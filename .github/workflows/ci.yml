@@ -95,8 +95,10 @@ jobs:
       - name: Install packed tarball and run CLI
         run: |
           mkdir -p /tmp/pkg-smoke
-          tar -xzf scriptspect-*.tgz -C /tmp/pkg-smoke
-          node /tmp/pkg-smoke/package/dist/cli.mjs --version
+          cd /tmp/pkg-smoke
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE"/scriptspect-*.tgz
+          npx scriptspect --version
 
   security:
     name: Security (CodeQL, dependency review)
