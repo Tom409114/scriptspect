@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and usage help
+    url: https://github.com/Tom409114/scriptspect/discussions
+    about: Ask how to use scriptspect or configure rules before opening an issue.
