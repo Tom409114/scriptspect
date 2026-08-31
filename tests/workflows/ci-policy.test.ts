@@ -243,6 +243,7 @@ describe('reproducible CI', () => {
     expect(evidence?.permissions).toEqual({ contents: 'read', actions: 'read', checks: 'read' });
     const run = (evidence?.steps ?? []).map((step) => step.run ?? '').join('\n');
     expect(run).toContain('/annotations');
+    expect(run).toContain('any(.[];');
     expect(run).toContain('.output.summary');
     expect(run).toContain('action-runner-evidence.json');
     expect(evidence?.steps?.some((step) => step.uses?.startsWith('actions/upload-artifact@'))).toBe(

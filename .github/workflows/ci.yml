@@ -240,7 +240,7 @@ jobs:
           gh api "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" > "$RUNNER_TEMP/action-check.json"
           gh api --paginate "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID/annotations?per_page=100" > "$RUNNER_TEMP/annotation-pages.json"
           jq -s 'add' "$RUNNER_TEMP/annotation-pages.json" > "$RUNNER_TEMP/annotations.json"
-          jq -e 'length > 0 and any((.title // "") + " " + (.message // ""); test("PS[0-9]{3}|scriptspect"))' "$RUNNER_TEMP/annotations.json" >/dev/null
+          jq -e 'length > 0 and any(.[]; ((.title // "") + " " + (.message // "")) | test("PS[0-9]{3}|scriptspect"))' "$RUNNER_TEMP/annotations.json" >/dev/null
           jq -er '.output.summary | select(test("scriptspect"; "i"))' "$RUNNER_TEMP/action-check.json" >/dev/null
           jq -n \
             --argjson workflowRunId "$RUN_ID" \
