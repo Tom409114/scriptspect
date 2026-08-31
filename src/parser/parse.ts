@@ -83,7 +83,8 @@ function parseBoolean(tokens: Token[], start: number, end: number): [ScriptNode,
     parts.push(node);
     i = next;
     const tok = tokens[i];
-    if (i < end && tok.kind === 'operator' && (tok.op === '&&' || tok.op === '||')) {
+    if (tok === undefined) break;
+    if (tok.kind === 'operator' && (tok.op === '&&' || tok.op === '||')) {
       ops.push(tok.op as '&&' | '||');
       i += 1;
       continue;
@@ -104,7 +105,8 @@ function parsePipeline(tokens: Token[], start: number, end: number): [ScriptNode
     parts.push(node);
     i = next;
     const tok = tokens[i];
-    if (i < end && tok.kind === 'operator' && tok.op === '|') {
+    if (tok === undefined) break;
+    if (tok.kind === 'operator' && tok.op === '|') {
       i += 1;
       continue;
     }
