@@ -169,18 +169,21 @@ export function loadConfig(
     }
   };
 
-  if (explicitPath !== undefined) {
-    let file: string;
+  const containedFile = (candidate: string): string => {
     try {
-      file = resolveContainedPath(canonicalRoot, explicitPath);
+      return resolveContainedPath(canonicalRoot, candidate);
     } catch (error) {
       if (error instanceof RootBoundaryError) throw new ConfigError(error.message);
       throw error;
     }
+  };
+
+  if (explicitPath !== undefined) {
+    const file = containedFile(explicitPath);
     return { config: parseConfig(readJson(file), file), source: file };
   }
 
-  const pkgFile = join(canonicalRoot, 'package.json');
+  const pkgFile = containedFile('package.json');
   try {
     const pkg = readJson(pkgFile) as Record<string, unknown>;
     const field = pkg[PACKAGE_FIELD];
@@ -196,8 +199,9 @@ export function loadConfig(
   }
 
   for (const name of CONFIG_FILENAMES) {
-    const file = join(canonicalRoot, name);
-    if (!existsSync(file)) continue;
+    const logicalFile = join(canonicalRoot, name);
+    if (!existsSync(logicalFile)) continue;
+    const file = containedFile(name);
     return { config: parseConfig(readJson(file), file), source: file };
   }
 

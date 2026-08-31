@@ -62,6 +62,16 @@ describe('rewriteScripts preserves formatting', () => {
     );
   });
 
+  it.each([
+    '{"scripts":{"clean":"rm -rf dist",}}',
+    '{"scripts":{"clean":"rm -rf dist"},}',
+    '{"scripts":{/* comment */"clean":"rm -rf dist"}}',
+  ])('refuses non-standard or malformed JSON without rewriting it', (text) => {
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
   it('rewrites only the root scripts object when a nested scripts key appears first', () => {
     const text = `{
   "metadata": {
@@ -131,6 +141,26 @@ describe('rewriteScripts preserves formatting', () => {
 });
 
 describe('applyRewritesToFile', () => {
+  it('refuses invalid UTF-8 and preserves the original bytes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-fix-'));
+    try {
+      const file = join(dir, 'package.json');
+      const bytes = Buffer.concat([
+        Buffer.from('{"name":"'),
+        Buffer.from([0xff]),
+        Buffer.from('","scripts":{"clean":"rm -rf dist"}}'),
+      ]);
+      writeFileSync(file, bytes);
+
+      expect(() =>
+        applyRewritesToFile(file, [{ scriptName: 'clean', newValue: 'rimraf dist' }], true),
+      ).toThrow(PackageJsonEditError);
+      expect(readFileSync(file)).toEqual(bytes);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes only when asked (dry-run leaves the file untouched)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-fix-'));
     try {

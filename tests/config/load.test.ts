@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -134,6 +134,43 @@ describe('ignore-all protection (spec §9)', () => {
 });
 
 describe('loadConfig discovery', () => {
+  it.skipIf(process.platform === 'win32')(
+    'rejects a root package.json symlink that escapes the analysis root',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
+      const outside = mkdtempSync(join(tmpdir(), 'ss-cfg-outside-'));
+      try {
+        const outsideManifest = join(outside, 'package.json');
+        writeFileSync(outsideManifest, JSON.stringify({ name: 'outside' }));
+        symlinkSync(outsideManifest, join(dir, 'package.json'), 'file');
+
+        expect(() => loadConfig(dir)).toThrow(/outside the analysis root/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects a default config symlink that escapes the analysis root',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
+      const outside = mkdtempSync(join(tmpdir(), 'ss-cfg-outside-'));
+      try {
+        writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+        const outsideConfig = join(outside, 'scriptspect.config.json');
+        writeFileSync(outsideConfig, JSON.stringify({ targets: ['cmd'] }));
+        symlinkSync(outsideConfig, join(dir, 'scriptspect.config.json'), 'file');
+
+        expect(() => loadConfig(dir)).toThrow(/outside the analysis root/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('resolves an explicit relative config from the analysis root', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
     try {

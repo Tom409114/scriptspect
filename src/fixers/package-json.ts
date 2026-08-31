@@ -5,6 +5,7 @@
  * temp file + rename.
  */
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { TextDecoder } from 'node:util';
 
 interface ScriptValueSpan {
   /** Span of the full JSON string literal, including quotes. */
@@ -211,6 +212,13 @@ export interface ScriptRewrite {
 /** Replace changed script values in the package.json text, byte-surgically. */
 export function rewriteScripts(text: string, rewrites: ScriptRewrite[]): string | null {
   if (rewrites.length === 0) return null;
+  try {
+    JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  } catch (error) {
+    throw new PackageJsonEditError(
+      `package.json must be strict JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   const spans = locateScriptSpans(text);
   let out = text;
   // Apply right-to-left so offsets stay valid.
@@ -240,7 +248,17 @@ export function applyRewritesToFile(
   rewrites: ScriptRewrite[],
   write: boolean,
 ): string | null {
-  const text = readFileSync(file, 'utf8');
+  const bytes = readFileSync(file);
+  const hasBom = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+  let text: string;
+  try {
+    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(
+      hasBom ? bytes.subarray(3) : bytes,
+    );
+    text = hasBom ? `\uFEFF${decoded}` : decoded;
+  } catch {
+    throw new PackageJsonEditError('package.json must be valid UTF-8');
+  }
   const next = rewriteScripts(text, rewrites);
   if (next !== null && write) writeFileAtomic(file, next);
   return next;
