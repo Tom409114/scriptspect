@@ -162,8 +162,8 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
 
   cli
     .command('[path]', 'analyze package.json scripts for cross-platform portability')
-    .action((args: CheckArgs, raw) => {
-      outcome = checkAction(args, raw);
+    .action((path: string | undefined, raw) => {
+      outcome = checkAction(path, raw);
       return outcome;
     });
 
@@ -175,8 +175,8 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
 
   cli
     .command('explain <ruleId>', 'show rule documentation offline')
-    .action((args: { ruleId: string }) => {
-      outcome = runExplain(args.ruleId, io);
+    .action((ruleId: string) => {
+      outcome = runExplain(ruleId, io);
       return outcome;
     });
 

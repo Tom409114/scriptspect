@@ -43,7 +43,7 @@ export function applyToScript(script: string, findings: readonly Finding[]): App
   const candidates = applicableFixes(findings)
     .map((f) => ({ finding: f, rep: f.fix?.replacement }))
     .filter(
-      (c): c is { finding: Finding; rep: NonNullable<Finding['fix']>['replacement'] } =>
+      (c): c is { finding: Finding; rep: { span: [number, number]; text: string } } =>
         c.rep !== undefined,
     )
     .sort((x, y) => y.rep.span[0] - x.rep.span[0]);

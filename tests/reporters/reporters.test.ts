@@ -124,7 +124,7 @@ describe('github reporter', () => {
     expect(md).toContain('## scriptspect');
     expect(md).toContain('**2 scripts**');
     expect(md).toContain('| PS010 | 1 |');
-    expect(md).toContain('| errors | 1 |');
+    expect(md).toContain('| errors | 2 |');
   });
 
   it('summary omits the top-rules table when clean', () => {

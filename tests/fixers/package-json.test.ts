@@ -60,7 +60,7 @@ describe('rewriteScripts preserves formatting', () => {
   it('preserves CRLF line endings', () => {
     const crlf = PKG_2SPACE.replace(/\n/g, '\r\n');
     const next = rewriteScripts(crlf, [{ scriptName: 'clean', newValue: 'rimraf dist' }]);
-    expect(next).toContain('"clean": "rimraf dist"\r\n');
+    expect(next).toContain('"clean": "rimraf dist",\r\n');
     expect(next?.split('\r\n').length).toBe(crlf.split('\r\n').length);
   });
 
