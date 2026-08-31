@@ -1,6 +1,6 @@
 {
   "name": "scriptspect",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Static analyzer for package.json scripts - catches shell-specific commands before they break Windows, macOS, or Linux builds.",
   "type": "module",
   "license": "MIT",
