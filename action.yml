@@ -14,13 +14,17 @@ inputs:
     required: false
     default: '.'
   target:
-    description: 'Target shells, comma-separated: posix-sh, cmd, powershell.'
+    description: >-
+      Target shells, comma-separated: posix-sh, cmd, powershell. Omit to honor
+      the project's scriptspect.config.json (CLI default: posix-sh,cmd).
     required: false
-    default: 'posix-sh,cmd'
+    default: ''
   severity:
-    description: 'Minimum severity to display: error, warn, or advisory.'
+    description: >-
+      Minimum severity to display: error, warn, or advisory. Omit to honor the
+      project's scriptspect.config.json (CLI default: advisory).
     required: false
-    default: 'advisory'
+    default: ''
   max-warnings:
     description: 'Fail the job when warnings exceed this number (omit for unlimited).'
     required: false
@@ -38,8 +42,15 @@ runs:
       run: |
         # Spec §12.1: the Action uses the same CLI core — one rule engine,
         # never a fork. It never modifies the repository (fix mode is not
-        # offered in CI).
-        ARGS=(check "${{ inputs.path }}" --format github --target "${{ inputs.target }}" --severity "${{ inputs.severity }}")
+        # offered in CI). When target/severity are not set the flags are
+        # omitted so the CLI honors scriptspect.config.json settings.
+        ARGS=(check "${{ inputs.path }}" --format github)
+        if [ -n "${{ inputs.target }}" ]; then
+          ARGS+=(--target "${{ inputs.target }}")
+        fi
+        if [ -n "${{ inputs.severity }}" ]; then
+          ARGS+=(--severity "${{ inputs.severity }}")
+        fi
         if [ -n "${{ inputs.max-warnings }}" ]; then
           ARGS+=(--max-warnings "${{ inputs.max-warnings }}")
         fi

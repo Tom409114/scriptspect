@@ -78,13 +78,14 @@ Rules: [docs/rules](docs/rules) — each with why/bad/good examples, false-posit
 
 ## Use it in CI
 
-The GitHub Action runs the same CLI core, emits inline annotations plus a job summary, and fails the job on findings:
+The GitHub Action runs the same CLI core, emits inline annotations plus a job summary, and fails the job on high-confidence errors (or when the warning budget is exceeded):
 
 ```yaml
 - uses: Tom409114/scriptspect@v0.1
   with:
     path: .            # project path to analyze (default: repository root)
-    target: posix-sh,cmd
+    # target / severity are optional. Omit them (as here) to honor the
+    # project's scriptspect.config.json; set them to override it.
 ```
 
 Or call the CLI directly:
