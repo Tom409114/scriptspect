@@ -219,7 +219,7 @@ jobs:
             INPUT_PATH=. \
             node dist/action.mjs
           grep -Fx '## scriptspect' "$RUNNER_TEMP/action-summary.md"
-          grep -F 'Scanned **1 script** in **1 package**.' "$RUNNER_TEMP/action-summary.md"
+          grep -F 'Scanned **1 script** across **1 package**.' "$RUNNER_TEMP/action-summary.md"
           grep -Fx 'exit-code=0' "$RUNNER_TEMP/action-summary-output.txt"
       - name: Upload hosted Action summary evidence
         if: always()
@@ -257,7 +257,7 @@ jobs:
           SUMMARY_FILE="$RUNNER_TEMP/action-consumer-evidence/action-summary.md"
           OUTPUT_FILE="$RUNNER_TEMP/action-consumer-evidence/action-summary-output.txt"
           grep -Fx '## scriptspect' "$SUMMARY_FILE"
-          grep -F 'Scanned **1 script** in **1 package**.' "$SUMMARY_FILE"
+          grep -F 'Scanned **1 script** across **1 package**.' "$SUMMARY_FILE"
           grep -Fx 'exit-code=0' "$OUTPUT_FILE"
           gh api --paginate "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/jobs-pages.json"
           jq -s '{jobs: map(.jobs[]) }' "$RUNNER_TEMP/jobs-pages.json" > "$RUNNER_TEMP/jobs.json"

@@ -245,6 +245,7 @@ describe('reproducible CI', () => {
     const consumerRun = (consumer?.steps ?? []).map((step) => step.run ?? '').join('\n');
     expect(consumerRun).toContain('GITHUB_STEP_SUMMARY=');
     expect(consumerRun).toContain('action-summary.md');
+    expect(consumerRun).toContain('Scanned **1 script** across **1 package**.');
     expect(consumer?.steps?.some((step) => step.uses?.startsWith('actions/upload-artifact@'))).toBe(
       true,
     );
