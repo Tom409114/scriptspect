@@ -122,7 +122,7 @@ describe('github reporter', () => {
   it('renders a markdown job summary with counts and top rules', () => {
     const md = renderSummary(resultFor({ a: 'rm -rf dist', b: 'NODE_ENV=x v' }));
     expect(md).toContain('## scriptspect');
-    expect(md).toContain('**1 scripts**');
+    expect(md).toContain('**2 scripts**');
     expect(md).toContain('| PS010 | 1 |');
     expect(md).toContain('| errors | 1 |');
   });

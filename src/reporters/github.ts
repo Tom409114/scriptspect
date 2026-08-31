@@ -59,7 +59,7 @@ export function renderSummary(result: AnalysisResult): string {
   const lines = [
     '## scriptspect',
     '',
-    `Scanned **${s.scriptsScanned} scripts** across **${s.packagesScanned} package${s.packagesScanned === 1 ? '' : 's'}**.`,
+    `Scanned **${s.scriptsScanned} script${s.scriptsScanned === 1 ? '' : 's'}** across **${s.packagesScanned} package${s.packagesScanned === 1 ? '' : 's'}**.`,
     '',
     `| Severity | Count |`,
     `| --- | --- |`,
