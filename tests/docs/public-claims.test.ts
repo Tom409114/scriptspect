@@ -37,10 +37,19 @@ describe('public project claims', () => {
     const security = read('SECURITY.md');
     const maintainers = read('MAINTAINERS.md');
     const changelog = read('CHANGELOG.md');
+    const releaseManifest = JSON.parse(read('.release-please-manifest.json')) as Record<
+      string,
+      string
+    >;
 
     expect(security).toContain('No npm release has been published yet');
     expect(maintainers).toContain('After the first release');
-    expect(changelog).toContain('## Unreleased');
-    expect(changelog).not.toMatch(/^## 0\.1\.0 \(Unreleased\)$/mu);
+    if (releaseManifest['.'] === '0.0.0') {
+      expect(changelog).toBe('');
+    } else {
+      expect(changelog).toMatch(/^# Changelog$/mu);
+    }
+    expect(changelog).not.toMatch(/^## \d+\.\d+\.\d+ \(Unreleased\)$/mu);
+    expect(changelog).not.toMatch(/^## Changelog$/mu);
   });
 });
