@@ -29,8 +29,11 @@
   "files": [
     "dist",
     "README.md",
+    "README.zh-CN.md",
     "LICENSE",
-    "docs/rules"
+    "docs/README.md",
+    "docs/rules",
+    "schema"
   ],
   "scripts": {
     "build": "tsup",
@@ -39,7 +42,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "docs:rules": "tsx tools/gen-rule-docs.ts"
+    "docs:rules": "tsx tools/gen-rule-docs.ts",
+    "schemas:generate": "tsx tools/generate-schemas.ts",
+    "schemas:check": "pnpm schemas:generate && git diff --exit-code -- schema"
   },
   "dependencies": {
     "cac": "^7.0.0",
@@ -50,9 +55,11 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",
     "@types/node": "^26.4.0",
+    "@vitest/coverage-v8": "4.1.11",
+    "ajv": "8.17.1",
     "tsup": "^8.5.1",
+    "tsx": "^4.20.0",
     "typescript": "~7.0.2",
-    "vitest": "^4.1.11",
-    "tsx": "^4.20.0"
+    "vitest": "^4.1.11"
   }
 }

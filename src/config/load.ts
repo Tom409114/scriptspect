@@ -113,13 +113,16 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
         if (
           !Array.isArray(value) ||
           value.length === 0 ||
-          value.some((v) => typeof v !== 'string')
+          value.some((v) => typeof v !== 'string' || v.length === 0)
         ) {
           throw new ConfigError(
             `${origin}: ignore[${i}].${key} must be a non-empty array of strings`,
           );
         }
         if (key === 'rules') {
+          if (new Set(value as string[]).size !== value.length) {
+            throw new ConfigError(`${origin}: ignore[${i}].rules must not contain duplicates`);
+          }
           for (const ruleId of value as string[]) {
             if (getRule(ruleId) === undefined) {
               throw new ConfigError(`${origin}: unknown rule id "${ruleId}" in ignore[${i}].rules`);
