@@ -372,7 +372,7 @@
 ## 后续状态（追加，不改写基线）：v0.1 hardening 实现后
 
 - 追加日期：2026-09-01
-- 本次后续审计所验证的实现 HEAD：`feat/v0.1-hardening` at `8034e1f48062172c0d42b05121f46a87a674c109`
+- 本次后续审计所验证的实现 HEAD：`feat/v0.1-hardening` at `c02d0c9338850ec2313c7609b76d39ea91787420`
 - README/status 固定的已审阅 runtime/release source：`069a9a7ffec7c844eebf89777456fb6723253fe5`
 - 逐门核签：[v0.1 Definition of Done 核签账本](v0.1-dod-2026-09-01.md)
 
