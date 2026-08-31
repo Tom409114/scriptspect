@@ -15,7 +15,9 @@ function ruleDoc(rule: (typeof RULES)[number]): string {
   const lines: string[] = [];
   lines.push(`# ${rule.id} — ${rule.title}`);
   lines.push('');
-  lines.push(`**Severity** \`${rule.severity}\` · **Confidence** \`${rule.confidence}\` · **Affected targets** ${rule.affectedTargets.map((t) => `\`${t}\``).join(', ')}`);
+  lines.push(
+    `**Severity** \`${rule.severity}\` · **Confidence** \`${rule.confidence}\` · **Affected targets** ${rule.affectedTargets.map((t) => `\`${t}\``).join(', ')}`,
+  );
   lines.push('');
   lines.push(rule.summary);
   lines.push('');
