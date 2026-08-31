@@ -26,21 +26,17 @@ jobs:
           node-version: 22
           package-manager-cache: false
       - run: npm install -g pnpm@11.24.0
-      - name: Generate and commit lockfile if absent
+      - name: Sync lockfile with package.json
         run: |
-          if [ -f pnpm-lock.yaml ]; then
-            echo "lockfile already present; nothing to do"
-            exit 0
-          fi
           pnpm install --lockfile-only
           git config user.name "scriptspect-ci[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pnpm-lock.yaml
-          if git diff --cached --quiet; then
-            echo "no lockfile changes"
+          if git diff --quiet -- pnpm-lock.yaml; then
+            echo "lockfile up to date"
             exit 0
           fi
-          git commit -m "chore: add pnpm-lock.yaml"
+          git add pnpm-lock.yaml
+          git commit -m "chore: update pnpm-lock.yaml"
           git push
 
   format:
@@ -62,13 +58,14 @@ jobs:
       - name: Apply biome canonical formatting and push if needed
         run: |
           pnpm exec biome check --write .
+          git checkout -- pnpm-lock.yaml 2>/dev/null || true
           git config user.name "scriptspect-ci[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git diff --quiet; then
             echo "already canonically formatted"
             exit 0
           fi
-          git add -A
+          git add -u
           git commit -m "style: canonical biome formatting"
           git push
 
@@ -91,9 +88,10 @@ jobs:
       - name: Regenerate rule docs and push if needed
         run: |
           pnpm docs:rules
+          git checkout -- pnpm-lock.yaml 2>/dev/null || true
           git config user.name "scriptspect-ci[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
+          if git diff --quiet -- docs/rules; then
             echo "rule docs up to date"
             exit 0
           fi
