@@ -4,8 +4,12 @@
  * line endings, field order, and every other byte. Atomic write via
  * temp file + rename.
  */
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { TextDecoder } from 'node:util';
+import { resolveContainedPath } from '../core/root';
+import { executeWriteTransaction } from './transaction';
 
 interface ScriptValueSpan {
   /** Span of the full JSON string literal, including quotes. */
@@ -209,6 +213,11 @@ export interface ScriptRewrite {
   newValue: string;
 }
 
+export interface PackageJsonRewritePlan {
+  content: Buffer;
+  expectedSha256: string;
+}
+
 /** Replace changed script values in the package.json text, byte-surgically. */
 export function rewriteScripts(text: string, rewrites: ScriptRewrite[]): string | null {
   if (rewrites.length === 0) return null;
@@ -235,20 +244,14 @@ export function rewriteScripts(text: string, rewrites: ScriptRewrite[]): string 
   return out === text ? null : out;
 }
 
-/** Atomic file write: temp file in the same directory, then rename. */
-export function writeFileAtomic(file: string, content: string): void {
-  const tmp = `${file}.scriptspect-tmp`;
-  writeFileSync(tmp, content, 'utf8');
-  renameSync(tmp, file);
-}
-
-/** Read, rewrite, and (optionally) write a package.json. Returns new text or null. */
-export function applyRewritesToFile(
+/** Calculate a rewrite against exact source bytes without changing the file. */
+export function planRewritesForFile(
+  root: string,
   file: string,
   rewrites: ScriptRewrite[],
-  write: boolean,
-): string | null {
-  const bytes = readFileSync(file);
+): PackageJsonRewritePlan | null {
+  const containedFile = resolveContainedPath(root, file);
+  const bytes = readFileSync(containedFile);
   const hasBom = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
   let text: string;
   try {
@@ -260,6 +263,23 @@ export function applyRewritesToFile(
     throw new PackageJsonEditError('package.json must be valid UTF-8');
   }
   const next = rewriteScripts(text, rewrites);
-  if (next !== null && write) writeFileAtomic(file, next);
+  if (next === null) return null;
+  return {
+    content: Buffer.from(next, 'utf8'),
+    expectedSha256: createHash('sha256').update(bytes).digest('hex'),
+  };
+}
+
+/** Read, rewrite, and (optionally) write a package.json. Returns new text or null. */
+export function applyRewritesToFile(
+  file: string,
+  rewrites: ScriptRewrite[],
+  write: boolean,
+): string | null {
+  const root = dirname(file);
+  const plan = planRewritesForFile(root, file, rewrites);
+  if (plan === null) return null;
+  const next = plan.content.toString('utf8');
+  if (write) executeWriteTransaction(root, [{ path: file, ...plan }]);
   return next;
 }

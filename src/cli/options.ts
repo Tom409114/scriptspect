@@ -92,7 +92,7 @@ export function normalizeOptions(raw: Record<string, unknown>): CliOptions {
     targets,
     rules,
     quiet: raw.quiet === true,
-    color: raw.noColor !== true,
+    color: raw.noColor !== true && raw.color !== false,
     maxWarnings,
     configPath: typeof raw.config === 'string' ? raw.config : undefined,
     fix: raw.fix === true,

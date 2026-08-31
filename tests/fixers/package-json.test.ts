@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import {
   applyRewritesToFile,
   locateScriptSpans,
   PackageJsonEditError,
+  planRewritesForFile,
   rewriteScripts,
 } from '../../src/fixers/package-json';
 
@@ -141,6 +142,45 @@ describe('rewriteScripts preserves formatting', () => {
 });
 
 describe('applyRewritesToFile', () => {
+  it('plans against the exact source bytes and preserves a leading UTF-8 BOM', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-fix-'));
+    try {
+      const file = join(dir, 'package.json');
+      const original = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(PKG_2SPACE)]);
+      writeFileSync(file, original);
+
+      const plan = planRewritesForFile(dir, file, [
+        { scriptName: 'clean', newValue: 'rimraf dist' },
+      ]);
+
+      expect(plan?.expectedSha256).toBe(
+        '33c471cd345316751186c3b7380e9b4209d87be58240a9a93d418a1872c5f4d3',
+      );
+      expect(plan?.content.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+      expect(plan?.content.toString('utf8')).toContain('"clean": "rimraf dist"');
+      expect(readFileSync(file)).toEqual(original);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a source outside the canonical fix root before reading it', () => {
+    const fixRoot = mkdtempSync(join(tmpdir(), 'ss-fix-root-'));
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'ss-fix-outside-'));
+    try {
+      const outside = join(outsideRoot, 'package.json');
+      writeFileSync(outside, PKG_2SPACE);
+
+      expect(() =>
+        planRewritesForFile(fixRoot, outside, [{ scriptName: 'clean', newValue: 'rimraf dist' }]),
+      ).toThrow(/outside the analysis root/);
+      expect(readFileSync(outside, 'utf8')).toBe(PKG_2SPACE);
+    } finally {
+      rmSync(fixRoot, { recursive: true, force: true });
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
   it('refuses invalid UTF-8 and preserves the original bytes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-fix-'));
     try {
@@ -175,6 +215,7 @@ describe('applyRewritesToFile', () => {
       expect(readFileSync(file, 'utf8')).toBe(PKG_2SPACE);
       applyRewritesToFile(file, [{ scriptName: 'clean', newValue: 'rimraf dist' }], true);
       expect(readFileSync(file, 'utf8')).toContain('"clean": "rimraf dist"');
+      expect(existsSync(join(dir, '.scriptspect', 'transactions'))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
