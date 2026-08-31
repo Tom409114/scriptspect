@@ -94,9 +94,16 @@ describe('README demo artifacts', () => {
     expect(terminal).toContain('PS001');
     expect(terminal).toContain('PS010');
     expect(terminal).toContain('exit code: 1');
-    expect(read('docs/assets/demo/terminal.svg')).toMatch(
-      /<svg[^>]+role="img"[^>]+aria-labelledby=/,
+    const terminalSvg = read('docs/assets/demo/terminal.svg');
+    expect(terminalSvg).toMatch(/<svg[^>]+role="img"[^>]+aria-labelledby=/);
+    expect(terminalSvg).toContain('class="terminal-line terminal-error"');
+    expect(terminalSvg).toContain('class="terminal-line terminal-advisory"');
+    expect(terminalSvg).toContain('class="terminal-line terminal-command"');
+    const renderedColumnCounts = [...terminalSvg.matchAll(/data-columns="([0-9]+)"/g)].map(
+      (match) => Number(match[1]),
     );
+    expect(renderedColumnCounts.length).toBeGreaterThan(terminal.split('\n').length);
+    expect(Math.max(...renderedColumnCounts)).toBeLessThanOrEqual(104);
     const patch = read('docs/assets/demo/fix.patch');
     expect(patch).toContain('--- a/package.json');
     expect(patch).not.toContain('Scanned ');

@@ -20,22 +20,67 @@ function stripAnsi(value: string): string {
   return value.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g'), '');
 }
 
+const terminalMaxColumns = 104;
+
+function wrapTerminalLine(line: string, maxColumns = terminalMaxColumns): string[] {
+  if (line.length <= maxColumns) return [line];
+
+  const initialIndent = line.match(/^\s*/u)?.[0] ?? '';
+  const findingPrefix = line.match(/^PS\d{3}\s+\S+\s+\S+\s+/u)?.[0] ?? '';
+  const continuationIndent = findingPrefix
+    ? ' '.repeat(findingPrefix.length)
+    : `${initialIndent}    `;
+  const wrapped: string[] = [];
+  let remaining = line;
+  let first = true;
+
+  while (remaining.length > 0) {
+    const prefix = first ? '' : continuationIndent;
+    const available = maxColumns - prefix.length;
+    if (remaining.length <= available) {
+      wrapped.push(`${prefix}${remaining}`);
+      break;
+    }
+
+    const candidate = remaining.slice(0, available + 1);
+    const whitespace = candidate.lastIndexOf(' ');
+    const breakAt = whitespace > 0 ? whitespace : available;
+    wrapped.push(`${prefix}${remaining.slice(0, breakAt).trimEnd()}`);
+    remaining = remaining.slice(breakAt).trimStart();
+    first = false;
+  }
+
+  return wrapped;
+}
+
+function terminalRowClass(line: string): string {
+  if (line.startsWith('$ ')) return 'terminal-command';
+  if (/^PS\d{3}\s+error\b/u.test(line)) return 'terminal-error';
+  if (/^PS\d{3}\s+advisory\b/u.test(line)) return 'terminal-advisory';
+  if (line.startsWith('package.json')) return 'terminal-section';
+  if (line.startsWith('Scanned ') || line.startsWith('exit code:')) return 'terminal-summary';
+  return '';
+}
+
 function terminalSvg(text: string): string {
-  const lines = text.split('\n');
+  const lines = text.split('\n').flatMap((line) => {
+    const className = terminalRowClass(line);
+    return wrapTerminalLine(line).map((wrapped) => ({ text: wrapped, className }));
+  });
   const width = 1100;
   const lineHeight = 22;
   const height = 72 + lines.length * lineHeight;
   const rows = lines
     .map(
       (line, index) =>
-        `  <text x="28" y="${52 + index * lineHeight}" class="terminal-line">${xml(line) || ' '}</text>`,
+        `  <text x="28" y="${52 + index * lineHeight}" class="terminal-line${line.className ? ` ${line.className}` : ''}" data-columns="${line.text.length}">${xml(line.text) || ' '}</text>`,
     )
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title desc">
   <title id="title">ScriptSpect pre-release demo output</title>
   <desc id="desc">Terminal output from checking the README demo fixture. The selectable text version is available beside this image.</desc>
-  <style>.terminal { fill: #0d1117; } .bar { fill: #161b22; } .terminal-line { fill: #c9d1d9; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }</style>
+  <style>.terminal { fill: #0d1117; } .bar { fill: #161b22; } .terminal-line { fill: #c9d1d9; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; } .terminal-command { fill: #7ee787; } .terminal-section { fill: #79c0ff; font-weight: 600; } .terminal-error { fill: #ff7b72; font-weight: 600; } .terminal-advisory { fill: #d29922; font-weight: 600; } .terminal-summary { fill: #8b949e; }</style>
   <rect class="terminal" width="100%" height="100%" rx="12"/>
   <rect class="bar" width="100%" height="34" rx="12"/>
   <circle cx="22" cy="17" r="5" fill="#ff7b72"/><circle cx="40" cy="17" r="5" fill="#d29922"/><circle cx="58" cy="17" r="5" fill="#3fb950"/>
