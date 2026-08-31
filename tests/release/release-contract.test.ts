@@ -1,10 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const temporaryDirectories: string[] = [];
+const canonicalTreeAlgorithmDigest =
+  'e4134401ced1d74c8f082a6a7950ef074d5a0ec9c24d6c1531a25254c9661ea3';
 
 type Step = {
   name?: string;
@@ -46,6 +52,110 @@ function source(name: string): string {
 
 function jobSource(name: string, job: string): string {
   return (workflow(name).jobs?.[job]?.steps ?? []).map((step) => step.run ?? '').join('\n');
+}
+
+function temporaryDirectory(name: string): string {
+  const directory = mkdtempSync(join(tmpdir(), `scriptspect-${name}-`));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+type IntegrityMode = 'exact-bytes' | 'canonical-tree-v1' | 'future-mode';
+
+function integrityContract(mode: IntegrityMode, comparatorDigest = canonicalTreeAlgorithmDigest) {
+  return {
+    schemaVersion: 1,
+    package: 'scriptspect',
+    bootstrapVersion: '0.0.0-bootstrap.0',
+    sourceCommit: '1'.repeat(40),
+    integrityMode: mode,
+    registryIntegrity: `sha512-${Buffer.alloc(64, 1).toString('base64')}`,
+    comparatorAlgorithm: 'scriptspect-canonical-tree/v1',
+    comparatorAlgorithmDigest: comparatorDigest,
+    latestUnchanged: true,
+    workflowRunUrl: 'https://github.com/Tom409114/scriptspect/actions/runs/1',
+    reviewedAt: '2026-09-01T00:00:00Z',
+  };
+}
+
+function npmSri(path: string): string {
+  return `sha512-${createHash('sha512').update(readFileSync(path)).digest('base64')}`;
+}
+
+function integrityTarballs(name: string) {
+  const directory = temporaryDirectory(name);
+  const packageDirectory = join(directory, 'package');
+  const changedDirectory = join(directory, 'changed', 'package');
+  mkdirSync(packageDirectory);
+  mkdirSync(changedDirectory, { recursive: true });
+  writeFileSync(
+    join(packageDirectory, 'package.json'),
+    '{"name":"scriptspect","version":"0.1.0"}\n',
+  );
+  writeFileSync(
+    join(changedDirectory, 'package.json'),
+    '{"name":"scriptspect","version":"9.9.9"}\n',
+  );
+
+  const candidate = join(directory, 'candidate.tgz');
+  const exactRegistry = join(directory, 'registry-exact.tgz');
+  const repackedRegistry = join(directory, 'registry-repacked.tgz');
+  const changedRegistry = join(directory, 'registry-changed.tgz');
+  const archive = spawnSync('tar', ['-czf', candidate, '-C', directory, 'package'], {
+    encoding: 'utf8',
+  });
+  if (archive.status !== 0) {
+    throw new Error(`tar fixture failed: ${archive.stderr}`);
+  }
+  const changedArchive = spawnSync(
+    'tar',
+    ['-czf', changedRegistry, '-C', join(directory, 'changed'), 'package'],
+    { encoding: 'utf8' },
+  );
+  if (changedArchive.status !== 0) {
+    throw new Error(`changed tar fixture failed: ${changedArchive.stderr}`);
+  }
+  copyFileSync(candidate, exactRegistry);
+  const repacked = Buffer.from(readFileSync(candidate));
+  if (repacked[0] !== 0x1f || repacked[1] !== 0x8b) {
+    throw new Error('tar fixture is not gzip compressed');
+  }
+  repacked[9] = repacked[9] === 3 ? 0 : 3;
+  writeFileSync(repackedRegistry, repacked);
+  return { directory, candidate, exactRegistry, repackedRegistry, changedRegistry };
+}
+
+function runIntegrityVerifier(
+  contract: Record<string, unknown>,
+  candidate: string,
+  registry: string,
+  registrySri = npmSri(registry),
+) {
+  const contractPath = join(dirname(candidate), `contract-${String(contract.integrityMode)}.json`);
+  writeFileSync(contractPath, `${JSON.stringify(contract)}\n`);
+  return spawnSync(
+    process.execPath,
+    [
+      join(root, 'tools', 'release', 'verify-package-integrity.mjs'),
+      '--contract',
+      contractPath,
+      '--candidate',
+      candidate,
+      '--registry',
+      registry,
+      '--candidate-sri',
+      npmSri(candidate),
+      '--registry-sri',
+      registrySri,
+    ],
+    { encoding: 'utf8' },
+  );
 }
 
 describe('release pull requests and exact release intent', () => {
@@ -162,10 +272,112 @@ describe('release coordinator trust and recovery', () => {
     expect(authorize).toContain('bootstrapVersion');
 
     const verify = jobSource('npm-publish.yml', 'publish');
-    expect(verify).toContain('canonical-tree.mjs digest --tarball');
+    expect(verify).toContain('verify-package-integrity.mjs');
     expect(source('release.yml')).not.toContain('vars.NPM_INTEGRITY_MODE');
     expect(authorize).toContain('NPM_BOOTSTRAP_ENABLED');
     expect(authorize).toContain('NPM_TRUSTED_PUBLISHING_READY');
+  });
+
+  it('enforces exact bytes and both calculated and registry SRI in exact-bytes mode', () => {
+    const { candidate, exactRegistry, repackedRegistry } = integrityTarballs('integrity-exact');
+    const contract = integrityContract('exact-bytes');
+
+    const exact = runIntegrityVerifier(contract, candidate, exactRegistry);
+    expect(exact.status, exact.stderr).toBe(0);
+    expect(JSON.parse(exact.stdout)).toMatchObject({
+      integrityMode: 'exact-bytes',
+      candidateNpmSRI: npmSri(candidate),
+      registryNpmSRI: npmSri(exactRegistry),
+      byteEqual: true,
+    });
+
+    const repacked = runIntegrityVerifier(contract, candidate, repackedRegistry);
+    expect(repacked.status).toBe(1);
+    expect(repacked.stderr).toMatch(/exact-bytes.*byte equality/i);
+
+    const falseRegistryMetadata = runIntegrityVerifier(
+      contract,
+      candidate,
+      exactRegistry,
+      `sha512-${Buffer.alloc(64, 9).toString('base64')}`,
+    );
+    expect(falseRegistryMetadata.status).toBe(1);
+    expect(falseRegistryMetadata.stderr).toMatch(/registry SRI.*registry tarball bytes/i);
+
+    const contractPath = join(dirname(candidate), 'contract-false-candidate-sri.json');
+    writeFileSync(contractPath, `${JSON.stringify(contract)}\n`);
+    const falseCandidateMetadata = spawnSync(
+      process.execPath,
+      [
+        join(root, 'tools', 'release', 'verify-package-integrity.mjs'),
+        '--contract',
+        contractPath,
+        '--candidate',
+        candidate,
+        '--registry',
+        exactRegistry,
+        '--candidate-sri',
+        `sha512-${Buffer.alloc(64, 8).toString('base64')}`,
+        '--registry-sri',
+        npmSri(exactRegistry),
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(falseCandidateMetadata.status).toBe(1);
+    expect(falseCandidateMetadata.stderr).toMatch(/candidate SRI.*candidate tarball bytes/i);
+  });
+
+  it('permits repacked bytes only when canonical trees match the reviewed algorithm digest', () => {
+    const { candidate, repackedRegistry, changedRegistry } =
+      integrityTarballs('integrity-canonical');
+    const contract = integrityContract('canonical-tree-v1');
+    expect(npmSri(candidate)).not.toBe(npmSri(repackedRegistry));
+
+    const repacked = runIntegrityVerifier(contract, candidate, repackedRegistry);
+    expect(repacked.status, repacked.stderr).toBe(0);
+    expect(JSON.parse(repacked.stdout)).toMatchObject({
+      integrityMode: 'canonical-tree-v1',
+      comparatorAlgorithm: 'scriptspect-canonical-tree/v1',
+      comparatorAlgorithmDigest: canonicalTreeAlgorithmDigest,
+      treeEqual: true,
+      byteEqual: false,
+    });
+
+    const changed = runIntegrityVerifier(contract, candidate, changedRegistry);
+    expect(changed.status).toBe(1);
+    expect(changed.stderr).toMatch(/canonical-tree-v1.*tree digest equality/i);
+  });
+
+  it('fails closed for an unknown mode or an unreviewed comparator digest', () => {
+    const { candidate, exactRegistry } = integrityTarballs('integrity-fail-closed');
+
+    const unknownMode = runIntegrityVerifier(
+      integrityContract('future-mode'),
+      candidate,
+      exactRegistry,
+    );
+    expect(unknownMode.status).toBe(1);
+    expect(unknownMode.stderr).toMatch(/unsupported integrity mode/i);
+
+    const driftedDigest = runIntegrityVerifier(
+      integrityContract('canonical-tree-v1', 'f'.repeat(64)),
+      candidate,
+      exactRegistry,
+    );
+    expect(driftedDigest.status).toBe(1);
+    expect(driftedDigest.stderr).toMatch(/comparator algorithm digest/i);
+  });
+
+  it('verifies the reviewed integrity mode before recording npm publication', () => {
+    const publish = jobSource('npm-publish.yml', 'publish');
+    const verifier = 'verify-package-integrity.mjs';
+    const transition = 'published-transition.json';
+
+    expect(publish).toContain('docs/release/npm-integrity-contract.json');
+    expect(publish).toContain(verifier);
+    expect(publish.indexOf(verifier)).toBeLessThan(publish.indexOf(transition));
+    expect(publish).not.toContain('[[ "$EXISTING_SRI" == "$CANDIDATE_SRI" ]]');
+    expect(publish).not.toContain('[[ "$REGISTRY_SRI" == "$CANDIDATE_SRI" ]]');
   });
 
   it('serializes every mutating transition by the verified version', () => {

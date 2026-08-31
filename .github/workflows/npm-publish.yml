@@ -228,14 +228,30 @@ jobs:
           node tools/release/release-state.mjs verify-publish-anchors \
             "$RUNNER_TEMP/publish-anchors.json" > "$RUNNER_TEMP/verified-anchors.json"
           CANDIDATE_SRI=$(jq -er '.npmSRI' "$RUNNER_TEMP/verified-anchors.json")
+          INTEGRITY_CONTRACT=docs/release/npm-integrity-contract.json
 
           npm install --global npm@11.12.1
           EXISTING_SRI=$(npm view "scriptspect@$VERSION" dist.integrity 2>/dev/null || true)
           if [[ -z "$EXISTING_SRI" ]]; then
             npm publish "$RUNNER_TEMP/release/$TARBALL" --provenance --access public
-            EXISTING_SRI=$(npm view "scriptspect@$VERSION" dist.integrity)
           fi
-          [[ "$EXISTING_SRI" == "$CANDIDATE_SRI" ]]
+          REGISTRY_SRI=$(npm view "scriptspect@$VERSION" dist.integrity)
+          mkdir -p "$RUNNER_TEMP/registry/install"
+          npm pack "scriptspect@$VERSION" --pack-destination "$RUNNER_TEMP/registry" --silent
+          mv "$RUNNER_TEMP/registry/$TARBALL" "$RUNNER_TEMP/registry/registry.tgz"
+          node tools/release/verify-package-integrity.mjs \
+            --contract "$INTEGRITY_CONTRACT" \
+            --candidate "$RUNNER_TEMP/release/$TARBALL" \
+            --registry "$RUNNER_TEMP/registry/registry.tgz" \
+            --candidate-sri "$CANDIDATE_SRI" \
+            --registry-sri "$REGISTRY_SRI" \
+            > "$RUNNER_TEMP/integrity-verification.json"
+          jq -e '.candidateTree' "$RUNNER_TEMP/integrity-verification.json" \
+            > "$RUNNER_TEMP/candidate-tree.json"
+          jq -e '.registryTree' "$RUNNER_TEMP/integrity-verification.json" \
+            > "$RUNNER_TEMP/registry-tree.json"
+          REGISTRY_MANIFEST_DIGEST=$(node tools/release/release-state.mjs json-digest \
+            "$RUNNER_TEMP/registry-tree.json" | jq -er '.digest')
 
           if [[ "$STATE" == staged-draft ]]; then
             jq -n --arg publishedVersion "$VERSION" --arg npmSRI "$CANDIDATE_SRI" \
@@ -261,21 +277,6 @@ jobs:
           gh api -X PATCH -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
           mv "$RUNNER_TEMP/approved-published-state.json" "$RUNNER_TEMP/release-state.json"
-
-          mkdir -p "$RUNNER_TEMP/registry/install"
-          npm pack "scriptspect@$VERSION" --pack-destination "$RUNNER_TEMP/registry" --silent
-          mv "$RUNNER_TEMP/registry/$TARBALL" "$RUNNER_TEMP/registry/registry.tgz"
-          REGISTRY_SRI=$(npm view "scriptspect@$VERSION" dist.integrity)
-          [[ "$REGISTRY_SRI" == "$CANDIDATE_SRI" ]]
-          node tools/release/canonical-tree.mjs digest --tarball \
-            "$RUNNER_TEMP/release/$TARBALL" > "$RUNNER_TEMP/candidate-tree.json"
-          node tools/release/canonical-tree.mjs digest --tarball \
-            "$RUNNER_TEMP/registry/registry.tgz" > "$RUNNER_TEMP/registry-tree.json"
-          jq -e --slurpfile right "$RUNNER_TEMP/registry-tree.json" \
-            '.treeDigest == $right[0].treeDigest and .algorithmDigest == $right[0].algorithmDigest' \
-            "$RUNNER_TEMP/candidate-tree.json" >/dev/null
-          REGISTRY_MANIFEST_DIGEST=$(node tools/release/release-state.mjs json-digest \
-            "$RUNNER_TEMP/registry-tree.json" | jq -er '.digest')
 
           cd "$RUNNER_TEMP/registry/install"
           npm init --yes >/dev/null
@@ -311,7 +312,7 @@ jobs:
             --out "$RUNNER_TEMP/approved-verified-state.json" >/dev/null
           jq -n --rawfile text "$RUNNER_TEMP/approved-verified-state.json" '{
             name:"release-intent",status:"completed",conclusion:"success",
-            output:{title:"npm artifact and provenance verified",summary:"Registry bytes and tag-bound provenance are exact",text:$text}}
+            output:{title:"npm artifact and provenance verified",summary:"Registry integrity and tag-bound provenance are verified",text:$text}}
           ' > "$RUNNER_TEMP/update-check.json"
           gh api -X PATCH -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
