@@ -90,6 +90,12 @@ describe('PS051 target shell parse diagnostics', () => {
     expect(analyze('echo "oops', ['cmd'], ['PS051'])).toEqual([]);
   });
 
+  it('does not report valid quoted commands supported by every active target', () => {
+    expect(
+      analyze('node app.js --message "ready now"', ['posix-sh', 'cmd', 'powershell'], ['PS051']),
+    ).toEqual([]);
+  });
+
   it('emits PowerShell subset boundaries as advisory medium findings', () => {
     expect(analyze('echo $HOME', ['powershell'], ['PS051'])).toEqual([
       expect.objectContaining({
