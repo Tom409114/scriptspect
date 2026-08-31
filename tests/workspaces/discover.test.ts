@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/config/load';
 import { analyze } from '../../src/core/analyze';
+import type { PackageUnit } from '../../src/core/analyze';
 import {
   discoverPackages,
   unitDependencyNames,
