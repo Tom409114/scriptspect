@@ -79,4 +79,36 @@ describe('PS050 SHELL_SPECIFIC_SEPARATOR', () => {
   it('negative: quoted separators do not split', () => {
     expect(only(run('echo "a; b"'), 'PS050')).toEqual([]);
   });
+
+  it('compares target graphs for single quotes and dialect-specific escapes', () => {
+    expect(only(run("echo 'a & b'"), 'PS050')).toHaveLength(1);
+    expect(only(run('echo \\& echo next'), 'PS050')).toHaveLength(1);
+    expect(only(run('echo ^& echo next'), 'PS050')).toHaveLength(1);
+  });
+
+  it('reports caret-escaped redirection graph divergence at the raw operator span', () => {
+    const findings = only(run('echo ^> /dev/null'), 'PS050');
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        affectedTargets: ['posix-sh', 'cmd'],
+        span: [6, 7],
+      }),
+    ]);
+    expect(only(run('echo ^> /dev/null'), 'PS025')).toEqual([]);
+  });
+
+  it('derives graph-divergence targets from the active comparison set', () => {
+    expect(only(run('echo ^> out', { targets: ['posix-sh'] }), 'PS050')).toEqual([]);
+    expect(
+      only(run('echo ^> out', { targets: ['posix-sh', 'cmd'] }), 'PS050')[0]?.affectedTargets,
+    ).toEqual(['posix-sh', 'cmd']);
+  });
+
+  it('does not substitute the generic graph for PowerShell outside its subset', () => {
+    expect(
+      only(run('a; b', { targets: ['posix-sh', 'cmd', 'powershell'] }), 'PS050')[0]
+        ?.affectedTargets,
+    ).toEqual(['posix-sh', 'cmd']);
+  });
 });

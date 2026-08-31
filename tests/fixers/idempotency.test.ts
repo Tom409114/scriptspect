@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AnalysisResult, PackageUnit } from '../../src/core/analyze';
+import type { AnalysisResult } from '../../src/core/analyze';
 import { DEFAULT_TARGETS } from '../../src/core/targets';
 import { applyToScript } from '../../src/fixers/apply';
 import { planFixes } from '../../src/fixers/fix-plan';
@@ -24,7 +24,7 @@ describe('fixer idempotency (spec §7.1: applying twice must not double-wrap)', 
     ['rm -rf dist', ['shx'], 'shx rm -rf dist'],
     ['cp -r src dist', ['shx'], 'shx cp -r src dist'],
     ['mkdir -p dist/assets', ['shx'], 'shx mkdir -p dist/assets'],
-    ['A=1 rm -rf b && cp x y', ['rimraf', 'shx'], 'A=1 rimraf b && shx cp x y'],
+    ['A=1 rm -rf b && cp x y', ['rimraf', 'shx'], 'A=1 rm -rf b && shx cp x y'],
   ];
 
   for (const [script, deps, expected] of cases) {

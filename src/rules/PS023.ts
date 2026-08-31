@@ -30,9 +30,9 @@ export const PS023: RuleModule = {
       claim: 'cmd.exe expands %VAR%; $VAR stays literal.',
     },
   ],
-  check(ir, ctx: RuleContext): Finding[] {
+  check(matrix, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
-    for (const cmd of commandsOf(ir)) {
+    for (const cmd of commandsOf(matrix, 'posix-sh')) {
       const tokens = [
         ...cmd.argv,
         ...cmd.redirects.flatMap((r) => (r.target !== null ? [r.target] : [])),

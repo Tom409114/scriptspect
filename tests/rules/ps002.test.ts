@@ -34,4 +34,10 @@ describe('PS002 CMD_SET_ENV', () => {
     expect(f?.severity).toBe('warn');
     expect(f?.affectedTargets).toEqual(['posix-sh']);
   });
+
+  it('derives PowerShell as affected when it is the only active non-cmd target', () => {
+    const [finding] = only(run('set X=1&& node b', { targets: ['powershell'] }), 'PS002');
+
+    expect(finding?.affectedTargets).toEqual(['powershell']);
+  });
 });

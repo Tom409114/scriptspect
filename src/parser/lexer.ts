@@ -31,6 +31,8 @@ export type ExpansionKind =
   | 'command'
   /** `%NAME%` cmd-style variable */
   | 'cmdvar'
+  /** PowerShell `$env:NAME` variable */
+  | 'psenv'
   /** `$?`, `$$`, `$0`…`$9`, `$@`, `$*`, `$!` */
   | 'special';
 
@@ -85,12 +87,15 @@ function isWordBreak(ch: string): boolean {
 }
 
 /** Longest-match operator table at position `i`. */
-function matchOperator(src: string, i: number): string | null {
+export type LexerTarget = 'posix-sh' | 'cmd' | 'powershell';
+
+function matchOperator(src: string, i: number, target: LexerTarget | null): string | null {
   const four = src.slice(i, i + 4);
   if (four === '2>&1' || four === '1>&2') return four;
   const two = src.slice(i, i + 2);
   if (two === '&&' || two === '||' || two === '>>' || two === '&>' || two === '>&') return two;
   const one = src.charAt(i);
+  if (one === ';' && target === 'cmd') return null;
   if (one === '|' || one === ';' || one === '&' || one === '>' || one === '<') return one;
   return null;
 }
@@ -100,12 +105,25 @@ function matchOperator(src: string, i: number): string | null {
  * quotes consume to end-of-input, and every byte maps to some token.
  */
 export function tokenize(src: string): Token[] {
+  return tokenizeDialect(src, null);
+}
+
+/** Tokenize using one shell dialect rather than the legacy blended contract. */
+export function tokenizeForTarget(src: string, target: LexerTarget): Token[] {
+  return tokenizeDialect(src, target);
+}
+
+function tokenizeDialect(src: string, target: LexerTarget | null): Token[] {
   const tokens: Token[] = [];
   const n = src.length;
   let i = 0;
 
   while (i < n) {
     const ch = src.charAt(i);
+
+    // In PowerShell, an unquoted `#` starts a comment through end-of-line.
+    // Comment bytes deliberately produce no generic command/operator tokens.
+    if (ch === '#' && target === 'powershell') break;
 
     // Newline is a sequence operator, not mere whitespace — check it before
     // the whitespace skip so it always becomes a token (spec §5.1).
@@ -152,7 +170,7 @@ export function tokenize(src: string): Token[] {
     }
 
     // Operator (possibly with a pending fd digit peeled off a word, e.g. `2>`).
-    const op = matchOperator(src, i);
+    const op = matchOperator(src, i, target);
     if (op !== null) {
       tokens.push({
         kind: 'operator',
@@ -177,6 +195,7 @@ export function tokenize(src: string): Token[] {
 
     while (i < n) {
       const c = src.charAt(i);
+      if (c === '#' && target === 'powershell') break;
       if (isWordBreak(c)) break;
       if (c === '(' || c === ')') break;
 
@@ -187,25 +206,24 @@ export function tokenize(src: string): Token[] {
         break;
       }
 
-      const opHere = matchOperator(src, i);
+      const opHere = matchOperator(src, i, target);
       if (opHere !== null) break;
 
-      if (c === "'") {
-        const close = src.indexOf("'", i + 1);
-        const end = close === -1 ? n : close;
-        value += src.slice(i + 1, end);
+      if (c === "'" && target !== 'cmd') {
+        const seg = scanSingleQuoted(src, i, target);
+        value += seg.value;
         quote ??= "'";
-        i = close === -1 ? n : close + 1;
+        i = seg.end;
         continue;
       }
       if (c === '"') {
-        const seg = scanDoubleQuoted(src, i, expansions);
+        const seg = scanDoubleQuoted(src, i, expansions, target);
         value += seg.value;
         quote ??= '"';
         i = seg.end;
         continue;
       }
-      if (c === '\\') {
+      if (c === '\\' && (target === null || target === 'posix-sh')) {
         const nx = src.charAt(i + 1);
         if (nx === '') {
           value += c;
@@ -216,13 +234,23 @@ export function tokenize(src: string): Token[] {
         }
         continue;
       }
-      if (c === '^' && CMD_CARET_SPECIALS.has(src.charAt(i + 1))) {
+      if (
+        c === '^' &&
+        (target === null || target === 'cmd') &&
+        CMD_CARET_SPECIALS.has(src.charAt(i + 1))
+      ) {
         value += src.charAt(i + 1);
         i += 2;
         continue;
       }
-      if (c === '$') {
-        const exp = scanDollar(src, i);
+      if (c === '`' && target === 'powershell') {
+        const nx = src.charAt(i + 1);
+        value += nx === '' ? c : nx;
+        i += nx === '' ? 1 : 2;
+        continue;
+      }
+      if (c === '$' && (target === null || target === 'posix-sh' || target === 'powershell')) {
+        const exp = target === 'powershell' ? scanPowerShellDollar(src, i) : scanDollar(src, i);
         if (exp !== null) {
           expansions.push(exp);
           value += exp.raw;
@@ -233,7 +261,7 @@ export function tokenize(src: string): Token[] {
         i += 1;
         continue;
       }
-      if (c === '%') {
+      if (c === '%' && (target === null || target === 'cmd')) {
         const m = CMDVAR_RE.exec(src.slice(i));
         if (m !== null) {
           const exp: Expansion = { kind: 'cmdvar', raw: m[0], span: [i, i + m[0].length] };
@@ -291,6 +319,7 @@ function scanDoubleQuoted(
   src: string,
   open: number,
   expansions: Expansion[],
+  target: LexerTarget | null,
 ): { value: string; end: number } {
   let i = open + 1;
   let value = '';
@@ -298,7 +327,7 @@ function scanDoubleQuoted(
   while (i < n) {
     const c = src.charAt(i);
     if (c === '"') return { value, end: i + 1 };
-    if (c === '\\') {
+    if (c === '\\' && target !== 'cmd' && target !== 'powershell') {
       const nx = src.charAt(i + 1);
       // Inside double quotes a backslash only escapes these (POSIX sh);
       // elsewhere both characters are kept (matches cmd.exe for paths).
@@ -311,8 +340,14 @@ function scanDoubleQuoted(
       i += 1;
       continue;
     }
-    if (c === '$') {
-      const exp = scanDollar(src, i);
+    if (c === '`' && target === 'powershell') {
+      const nx = src.charAt(i + 1);
+      value += nx === '' ? c : nx;
+      i += nx === '' ? 1 : 2;
+      continue;
+    }
+    if (c === '$' && target !== 'cmd') {
+      const exp = target === 'powershell' ? scanPowerShellDollar(src, i) : scanDollar(src, i);
       if (exp !== null) {
         expansions.push(exp);
         value += exp.raw;
@@ -320,7 +355,7 @@ function scanDoubleQuoted(
         continue;
       }
     }
-    if (c === '%' && i > open) {
+    if (c === '%' && i > open && (target === null || target === 'cmd')) {
       // cmd %VAR% works inside double quotes too
       const m = CMDVAR_RE.exec(src.slice(i));
       if (m !== null) {
@@ -335,6 +370,37 @@ function scanDoubleQuoted(
     i += 1;
   }
   return { value, end: n }; // unterminated: consume the rest
+}
+
+function scanSingleQuoted(
+  src: string,
+  open: number,
+  target: LexerTarget | null,
+): { value: string; end: number } {
+  let i = open + 1;
+  let value = '';
+  while (i < src.length) {
+    if (src.charAt(i) !== "'") {
+      value += src.charAt(i);
+      i += 1;
+      continue;
+    }
+    if (target === 'powershell' && src.charAt(i + 1) === "'") {
+      value += "'";
+      i += 2;
+      continue;
+    }
+    return { value, end: i + 1 };
+  }
+  return { value, end: src.length };
+}
+
+function scanPowerShellDollar(src: string, i: number): Expansion | null {
+  const match = /^\$env:[A-Za-z_][A-Za-z0-9_]*/i.exec(src.slice(i));
+  if (match !== null) {
+    return { kind: 'psenv', raw: match[0], span: [i, i + match[0].length] };
+  }
+  return scanDollar(src, i);
 }
 
 /** Scan a `$` expansion at `i`; returns null when the `$` is literal. */

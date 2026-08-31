@@ -84,6 +84,7 @@ describe('ir: sequences, booleans, pipelines', () => {
     const root = parseScript('a && b').root as BooleanNode;
     expect(root.kind).toBe('boolean');
     expect(root.ops).toEqual(['&&']);
+    expect(root.opSpans).toEqual([[2, 4]]);
     expect(names('a && b')).toEqual(['a', 'b']);
   });
 
@@ -103,6 +104,10 @@ describe('ir: sequences, booleans, pipelines', () => {
     const root = parseScript('cat x | grep y | wc -l').root as PipelineNode;
     expect(root.kind).toBe('pipeline');
     expect(root.parts).toHaveLength(3);
+    expect(root.opSpans).toEqual([
+      [6, 7],
+      [15, 16],
+    ]);
   });
 
   it('parses parenthesized groups', () => {
@@ -149,9 +154,9 @@ describe('ir: shell wrappers', () => {
     expect(commandName([...(inner ? walkCommands(inner.root) : [])][0] as CommandNode)).toBe('rm');
   });
 
-  it('wraps sh/zsh/dash -c payloads as the sh family', () => {
+  it('wraps sh -c payloads as the sh family but not other shell executables', () => {
     const [zsh] = cmds('zsh -c "echo hi"');
-    expect(zsh?.wrapper?.shell).toBe('sh');
+    expect(zsh?.wrapper).toBeUndefined();
     const [sh] = cmds('sh -c "echo hi"');
     expect(sh?.wrapper?.shell).toBe('sh');
   });

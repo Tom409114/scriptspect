@@ -1,7 +1,7 @@
 /**
  * PS019 — POSIX_CAT: `cat` does not exist under cmd.exe (type differs).
  */
-import { rimrafFix, shxPrefixFix } from './fix-builders';
+import { shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 

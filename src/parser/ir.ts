@@ -9,6 +9,26 @@
 import type { Token } from './lexer';
 
 export type ShellTarget = 'posix-sh' | 'cmd' | 'powershell';
+export type ParseTarget = ShellTarget;
+
+export interface ParseDiagnostic {
+  code: string;
+  message: string;
+  span: [number, number];
+  severity: 'error' | 'advisory';
+}
+
+export interface TargetParse {
+  target: ParseTarget;
+  root: ScriptNode;
+  diagnostics: ParseDiagnostic[];
+}
+
+export interface ParseMatrix {
+  source: string;
+  activeTargets: ReadonlySet<ParseTarget>;
+  byTarget: ReadonlyMap<ParseTarget, TargetParse>;
+}
 
 export interface EnvAssignment {
   name: string;
@@ -24,13 +44,22 @@ export interface Redirection {
 }
 
 export type WrapperShell = 'bash' | 'sh' | 'cmd' | 'powershell';
+export type WrapperPayloadSupport = 'supported' | 'unsupported-wrapper-boundary';
 
 export interface WrapperInfo {
   shell: WrapperShell;
   /** Wrapper invocation as written (`bash -c`). */
   raw: string;
   span: [number, number];
-  /** Parsed payload; spans are relative to the payload string, not the script. */
+  /** Dialect selected by the literal wrapper executable. */
+  payloadTarget: ParseTarget;
+  /** Whether delivered payload bytes map to one exact source slice. */
+  payloadSupport: WrapperPayloadSupport;
+  /** Exact top-level source span when the payload is supported. */
+  payloadSourceSpan: [number, number] | null;
+  /** Always derived by slicing the top-level source with `payloadSourceSpan`. */
+  payloadRaw: string | null;
+  /** Parsed payload; every nested span remains relative to the top-level source. */
   inner: ScriptIr | null;
 }
 
@@ -60,12 +89,14 @@ export interface BooleanNode {
   kind: 'boolean';
   parts: ScriptNode[];
   ops: BooleanOp[];
+  opSpans: [number, number][];
   span: [number, number];
 }
 
 export interface PipelineNode {
   kind: 'pipeline';
   parts: ScriptNode[];
+  opSpans: [number, number][];
   span: [number, number];
 }
 

@@ -19,6 +19,7 @@ export interface FindingOpts {
   severity?: Severity;
   confidence?: Confidence;
   affectedTargets?: readonly ShellTarget[];
+  subtype?: string;
 }
 
 /**
@@ -41,6 +42,7 @@ export function makeFinding(
     confidence: opts.confidence ?? rule.confidence,
     affectedTargets: affected,
     message: opts.message,
+    subtype: opts.subtype,
     fix: opts.fix,
   };
 }

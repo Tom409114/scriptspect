@@ -4,7 +4,7 @@
  */
 
 import type { CommandNode } from '../parser/ir';
-import { rimrafFix, shxPrefixFix } from './fix-builders';
+import { shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule, flagsOf } from './util';
 

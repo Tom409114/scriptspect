@@ -30,9 +30,9 @@ export const PS020: RuleModule = {
       claim: 'cmd.exe has no command substitution; it uses for /f with delayed expansion at best.',
     },
   ],
-  check(ir, ctx: RuleContext): Finding[] {
+  check(matrix, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
-    for (const cmd of commandsOf(ir)) {
+    for (const cmd of commandsOf(matrix, 'posix-sh')) {
       const tokens = [
         ...cmd.argv,
         ...cmd.redirects.flatMap((r) => (r.target !== null ? [r.target] : [])),

@@ -30,29 +30,35 @@ export const PS040: RuleModule = {
       claim: 'Workspace packages expose their bin field to sibling scripts.',
     },
   ],
-  check(ir, ctx: RuleContext): Finding[] {
+  check(matrix, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
-    for (const cmd of commandsOf(ir)) {
-      const first = cmd.argv[0];
-      if (first === undefined) continue;
-      const name = first.value;
-      const pkg = KNOWN_TOOLS.get(name);
-      if (pkg === undefined) continue;
-      if (SYSTEM_AND_TOOLCHAIN.has(name)) continue;
-      const hasIt =
-        ctx.dependencies.has(pkg) || ctx.dependencies.has(name) || ctx.workspaceBins.has(name);
-      if (hasIt) continue;
-      const finding = makeFinding(this, ctx, {
-        message: `\`${name}\` is not declared as a dependency (provided by \`${pkg}\`)`,
-        span: first.span,
-        fix: {
-          ruleId: this.id,
-          safety: 'conditional',
-          description: `add \`${pkg}\` to devDependencies (never auto-installed by scriptspect)`,
-          requiresDependency: pkg,
-        },
-      });
-      if (finding !== null) findings.push(finding);
+    for (const target of matrix.activeTargets) {
+      for (const cmd of commandsOf(matrix, target)) {
+        const first = cmd.argv[0];
+        if (first === undefined) continue;
+        const name = first.value;
+        const pkg = KNOWN_TOOLS.get(name);
+        if (pkg === undefined) continue;
+        if (SYSTEM_AND_TOOLCHAIN.has(name)) continue;
+        const hasIt =
+          ctx.dependencies.has(pkg) || ctx.dependencies.has(name) || ctx.workspaceBins.has(name);
+        if (hasIt) continue;
+        const finding = makeFinding(
+          this,
+          { ...ctx, targets: [target] },
+          {
+            message: `\`${name}\` is not declared as a dependency (provided by \`${pkg}\`)`,
+            span: first.span,
+            fix: {
+              ruleId: this.id,
+              safety: 'conditional',
+              description: `add \`${pkg}\` to devDependencies (never auto-installed by scriptspect)`,
+              requiresDependency: pkg,
+            },
+          },
+        );
+        if (finding !== null) findings.push(finding);
+      }
     }
     return findings;
   },

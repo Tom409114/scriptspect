@@ -35,8 +35,11 @@ describe('PS032 EXPLICIT_POWERSHELL', () => {
     expect(only(run('powershell -NoProfile -Command "echo hi"'), 'PS032')).toHaveLength(1);
   });
 
-  it('wrapper owns the finding; inner $env: is not re-reported', () => {
-    expect(ids(run(`powershell -Command "$env:FOO='bar'; node app.js"`))).toEqual(['PS032']);
+  it('wrapper owns the portability finding while unsafe outer expansion gets PS051', () => {
+    expect(ids(run(`powershell -Command "$env:FOO='bar'; node app.js"`))).toEqual([
+      'PS032',
+      'PS051',
+    ]);
   });
 
   it('negative: node scripts', () => {

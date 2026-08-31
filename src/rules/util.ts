@@ -5,7 +5,7 @@
  */
 
 import { makeFinding } from '../core/finding';
-import type { CommandNode, ScriptIr, ScriptNode } from '../parser/ir';
+import type { CommandNode, ParseMatrix, ParseTarget, ScriptNode } from '../parser/ir';
 import { commandName, walkCommands } from '../parser/ir';
 import type { Finding, FixCandidate, RuleContext, RuleModule } from './types';
 
@@ -37,8 +37,9 @@ export function collectSequenceOps(
 }
 
 /** Yield every command in the tree (never descends into wrapper payloads). */
-export function commandsOf(ir: ScriptIr): CommandNode[] {
-  return [...walkCommands(ir.root)];
+export function commandsOf(matrix: ParseMatrix, target: ParseTarget = 'posix-sh'): CommandNode[] {
+  const parsed = matrix.byTarget.get(target);
+  return parsed === undefined ? [] : [...walkCommands(parsed.root)];
 }
 
 export interface AvailabilityOptions {
@@ -67,29 +68,33 @@ export function availabilityRule(
 ): RuleModule {
   return {
     ...rule,
-    check(ir: ScriptIr, ctx: RuleContext): Finding[] {
+    check(matrix: ParseMatrix, ctx: RuleContext): Finding[] {
       const findings: Finding[] = [];
-      for (const cmd of commandsOf(ir)) {
-        const name = commandName(cmd);
-        if (name === null) continue;
-        if (!options.names.has(name.toLowerCase())) continue;
-        if (options.matches && !options.matches(cmd)) continue;
-        const first = cmd.argv[0];
-        if (first === undefined) continue;
-        const fix =
-          options.fix !== undefined
-            ? options.fix(cmd, ctx)
-            : ({
-                ruleId: rule.id,
-                safety: rule.fixSafety,
-                description: options.fixSummary,
-              } as FixCandidate);
-        const finding = makeFinding(rule, ctx, {
-          message: options.message(cmd),
-          span: first.span,
-          fix,
-        });
-        if (finding !== null) findings.push(finding);
+      for (const target of rule.affectedTargets) {
+        if (!matrix.activeTargets.has(target)) continue;
+        const targetCtx: RuleContext = { ...ctx, targets: [target] };
+        for (const cmd of commandsOf(matrix, target)) {
+          const name = commandName(cmd);
+          if (name === null) continue;
+          if (!options.names.has(name.toLowerCase())) continue;
+          if (options.matches && !options.matches(cmd)) continue;
+          const first = cmd.argv[0];
+          if (first === undefined) continue;
+          const fix =
+            options.fix !== undefined
+              ? options.fix(cmd, ctx)
+              : ({
+                  ruleId: rule.id,
+                  safety: rule.fixSafety,
+                  description: options.fixSummary,
+                } as FixCandidate);
+          const finding = makeFinding(rule, targetCtx, {
+            message: options.message(cmd),
+            span: first.span,
+            fix,
+          });
+          if (finding !== null) findings.push(finding);
+        }
       }
       return findings;
     },

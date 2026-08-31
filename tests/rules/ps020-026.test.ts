@@ -82,6 +82,12 @@ describe('PS024 CMD_VAR_EXPANSION', () => {
     expect(only(run('date +%Y-%m-%d'), 'PS024')).toEqual([]);
     expect(only(run('echo 100%'), 'PS024')).toEqual([]);
   });
+
+  it('derives PowerShell as affected for cmd percent expansion syntax', () => {
+    const [finding] = only(run('echo %TEMP%', { targets: ['powershell'] }), 'PS024');
+
+    expect(finding?.affectedTargets).toEqual(['powershell']);
+  });
 });
 
 describe('PS025 DEV_NULL', () => {

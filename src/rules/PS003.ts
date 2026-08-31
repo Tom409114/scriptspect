@@ -33,9 +33,9 @@ export const PS003: RuleModule = {
       claim: 'POSIX sh and cmd.exe have no $env: namespace; the text is passed through literally.',
     },
   ],
-  check(ir, ctx: RuleContext): Finding[] {
+  check(matrix, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
-    for (const cmd of commandsOf(ir)) {
+    for (const cmd of commandsOf(matrix, 'powershell')) {
       if (cmd.wrapper?.shell === 'powershell') continue;
       for (const tok of cmd.argv) {
         if (!PS_ENV_RE.test(tok.value)) continue;

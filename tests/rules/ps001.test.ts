@@ -34,6 +34,12 @@ describe('PS001 POSIX_INLINE_ENV', () => {
     expect(only(run('NODE_ENV=x vite build', { targets: ['posix-sh'] }), 'PS001')).toEqual([]);
   });
 
+  it('derives PowerShell as affected when it is the active non-POSIX target', () => {
+    const [finding] = only(run('NODE_ENV=x vite build', { targets: ['powershell'] }), 'PS001');
+
+    expect(finding?.affectedTargets).toEqual(['powershell']);
+  });
+
   it('fix: safe when cross-env is already a dependency', () => {
     const [f] = only(
       run('NODE_ENV=production vite build', { dependencies: new Set(['cross-env']) }),
