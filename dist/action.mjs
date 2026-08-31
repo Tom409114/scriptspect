@@ -14462,71 +14462,210 @@ var PS003 = {
 };
 
 // src/rules/fix-builders.ts
-var RECURSIVE_FLAGS = /^-{1,2}(r|rf|fr|R|-recursive)$/;
-function firstArgIndex(cmd) {
-  let i = 1;
-  while (i < cmd.argv.length) {
-    const v = cmd.argv[i]?.value ?? "";
-    if (!v.startsWith("-")) break;
-    i += 1;
+var CONTEXT_FLAGS = /* @__PURE__ */ new Set(["A", "B", "C"]);
+var REGEX_META = /[\\^$.*+?()[\]{}|]/;
+var SED_REPLACEMENT_META = /[\\$&]/;
+var GLOB_META = /[*?[\]{}]/;
+var CMD_ENV_REFERENCE = /%[A-Za-z_][A-Za-z0-9_]*%/;
+var SHX_CONTRACTS = {
+  PS011: {
+    command: "cp",
+    allowedFlags: /* @__PURE__ */ new Set(["f", "n", "u", "r", "R", "L", "P", "p"]),
+    minPositionals: 2,
+    incompatibleFlagPairs: [
+      ["f", "n"],
+      ["L", "P"]
+    ]
+  },
+  PS012: {
+    command: "mv",
+    allowedFlags: /* @__PURE__ */ new Set(["f", "n"]),
+    minPositionals: 2,
+    incompatibleFlagPairs: [["f", "n"]]
+  },
+  PS013: {
+    command: "mkdir",
+    allowedFlags: /* @__PURE__ */ new Set(["p"]),
+    minPositionals: 1
+  },
+  PS017: {
+    command: "grep",
+    allowedFlags: /* @__PURE__ */ new Set(["v", "l", "i", "n", "B", "A", "C"]),
+    valueFlags: CONTEXT_FLAGS,
+    minPositionals: 1,
+    validate: validateLiteralGrep
+  },
+  PS018: {
+    command: "sed",
+    allowedFlags: /* @__PURE__ */ new Set(["i"]),
+    minPositionals: 1,
+    validate: validateLiteralSed
+  },
+  PS019: {
+    command: "cat",
+    allowedFlags: /* @__PURE__ */ new Set(["n"]),
+    minPositionals: 1
   }
-  return i;
+};
+var SHX_RM_CONTRACT = {
+  command: "rm",
+  allowedFlags: /* @__PURE__ */ new Set(["f", "r", "R"]),
+  minPositionals: 1
+};
+function manual(ruleId, reason) {
+  return {
+    ruleId,
+    safety: "manual",
+    description: `manual rewrite required: ${reason}`
+  };
+}
+function conditional(ruleId, dependency) {
+  return {
+    ruleId,
+    safety: "conditional",
+    description: `add ${dependency} as a devDependency, then re-run --fix`,
+    requiresDependency: dependency
+  };
+}
+function safePrefix(ruleId, first) {
+  return {
+    ruleId,
+    safety: "safe",
+    description: "prefix with shx (already a dependency)",
+    replacement: { span: [first.span[0], first.span[0]], text: "shx " }
+  };
+}
+function parseShxArgs(cmd, contract) {
+  const args = cmd.argv.slice(1);
+  let positionals = args;
+  let flags = [];
+  let usedOptionTerminator = false;
+  const firstArg = args[0];
+  if (firstArg?.value === "--") {
+    usedOptionTerminator = true;
+    positionals = args.slice(1);
+  } else if (firstArg?.value.startsWith("-")) {
+    if (!/^-[A-Za-z]+$/.test(firstArg.value)) {
+      return `option ${JSON.stringify(firstArg.raw)} is outside the ShellJS ${contract.command} contract`;
+    }
+    flags = firstArg.value.slice(1).split("");
+    const unknown = flags.find((flag) => !contract.allowedFlags.has(flag));
+    if (unknown !== void 0) {
+      return `option -${unknown} is not supported by ShellJS ${contract.command}`;
+    }
+    positionals = args.slice(1);
+  }
+  if (!usedOptionTerminator && positionals.some((token) => token.value.startsWith("-"))) {
+    return "ShellJS accepts only one leading short-option string; use -- for dash-prefixed paths";
+  }
+  for (const [left, right] of contract.incompatibleFlagPairs ?? []) {
+    if (flags.includes(left) && flags.includes(right)) {
+      return `combined -${left}/-${right} semantics are not provably equivalent`;
+    }
+  }
+  const valueFlags = flags.filter((flag) => contract.valueFlags?.has(flag) === true);
+  if (valueFlags.length > 1) {
+    return "multiple context flags require distinct values that shx cannot infer from one option string";
+  }
+  if (valueFlags.length === 1) {
+    const value = positionals[0];
+    if (value === void 0 || !/^\d+$/.test(value.value)) {
+      return `-${valueFlags[0]} requires a non-negative integer argument`;
+    }
+    positionals = positionals.slice(1);
+  }
+  if (positionals.length < contract.minPositionals) {
+    return `${contract.command} requires at least ${contract.minPositionals} positional argument(s)`;
+  }
+  if (cmd.argv.slice(1).some(hasUnportableArgumentSyntax)) {
+    return "single-quoted or runtime-expanded arguments are not equivalent across npm script shells";
+  }
+  const parsed = { flags, positionals, usedOptionTerminator };
+  return contract.validate?.(parsed) ?? parsed;
+}
+function hasUnportableArgumentSyntax(token) {
+  return token.raw.includes("'") || token.expansions.length > 0 || token.raw.includes("$") || CMD_ENV_REFERENCE.test(token.raw);
+}
+function validateLiteralGrep(args) {
+  const pattern = args.positionals[0]?.value ?? "";
+  if (pattern === "" || REGEX_META.test(pattern)) {
+    return "grep pattern is outside the literal subset shared by POSIX grep and JavaScript RegExp";
+  }
+  return null;
+}
+function validateLiteralSed(args) {
+  const expression = args.positionals[0]?.value ?? "";
+  const match = /^s\/([^/]*)\/([^/]*)\/(g?)$/.exec(expression);
+  if (match === null) {
+    return "sed expression is outside the shx s/search/replacement/[g] grammar";
+  }
+  const search = match[1] ?? "";
+  const replacement = match[2] ?? "";
+  if (search === "" || REGEX_META.test(search) || SED_REPLACEMENT_META.test(replacement)) {
+    return "sed expression is outside the provably equivalent literal substitution subset";
+  }
+  return null;
+}
+function unsafeRemovalTarget(token) {
+  if (hasUnportableArgumentSyntax(token)) return true;
+  const slashNormalized = token.value.replace(/\\/g, "/");
+  const normalized = slashNormalized.replace(/\/+$/, "");
+  if (normalized === "" || normalized === "." || normalized === "..") return true;
+  if (normalized.startsWith("~")) return true;
+  if (normalized.startsWith("/") || /^[A-Za-z]:/.test(slashNormalized)) return true;
+  const segments = normalized.replace(/^\.\//, "").split("/");
+  if (segments.includes("..")) return true;
+  const stablePrefix = segments[0] ?? "";
+  return stablePrefix === "" || GLOB_META.test(stablePrefix);
+}
+function rimrafEquivalent(args) {
+  if (args.usedOptionTerminator) return false;
+  const recursive = args.flags.includes("r") || args.flags.includes("R");
+  const force = args.flags.includes("f");
+  if (!recursive || !force) return false;
+  return args.positionals.every((token) => !GLOB_META.test(token.value));
 }
 function rimrafFix(cmd, ctx) {
   const first = cmd.argv[0];
   if (first === void 0) {
-    return { ruleId: "PS010", safety: "manual", description: "replace rm with rimraf or shx rm" };
+    return manual("PS010", "missing rm command token");
   }
-  if (ctx.dependencies.has("rimraf")) {
-    const flagsRecursive = cmd.argv.slice(1).some((t) => RECURSIVE_FLAGS.test(t.value));
-    const nonFlag = cmd.argv[firstArgIndex(cmd)];
-    if (flagsRecursive && nonFlag !== void 0) {
+  const parsed = parseShxArgs(cmd, SHX_RM_CONTRACT);
+  if (typeof parsed === "string") return manual("PS010", parsed);
+  if (parsed.positionals.some(unsafeRemovalTarget)) {
+    return manual(
+      "PS010",
+      "destructive target is absolute, parent-traversing, broad, or runtime-dependent"
+    );
+  }
+  if (rimrafEquivalent(parsed)) {
+    if (ctx.dependencies.has("rimraf")) {
+      const firstTarget = parsed.positionals[0];
+      if (firstTarget === void 0) return manual("PS010", "missing removal target");
       return {
         ruleId: "PS010",
         safety: "safe",
         description: "rewrite as `rimraf \u2026` (rimraf is already a dependency)",
-        replacement: { span: [first.span[0], nonFlag.span[0]], text: "rimraf " }
+        replacement: { span: [first.span[0], firstTarget.span[0]], text: "rimraf " }
       };
     }
-    return {
-      ruleId: "PS010",
-      safety: "safe",
-      description: "rewrite as `rimraf \u2026` (rimraf is already a dependency)",
-      replacement: { span: first.span, text: "rimraf" }
-    };
+    if (ctx.dependencies.has("shx")) return safePrefix("PS010", first);
+    return conditional("PS010", "rimraf");
   }
-  if (ctx.dependencies.has("shx")) {
-    return {
-      ruleId: "PS010",
-      safety: "safe",
-      description: "rewrite as `shx rm \u2026` (shx is already a dependency)",
-      replacement: { span: [first.span[0], first.span[0]], text: "shx " }
-    };
-  }
-  return {
-    ruleId: "PS010",
-    safety: "conditional",
-    description: "add rimraf (or shx) as a devDependency, then re-run --fix",
-    requiresDependency: "rimraf"
-  };
+  if (ctx.dependencies.has("shx")) return safePrefix("PS010", first);
+  return conditional("PS010", "shx");
 }
 function shxPrefixFix(ruleId, cmd, ctx) {
   const first = cmd.argv[0];
-  const description = "prefix with shx (already a dependency)";
-  if (first !== void 0 && ctx.dependencies.has("shx")) {
-    return {
-      ruleId,
-      safety: "safe",
-      description,
-      replacement: { span: [first.span[0], first.span[0]], text: "shx " }
-    };
+  if (first === void 0) return manual(ruleId, "missing command token");
+  const contract = SHX_CONTRACTS[ruleId];
+  if (contract === void 0 || first.value.toLowerCase() !== contract.command) {
+    return manual(ruleId, "no declared ShellJS contract for this command");
   }
-  return {
-    ruleId,
-    safety: "conditional",
-    description: "add shx as a devDependency, then re-run --fix",
-    requiresDependency: "shx"
-  };
+  const parsed = parseShxArgs(cmd, contract);
+  if (typeof parsed === "string") return manual(ruleId, parsed);
+  if (ctx.dependencies.has("shx")) return safePrefix(ruleId, first);
+  return conditional(ruleId, "shx");
 }
 
 // src/rules/PS010.ts

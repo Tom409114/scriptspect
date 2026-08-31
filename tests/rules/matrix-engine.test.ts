@@ -132,7 +132,7 @@ describe('PS051 target shell parse diagnostics', () => {
 
 describe('matrix diagnostic fix gates', () => {
   it('keeps a replacement when an unrelated diagnostic is elsewhere in the script', () => {
-    const script = 'rm -rf $HOME';
+    const script = 'rm -rf dist && echo $HOME';
     const [finding] = analyzeScript(
       script,
       makeCtx({

@@ -42,11 +42,11 @@ describe('fix engine: cross-env (PS001)', () => {
 describe('fix engine: rimraf (PS010)', () => {
   it('folds rm -rf into rimraf when rimraf is a dependency', () => {
     expect(fix('rm -rf dist', ['rimraf'])).toBe('rimraf dist');
-    expect(fix('rm -r build', ['rimraf'])).toBe('rimraf build');
   });
 
-  it('replaces bare rm when rimraf is a dependency', () => {
-    expect(fix('rm temp.log', ['rimraf'])).toBe('rimraf temp.log');
+  it('does not treat rimraf as equivalent to non-force rm', () => {
+    expect(fix('rm -r build', ['rimraf'])).toBe('rm -r build');
+    expect(fix('rm temp.log', ['rimraf'])).toBe('rm temp.log');
   });
 
   it('falls back to shx rm when only shx is present', () => {
@@ -65,8 +65,8 @@ describe('fix engine: shx prefixes (PS011-PS019)', () => {
     expect(fix('cp -r src dist', ['shx'])).toBe('shx cp -r src dist');
     expect(fix('mv a b', ['shx'])).toBe('shx mv a b');
     expect(fix('mkdir -p dist/assets', ['shx'])).toBe('shx mkdir -p dist/assets');
-    expect(fix('grep -r TODO src', ['shx'])).toBe('shx grep -r TODO src');
-    expect(fix("sed 's/a/b/' x", ['shx'])).toBe("shx sed 's/a/b/' x");
+    expect(fix('grep -in TODO src/app.ts', ['shx'])).toBe('shx grep -in TODO src/app.ts');
+    expect(fix('sed "s/a/b/" x', ['shx'])).toBe('shx sed "s/a/b/" x');
     expect(fix('cat a.json > b.json', ['shx'])).toBe('shx cat a.json > b.json');
   });
 
