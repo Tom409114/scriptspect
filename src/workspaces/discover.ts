@@ -10,13 +10,20 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import fg from 'fast-glob';
-import { npmWorkspaceGlobs } from './npm';
-import { pnpmWorkspaceGlobs } from './pnpm';
 import type { PackageManifest, PackageUnit } from '../core/analyze';
 import { readManifest, toPosix } from '../core/analyze';
+import { npmWorkspaceGlobs } from './npm';
+import { pnpmWorkspaceGlobs } from './pnpm';
 
 /** Directories that never contain analyzable workspace packages. */
-export const EXCLUDED_DIRS = ['**/node_modules/**', '**/vendor/**', '**/dist/**', '**/build/**', '**/.yarn/**', '**/coverage/**'];
+export const EXCLUDED_DIRS = [
+  '**/node_modules/**',
+  '**/vendor/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.yarn/**',
+  '**/coverage/**',
+];
 
 export interface DiscoveryResult {
   packages: PackageUnit[];

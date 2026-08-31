@@ -1,14 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { discoverPackages, workspaceBinNames, unitDependencyNames } from '../../src/workspaces/discover';
+import { describe, expect, it } from 'vitest';
+import { parseConfig } from '../../src/config/load';
+import { analyze } from '../../src/core/analyze';
+import {
+  discoverPackages,
+  unitDependencyNames,
+  workspaceBinNames,
+} from '../../src/workspaces/discover';
 import { npmWorkspaceGlobs } from '../../src/workspaces/npm';
 import { pnpmWorkspaceGlobs } from '../../src/workspaces/pnpm';
-import { analyze } from '../../src/core/analyze';
-import { parseConfig } from '../../src/config/load';
 
-function pkg(name: string, scripts: Record<string, string> = {}, extra: Record<string, unknown> = {}): string {
+function pkg(
+  name: string,
+  scripts: Record<string, string> = {},
+  extra: Record<string, unknown> = {},
+): string {
   return JSON.stringify({ name, scripts, ...extra }, null, 2);
 }
 
@@ -106,7 +114,11 @@ describe('workspace discovery', () => {
 
   it('dedupes packages matched by multiple globs', () => {
     const root = makeProject({
-      'package.json': pkg('root', {}, { workspaces: ['packages/*', 'packages/web', 'packages/**'] }),
+      'package.json': pkg(
+        'root',
+        {},
+        { workspaces: ['packages/*', 'packages/web', 'packages/**'] },
+      ),
       'packages/web/package.json': pkg('web'),
     });
     const { packages } = discoverPackages(root);
@@ -136,8 +148,16 @@ describe('workspace discovery', () => {
 describe('workspace bins and dependencies', () => {
   it('unions bin names across packages for PS040', () => {
     const units = [
-      { relPath: 'package.json', absDir: '/r', manifest: { name: 'root', bin: { 'root-cli': './x' } } },
-      { relPath: 'packages/w/package.json', absDir: '/r/w', manifest: { name: '@scope/w', bin: { wtool: './y' } } },
+      {
+        relPath: 'package.json',
+        absDir: '/r',
+        manifest: { name: 'root', bin: { 'root-cli': './x' } },
+      },
+      {
+        relPath: 'packages/w/package.json',
+        absDir: '/r/w',
+        manifest: { name: '@scope/w', bin: { wtool: './y' } },
+      },
     ];
     expect(workspaceBinNames(units)).toEqual(new Set(['root', 'root-cli', '@scope/w', 'wtool']));
   });
@@ -161,7 +181,11 @@ describe('monorepo analysis', () => {
   it('reports findings with per-package paths and script names (spec §8.1)', () => {
     const root = makeProject({
       'package.json': pkg('root', { clean: 'rm -rf dist' }, { workspaces: ['packages/*'] }),
-      'packages/web/package.json': pkg('web', { build: 'NODE_ENV=production vite build' }, { devDependencies: { vite: '^5' } }),
+      'packages/web/package.json': pkg(
+        'web',
+        { build: 'NODE_ENV=production vite build' },
+        { devDependencies: { vite: '^5' } },
+      ),
     });
     const result = analyze(root, { config: parseConfig({}, 'test') });
     const paths = result.findings.map((f) => `${f.packagePath} ${f.scriptName} ${f.ruleId}`);
@@ -202,7 +226,10 @@ describe('monorepo analysis', () => {
       'package.json': pkg('root', { build: 'node build.js' }, { workspaces: ['packages/*'] }),
     };
     for (let i = 0; i < 100; i += 1) {
-      files[`packages/p${i}/package.json`] = pkg(`p${i}`, { build: 'vite build', test: 'node test.js' });
+      files[`packages/p${i}/package.json`] = pkg(`p${i}`, {
+        build: 'vite build',
+        test: 'node test.js',
+      });
     }
     const root = makeProject(files);
     const start = performance.now();
