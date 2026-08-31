@@ -14,6 +14,108 @@ interface ScriptValueSpan {
   value: string;
 }
 
+export class PackageJsonEditError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PackageJsonEditError';
+  }
+}
+
+interface JsonStringToken {
+  raw: string;
+  value: string;
+  end: number;
+}
+
+function skipWhitespace(text: string, start: number): number {
+  let i = start;
+  while (i < text.length && /\s/.test(text.charAt(i))) i += 1;
+  return i;
+}
+
+function readJsonString(text: string, start: number): JsonStringToken | null {
+  if (text.charAt(start) !== '"') return null;
+  let i = start + 1;
+  while (i < text.length) {
+    const char = text.charAt(i);
+    if (char === '\\') {
+      i += 2;
+      continue;
+    }
+    if (char === '"') {
+      const raw = text.slice(start, i + 1);
+      const value = jsonDecode(raw);
+      return value === null ? null : { raw, value, end: i + 1 };
+    }
+    i += 1;
+  }
+  return null;
+}
+
+function skipJsonValue(text: string, start: number): number | null {
+  const first = text.charAt(start);
+  if (first === '"') return readJsonString(text, start)?.end ?? null;
+  if (first !== '{' && first !== '[') {
+    let i = start;
+    while (i < text.length && !/[\s,}\]]/.test(text.charAt(i))) i += 1;
+    return i > start ? i : null;
+  }
+
+  const stack = [first];
+  let i = start + 1;
+  while (i < text.length && stack.length > 0) {
+    const char = text.charAt(i);
+    if (char === '"') {
+      const token = readJsonString(text, i);
+      if (token === null) return null;
+      i = token.end;
+      continue;
+    }
+    if (char === '{' || char === '[') stack.push(char);
+    if (char === '}' || char === ']') {
+      const expected = char === '}' ? '{' : '[';
+      if (stack.pop() !== expected) return null;
+    }
+    i += 1;
+  }
+  return stack.length === 0 ? i : null;
+}
+
+function rootScriptsObjectStart(text: string): number | null {
+  let i = skipWhitespace(text, 0);
+  if (text.charAt(i) !== '{') return null;
+  i += 1;
+  let scriptsStart: number | null = null;
+
+  for (;;) {
+    i = skipWhitespace(text, i);
+    if (text.charAt(i) === '}') return scriptsStart;
+    const key = readJsonString(text, i);
+    if (key === null) return null;
+    i = skipWhitespace(text, key.end);
+    if (text.charAt(i) !== ':') return null;
+    i = skipWhitespace(text, i + 1);
+    if (key.value === 'scripts') {
+      if (scriptsStart !== null) {
+        throw new PackageJsonEditError('package.json has duplicate root "scripts" keys');
+      }
+      if (text.charAt(i) !== '{') {
+        throw new PackageJsonEditError('package.json root "scripts" value must be an object');
+      }
+      scriptsStart = i + 1;
+    }
+    const end = skipJsonValue(text, i);
+    if (end === null) return null;
+    i = skipWhitespace(text, end);
+    if (text.charAt(i) === ',') {
+      i += 1;
+      continue;
+    }
+    if (text.charAt(i) === '}') return scriptsStart;
+    return null;
+  }
+}
+
 /**
  * Locate `scripts` object member value spans in a package.json text.
  * A tiny scanner (no JSON.parse round-trip) walks the scripts object and
@@ -21,12 +123,10 @@ interface ScriptValueSpan {
  */
 export function locateScriptSpans(text: string): Map<string, ScriptValueSpan> {
   const spans = new Map<string, ScriptValueSpan>();
-  const header = /"scripts"\s*:\s*\{/g;
-  header.lastIndex = 0;
-  const match = header.exec(text);
-  if (match === null) return spans;
+  const start = rootScriptsObjectStart(text);
+  if (start === null) return spans;
 
-  let i = match.index + match[0].length;
+  let i = start;
   const n = text.length;
 
   const skipWs = (): void => {
@@ -68,15 +168,19 @@ export function locateScriptSpans(text: string): Map<string, ScriptValueSpan> {
     i += 1;
     skipWs();
     if (text.charAt(i) !== '"') {
-      // non-string member (or nested object) — skip to next comma at this level
-      while (i < n && text.charAt(i) !== ',' && text.charAt(i) !== '}') i += 1;
-      if (text.charAt(i) === ',') i += 1;
-      continue;
+      throw new PackageJsonEditError(
+        `package.json script ${JSON.stringify(key ?? '<invalid>')} must be a string`,
+      );
     }
     const valueStart = i;
     const valueRaw = readString();
     if (valueRaw === null) break;
     if (key !== null) {
+      if (spans.has(key)) {
+        throw new PackageJsonEditError(
+          `package.json has duplicate script key ${JSON.stringify(key)}`,
+        );
+      }
       spans.set(key, {
         quoteStart: valueStart,
         quoteEnd: valueStart + valueRaw.length,

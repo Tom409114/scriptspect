@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyRewritesToFile,
   locateScriptSpans,
+  PackageJsonEditError,
   rewriteScripts,
 } from '../../src/fixers/package-json';
 
@@ -37,6 +38,49 @@ describe('locateScriptSpans', () => {
 });
 
 describe('rewriteScripts preserves formatting', () => {
+  it('refuses an ambiguous manifest with duplicate root scripts keys', () => {
+    const text = '{"scripts":{"clean":"first"},"scripts":{"clean":"second"}}';
+
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
+  it('refuses duplicate script names inside the root scripts object', () => {
+    const text = '{"scripts":{"clean":"first","clean":"second"}}';
+
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
+  it('refuses a non-string value inside the root scripts object', () => {
+    const text = '{"scripts":{"clean":["rm","-rf","dist"]}}';
+
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
+  it('rewrites only the root scripts object when a nested scripts key appears first', () => {
+    const text = `{
+  "metadata": {
+    "scripts": {
+      "clean": "do-not-touch"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist"
+  }
+}
+`;
+
+    const next = rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }]);
+
+    expect(next).toBe(text.replace('"clean": "rm -rf dist"', '"clean": "rimraf dist"'));
+    expect(next).toContain('"clean": "do-not-touch"');
+  });
+
   it('changes only the target value with 2-space indentation', () => {
     const next = rewriteScripts(PKG_2SPACE, [{ scriptName: 'clean', newValue: 'rimraf dist' }]);
     expect(next).not.toBeNull();
