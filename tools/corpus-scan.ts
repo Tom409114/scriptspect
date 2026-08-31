@@ -11,11 +11,10 @@
  * The scanner never writes to third-party repositories (spec §0 COMMUNITY-02)
  * and never executes analyzed scripts (QUALITY-02).
  */
-import { createWriteStream } from 'node:fs';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { createWriteStream, readFileSync, writeFileSync } from 'node:fs';
+import { DEFAULT_TARGETS } from '../src/core/targets';
 import { analyzeScript } from '../src/rules';
 import type { Finding } from '../src/rules/types';
-import { DEFAULT_TARGETS } from '../src/core/targets';
 
 interface RepoManifest {
   name?: string;
@@ -79,7 +78,9 @@ async function main(): Promise<void> {
     console.error('usage: tsx tools/corpus-scan.ts repos.txt');
     process.exit(2);
   }
-  const repos = readFileSync(listFile, 'utf8').split(String.fromCharCode(10)).map((l) => l.trim());
+  const repos = readFileSync(listFile, 'utf8')
+    .split(String.fromCharCode(10))
+    .map((l) => l.trim());
   const findingsOut = createWriteStream('findings.jsonl', 'utf8');
   const reposWithScripts: string[] = [];
   const scriptsScannedTotal: number[] = [];
@@ -148,10 +149,15 @@ async function main(): Promise<void> {
     '',
     '| Repo | Findings |',
     '| --- | --- |',
-    ...[...byRepo.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([r, c]) => `| ${r} | ${c} |`),
+    ...[...byRepo.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([r, c]) => `| ${r} | ${c} |`),
   ];
   writeFileSync('summary.md', lines.join('\n'), 'utf8');
-  console.log(`scanned ${reposWithScripts.length} repos, ${scriptsScanned} scripts, ${findingCount} findings`);
+  console.log(
+    `scanned ${reposWithScripts.length} repos, ${scriptsScanned} scripts, ${findingCount} findings`,
+  );
 }
 
 await main();
