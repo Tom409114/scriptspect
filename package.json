@@ -38,7 +38,8 @@
     "watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "lint:fix": "biome check --write ."
+    "lint:fix": "biome check --write .",
+    "docs:rules": "tsx tools/gen-rule-docs.ts"
   },
   "dependencies": {
     "cac": "^7.0.0",
@@ -51,6 +52,7 @@
     "@types/node": "^26.4.0",
     "tsup": "^8.5.1",
     "typescript": "~5.9.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "tsx": "^4.20.0"
   }
 }

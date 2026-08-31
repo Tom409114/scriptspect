@@ -72,6 +72,35 @@ jobs:
           git commit -m "style: canonical biome formatting"
           git push
 
+  docs:
+    name: Rule docs (generated)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm install -g pnpm@11.24.0
+      - run: pnpm install --no-frozen-lockfile
+      - name: Regenerate rule docs and push if needed
+        run: |
+          pnpm docs:rules
+          git config user.name "scriptspect-ci[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "rule docs up to date"
+            exit 0
+          fi
+          git add docs/rules
+          git commit -m "docs: regenerate rule docs from metadata"
+          git push
+
   quality:
     name: Quality (typecheck, lint, unit tests)
     runs-on: ubuntu-latest

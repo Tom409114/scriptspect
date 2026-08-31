@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://unpkg.com/scriptspect/schema/config.schema.json",
+  "title": "scriptspect configuration",
+  "description": "Cross-platform script analysis configuration. Place in a `scriptspect` field of package.json or in scriptspect.config.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "targets": {
+      "description": "Target shells to analyze against. Defaults to npm's script shells: posix-sh + cmd.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["posix-sh", "cmd", "powershell"]
+      }
+    },
+    "severity": {
+      "description": "Per-rule severity overrides. Changing a rule to 'advisory' keeps it visible but never fails CI.",
+      "type": "object",
+      "additionalProperties": {
+        "enum": ["error", "warn", "advisory"]
+      }
+    },
+    "ignore": {
+      "description": "Suppress findings. Within one entry, every specified key must match (package globs AND script globs AND rule ids). Prefer narrow entries over broad ones.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "packages": {
+            "description": "Package path globs relative to the root (e.g. 'packages/web/package.json', 'examples/**').",
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "scripts": {
+            "description": "Script name globs (e.g. 'docs:unix', 'gen:*').",
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "rules": {
+            "description": "Rule ids to suppress (e.g. 'PS030').",
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^PS[0-9]{3}$" }
+          }
+        }
+      }
+    }
+  }
+}
