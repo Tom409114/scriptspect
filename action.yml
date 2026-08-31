@@ -1,0 +1,46 @@
+name: 'scriptspect'
+description: >-
+  Cross-platform static analysis for package.json scripts — catches
+  shell-specific commands before they break Windows, macOS, or Linux builds.
+author: 'Tom409114'
+
+branding:
+  icon: 'search'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Project path to analyze (defaults to the repository root).'
+    required: false
+    default: '.'
+  target:
+    description: 'Target shells, comma-separated: posix-sh, cmd, powershell.'
+    required: false
+    default: 'posix-sh,cmd'
+  severity:
+    description: 'Minimum severity to display: error, warn, or advisory.'
+    required: false
+    default: 'advisory'
+  max-warnings:
+    description: 'Fail the job when warnings exceed this number (omit for unlimited).'
+    required: false
+    default: ''
+  version:
+    description: 'scriptspect npm version or dist-tag to run (e.g. latest, 0.1.0).'
+    required: false
+    default: 'latest'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run scriptspect
+      shell: bash
+      run: |
+        # Spec §12.1: the Action uses the same CLI core — one rule engine,
+        # never a fork. It never modifies the repository (fix mode is not
+        # offered in CI).
+        ARGS=(check "${{ inputs.path }}" --format github --target "${{ inputs.target }}" --severity "${{ inputs.severity }}")
+        if [ -n "${{ inputs.max-warnings }}" ]; then
+          ARGS+=(--max-warnings "${{ inputs.max-warnings }}")
+        fi
+        npx --yes "scriptspect@${{ inputs.version }}" "${ARGS[@]}"
