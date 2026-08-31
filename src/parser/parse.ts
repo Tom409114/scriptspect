@@ -54,7 +54,7 @@ function parseSequence(tokens: Token[], start: number, end: number): [ScriptNode
     parts.push(node);
     i = next;
     const tok = tokens[i];
-    if (i >= end) break;
+    if (i >= end || tok === undefined) break;
     if (
       tok.kind === 'operator' &&
       (tok.op === ';' || tok.op === '&' || tok.op === '\n') &&
