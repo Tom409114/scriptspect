@@ -113,7 +113,7 @@ A published JSON Schema gives editor completion for every field.
 
 ## Status
 
-All milestones [M0–M8](docs/roadmap.md) are merged and CI-green on main; the M8 corpus validation gate is underway. Rule IDs are a stable API once published; semantic changes are tracked in release notes.
+All milestones [M0–M8](docs/roadmap.md) are merged and CI-green on main. The M8 corpus gate has run on 133 public repos (5083 scripts): a 62-finding human-verified precision sample found zero false positives — see the [corpus validation report](docs/validation/corpus-2026-08.md). Rule IDs are a stable API once published; semantic changes are tracked in release notes.
 
 ## License
 
