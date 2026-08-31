@@ -113,7 +113,7 @@ jobs:
     name: Authorize exact release intent
     needs: [discover-intent]
     if: >-
-      always() &&
+      !cancelled() &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&

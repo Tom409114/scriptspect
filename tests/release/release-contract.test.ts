@@ -261,7 +261,8 @@ describe('release coordinator trust and recovery', () => {
     expect(discoverRun).toContain('exit 1');
 
     expect(authorize?.needs).toEqual(['discover-intent']);
-    expect(authorize?.if).toContain('always()');
+    expect(authorize?.if).toContain('!cancelled()');
+    expect(authorize?.if).not.toContain('always()');
     expect(authorize?.if).toContain("needs.discover-intent.result == 'success'");
     expect(authorize?.if).toContain("needs.discover-intent.outputs.has-intent == 'true'");
     expect(authorize?.environment).toBe('release');
