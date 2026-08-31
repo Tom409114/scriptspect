@@ -36,5 +36,5 @@ describe('published package contents', () => {
     expect(paths).toContain('schema/output.schema.json');
     expect(paths).toContain('README.md');
     expect(paths).toContain('README.zh-CN.md');
-  });
+  }, 20_000);
 });

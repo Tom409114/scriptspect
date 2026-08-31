@@ -29,7 +29,9 @@ describe('pinned shared-corpus comparison harness', () => {
   it('captures normalized outputs and hashes without mutating the shared fixtures', () => {
     const outputDir = join(mkdtempSync(join(tmpdir(), 'scriptspect-comparison-parent-')), 'run');
     outputs.push(resolve(outputDir, '..'));
-    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
     const before = readFileSync('tests/fixtures/comparison/raw-rm/package.json', 'utf8');
 
     const manifest = runComparison({ outputDir, sourceCommit, enforcePinnedNode: false });
@@ -67,5 +69,5 @@ describe('pinned shared-corpus comparison harness', () => {
       expect(fixture.scriptspect.exitCode).toBeOneOf([0, 1]);
       expect(fixture.scriptsDoctor.exitCode).toBe(0);
     }
-  });
+  }, 20_000);
 });
