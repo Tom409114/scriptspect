@@ -1,7 +1,7 @@
 /**
  * PS012 — POSIX_MV: `mv` does not exist under cmd.exe.
  */
-import { rimrafFix, shxPrefixFix } from './fix-builders';
+import { shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 

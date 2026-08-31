@@ -37,23 +37,31 @@ export const PS026: RuleModule = {
       claim: 'Windows has no /tmp or /usr; equivalents live under %TEMP%, %ProgramFiles%.',
     },
   ],
-  check(ir, ctx: RuleContext): Finding[] {
+  check(matrix, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
-    for (const cmd of commandsOf(ir)) {
-      for (const tok of cmd.argv) {
-        const value = tok.value;
-        const hit = UNIX_PATH_PREFIXES.find((p) => value === p || value.startsWith(`${p}/`));
-        if (hit === undefined) continue;
-        const finding = makeFinding(this, ctx, {
-          message: `\`${value}\` assumes a Unix filesystem layout`,
-          span: tok.span,
-          fix: {
-            ruleId: this.id,
-            safety: 'manual',
-            description: 'use os.tmpdir()/PATH lookup in a Node helper instead of hardcoded paths',
-          },
-        });
-        if (finding !== null) findings.push(finding);
+    for (const target of ['cmd', 'powershell'] as const) {
+      if (!matrix.activeTargets.has(target)) continue;
+      for (const cmd of commandsOf(matrix, target)) {
+        for (const tok of cmd.argv) {
+          const value = tok.value;
+          const hit = UNIX_PATH_PREFIXES.find((p) => value === p || value.startsWith(`${p}/`));
+          if (hit === undefined) continue;
+          const finding = makeFinding(
+            this,
+            { ...ctx, targets: [target] },
+            {
+              message: `\`${value}\` assumes a Unix filesystem layout`,
+              span: tok.span,
+              fix: {
+                ruleId: this.id,
+                safety: 'manual',
+                description:
+                  'use os.tmpdir()/PATH lookup in a Node helper instead of hardcoded paths',
+              },
+            },
+          );
+          if (finding !== null) findings.push(finding);
+        }
       }
     }
     return findings;

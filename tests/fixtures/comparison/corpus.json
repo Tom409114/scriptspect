@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "raw-rm",
+      "question": "Does the analyzer identify a raw POSIX delete on the default Windows npm shell?"
+    },
+    {
+      "id": "quoted-rm",
+      "question": "Does the analyzer avoid treating quoted explanatory text as an invoked command?"
+    },
+    {
+      "id": "command-substitution",
+      "question": "Does the analyzer identify POSIX command substitution for cmd consumers?"
+    },
+    {
+      "id": "environment-expansion",
+      "question": "Does the analyzer identify POSIX variable expansion for cmd consumers?"
+    },
+    {
+      "id": "separator-semantics",
+      "question": "Does the analyzer identify a separator whose command graph differs by target?"
+    },
+    {
+      "id": "declared-vite",
+      "question": "Does executable validation respect an already declared local dependency?"
+    },
+    {
+      "id": "inline-environment",
+      "question": "Does inline environment analysis remain separate from executable dependency truth?"
+    }
+  ]
+}

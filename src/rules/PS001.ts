@@ -11,10 +11,10 @@ import { commandsOf, PORTABILITY_TOOLS } from './util';
 export const PS001: RuleModule = {
   id: 'PS001',
   title: 'POSIX_INLINE_ENV',
-  summary: 'Inline environment assignments (`FOO=bar cmd`) do not work in cmd.exe npm scripts.',
+  summary: 'Inline environment assignments (`FOO=bar cmd`) require POSIX sh semantics.',
   severity: 'error',
   confidence: 'high',
-  affectedTargets: ['cmd'],
+  affectedTargets: ['cmd', 'powershell'],
   badExamples: [
     'NODE_ENV=production vite build',
     'A=1 B=2 node app.js',
@@ -31,14 +31,20 @@ export const PS001: RuleModule = {
     },
     {
       source:
+        'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_environment_variables',
+      claim:
+        'PowerShell assigns environment variables through the Env: provider, not POSIX assignment prefixes.',
+    },
+    {
+      source:
         'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
       claim:
         'cmd.exe has no per-command assignment; `set` persists in the session and `FOO=bar cmd` would try to run a program literally named FOO=bar.',
     },
   ],
-  check(ir, ctx: RuleContext): Finding[] {
+  check(matrix, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
-    for (const cmd of commandsOf(ir)) {
+    for (const cmd of commandsOf(matrix, 'posix-sh')) {
       if (cmd.leadingEnv.length === 0) continue;
       const name = commandName(cmd);
       if (name !== null && PORTABILITY_TOOLS.has(name.toLowerCase())) continue;
@@ -46,7 +52,7 @@ export const PS001: RuleModule = {
       if (first === undefined) continue;
       const hasCrossEnv = ctx.dependencies.has('cross-env');
       const finding = makeFinding(this, ctx, {
-        message: `POSIX inline env assignment \`${first.name}=${first.value}\` is not portable to cmd.exe`,
+        message: `POSIX inline env assignment \`${first.name}=${first.value}\` is not portable to non-POSIX target shells`,
         span: first.span,
         fix: {
           ruleId: this.id,

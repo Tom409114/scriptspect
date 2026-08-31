@@ -1,6 +1,9 @@
 node_modules/
-dist/
+dist/*
+!dist/action.mjs
+!dist/action.mjs.map
 coverage/
+.worktrees/
 *.log
 .DS_Store
 Thumbs.db

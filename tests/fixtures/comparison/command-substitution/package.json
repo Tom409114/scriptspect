@@ -1,0 +1,7 @@
+{
+  "name": "comparison-command-substitution",
+  "private": true,
+  "scripts": {
+    "revision": "echo $(git rev-parse HEAD)"
+  }
+}

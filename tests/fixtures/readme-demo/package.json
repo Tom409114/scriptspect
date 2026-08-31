@@ -1,0 +1,13 @@
+{
+  "name": "portable-demo",
+  "private": true,
+  "scripts": {
+    "build": "NODE_ENV=production vite build",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "rimraf": "^6.0.1",
+    "vite": "^7.0.0"
+  }
+}

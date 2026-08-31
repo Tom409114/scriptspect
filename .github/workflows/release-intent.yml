@@ -1,0 +1,140 @@
+name: Release intent
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: read
+
+jobs:
+  record-intent:
+    name: Record exact merged release intent
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: release-state-${{ github.repository }}-${{ github.sha }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release PR and create its queryable intent check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_PR_ACTORS: ${{ vars.RELEASE_PR_ACTORS || 'github-actions[bot]' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_PR_ACTORS" =~ ^[A-Za-z0-9_-]+(\[bot\])?(,[A-Za-z0-9_-]+(\[bot\])?)*$ ]]
+          ACTORS_JSON=$(printf '%s' "$RELEASE_PR_ACTORS" | jq -Rc 'split(",")')
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/commits/$MERGE_SHA/pulls" > "$RUNNER_TEMP/associated-pulls.json"
+          jq --arg sha "$MERGE_SHA" --arg repository "$REPOSITORY" --argjson actors "$ACTORS_JSON" '
+            [.[] | select(
+              .merged_at != null and
+              .merge_commit_sha == $sha and
+              .base.ref == "main" and
+              .base.repo.full_name == $repository and
+              .head.repo.full_name == $repository and
+              .head.repo.fork == false and
+              (.user.login as $actor | $actors | index($actor)) and
+              (.head.ref | startswith("release-please--")) and
+              (.title | test("^chore\\(main\\): release "))
+            )]
+          ' "$RUNNER_TEMP/associated-pulls.json" > "$RUNNER_TEMP/release-pulls.json"
+          RELEASE_PULL_COUNT=$(jq 'length' "$RUNNER_TEMP/release-pulls.json")
+          [[ "$RELEASE_PULL_COUNT" -le 1 ]]
+          if [[ "$RELEASE_PULL_COUNT" == 0 ]]; then
+            echo 'No merged release-please PR is associated with this main commit.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          PR_NUMBER=$(jq -er '.[0].number' "$RUNNER_TEMP/release-pulls.json")
+          PR_ACTOR=$(jq -er '.[0].user.login' "$RUNNER_TEMP/release-pulls.json")
+          PR_HEAD=$(jq -er '.[0].head.ref' "$RUNNER_TEMP/release-pulls.json")
+          PR_HEAD_REPO=$(jq -er '.[0].head.repo.full_name' "$RUNNER_TEMP/release-pulls.json")
+          PR_HEAD_SHA=$(jq -er '.[0].head.sha' "$RUNNER_TEMP/release-pulls.json")
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+
+          VERSION=$(jq -er '.version' package.json)
+          MANIFEST_VERSION=$(jq -er '.["."]' .release-please-manifest.json)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$VERSION" == "$MANIFEST_VERSION" ]]
+          TAG="v$VERSION"
+          grep -Eq "^## \\[$VERSION\\]|^## $VERSION([[:space:](]|$)" CHANGELOG.md
+
+          PACKAGE_HASH=$(sha256sum package.json | cut -d' ' -f1)
+          CHANGELOG_HASH=$(sha256sum CHANGELOG.md | cut -d' ' -f1)
+          RELEASE_PLEASE_HASH=$(sha256sum .release-please-manifest.json | cut -d' ' -f1)
+          EXTERNAL_ID="scriptspect-release-intent:$PR_NUMBER:$MERGE_SHA"
+          jq -cn \
+            --arg schemaVersion scriptspect-release-intent/v1 \
+            --arg intentId "$EXTERNAL_ID" \
+            --argjson prNumber "$PR_NUMBER" \
+            --arg mergeCommitSha "$MERGE_SHA" \
+            --arg version "$VERSION" \
+            --arg tag "$TAG" \
+            --arg packageManifestHash "$PACKAGE_HASH" \
+            --arg changelogHash "$CHANGELOG_HASH" \
+            --arg releasePleaseManifestHash "$RELEASE_PLEASE_HASH" \
+            --arg releasePrActor "$PR_ACTOR" \
+            --arg releasePrHead "$PR_HEAD" \
+            --arg releasePrHeadRepo "$PR_HEAD_REPO" \
+            --arg releasePrHeadSha "$PR_HEAD_SHA" \
+            '{
+              schemaVersion: $schemaVersion,
+              intentId: $intentId,
+              prNumber: $prNumber,
+              mergeCommitSha: $mergeCommitSha,
+              version: $version,
+              tag: $tag,
+              packageManifestHash: $packageManifestHash,
+              changelogHash: $changelogHash,
+              releasePleaseManifestHash: $releasePleaseManifestHash,
+              releasePrActor: $releasePrActor,
+              releasePrHead: $releasePrHead,
+              releasePrHeadRepo: $releasePrHeadRepo,
+              releasePrHeadSha: $releasePrHeadSha
+            }' > "$RUNNER_TEMP/release-intent.json"
+          node tools/release/release-state.mjs create-state \
+            "$RUNNER_TEMP/release-intent.json" \
+            --out "$RUNNER_TEMP/release-state.json" >/dev/null
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/commits/$MERGE_SHA/check-runs?check_name=release-intent" \
+            > "$RUNNER_TEMP/check-runs.json"
+          MATCHES=$(jq --arg id "$EXTERNAL_ID" '[.check_runs[] | select(.external_id == $id)] | length' "$RUNNER_TEMP/check-runs.json")
+          [[ "$MATCHES" -le 1 ]]
+          if [[ "$MATCHES" == 1 ]]; then
+            EXISTING=$(jq -r --arg id "$EXTERNAL_ID" '.check_runs[] | select(.external_id == $id) | .output.text' "$RUNNER_TEMP/check-runs.json")
+            diff -u <(printf '%s\n' "$EXISTING" | jq -cS .) <(jq -cS . "$RUNNER_TEMP/release-state.json")
+            exit 0
+          fi
+
+          jq -n \
+            --arg name release-intent \
+            --arg head_sha "$MERGE_SHA" \
+            --arg external_id "$EXTERNAL_ID" \
+            --rawfile text "$RUNNER_TEMP/release-state.json" \
+            '{
+              name: $name,
+              head_sha: $head_sha,
+              external_id: $external_id,
+              status: "completed",
+              conclusion: "success",
+              output: {
+                title: "Verified release intent",
+                summary: "Exact release-please merge metadata and content hashes",
+                text: $text
+              }
+            }' > "$RUNNER_TEMP/create-check.json"
+          gh api -X POST -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs" --input "$RUNNER_TEMP/create-check.json" >/dev/null

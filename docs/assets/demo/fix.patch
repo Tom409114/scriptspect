@@ -1,0 +1,8 @@
+--- a/package.json (scripts.build)
++++ b/package.json (scripts.build)
+-NODE_ENV=production vite build
++cross-env NODE_ENV=production vite build
+--- a/package.json (scripts.clean)
++++ b/package.json (scripts.clean)
+-rm -rf dist
++rimraf dist

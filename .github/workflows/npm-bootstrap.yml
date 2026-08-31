@@ -1,0 +1,314 @@
+name: One-time npm bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      source-sha:
+        description: Exact main commit with a successful CI push run
+        required: true
+      version:
+        description: Distinct prerelease, for example 0.0.0-bootstrap.0
+        required: true
+        default: 0.0.0-bootstrap.0
+      confirm:
+        description: Type BOOTSTRAP (this never publishes 0.1.0 or moves latest)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Establish npm ownership and integrity contract
+    if: vars.NPM_BOOTSTRAP_ENABLED == 'true' && inputs.confirm == 'BOOTSTRAP'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: npm-bootstrap
+    concurrency:
+      group: npm-bootstrap-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Validate the approved request and exact successful CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^0\.0\.0-bootstrap\.[0-9]+$ ]]
+          [[ "$VERSION" != 0.1.0 ]]
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_SHA&event=push&branch=main&status=completed&per_page=100" \
+            > "$RUNNER_TEMP/ci-runs.json"
+          node tools/release/release-state.mjs verify-ci \
+            --runs "$RUNNER_TEMP/ci-runs.json" \
+            --sha "$SOURCE_SHA" \
+            --repository "$REPOSITORY" \
+            --workflow CI \
+            --event push \
+            --branch main \
+            --selection newest \
+            > "$RUNNER_TEMP/verified-ci.json"
+          jq -e '(.runId // .id) | numbers' "$RUNNER_TEMP/verified-ci.json" >/dev/null
+      - name: Recover the single crash-stable pre-publish anchor
+        id: anchor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ANCHOR_NAME="npm-bootstrap-anchor-$VERSION-$SOURCE_SHA"
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/artifacts?name=$ANCHOR_NAME&per_page=100" \
+            > "$RUNNER_TEMP/bootstrap-artifacts.json"
+          COUNT=$(jq '[.artifacts[] | select(.expired == false and .name == $name)] | length' \
+            --arg name "$ANCHOR_NAME" "$RUNNER_TEMP/bootstrap-artifacts.json")
+          [[ "$COUNT" -le 1 ]]
+          if [[ "$COUNT" == 0 ]]; then
+            echo 'recovered=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/bootstrap"
+          ARTIFACT_ID=$(jq -er --arg name "$ANCHOR_NAME" \
+            '.artifacts[] | select(.expired == false and .name == $name) | .id' \
+            "$RUNNER_TEMP/bootstrap-artifacts.json")
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/bootstrap-anchor.zip"
+          unzip -q "$RUNNER_TEMP/bootstrap-anchor.zip" -d "$RUNNER_TEMP/bootstrap"
+          jq -e --arg source "$SOURCE_SHA" --arg version "$VERSION" '
+            .schemaVersion == "scriptspect-bootstrap-anchor/v1" and
+            .sourceCommit == $source and .version == $version and
+            (.tarball.basename | test("^scriptspect-.*\\.tgz$")) and
+            (.tarball.sha256 | test("^[0-9a-f]{64}$")) and
+            (.distTagsBeforeDigest | test("^[0-9a-f]{64}$"))
+          ' "$RUNNER_TEMP/bootstrap/bootstrap-anchor.json" >/dev/null
+          (cd "$RUNNER_TEMP/bootstrap" && sha256sum --check SHA256SUMS)
+          [[ "$(sha256sum "$RUNNER_TEMP/bootstrap/dist-tags-before.json" | cut -d' ' -f1)" == \
+            "$(jq -er '.distTagsBeforeDigest' "$RUNNER_TEMP/bootstrap/bootstrap-anchor.json")" ]]
+          echo 'recovered=true' >> "$GITHUB_OUTPUT"
+      - name: Version first, then build and pack the bootstrap prerelease once
+        if: steps.anchor.outputs.recovered != 'true'
+        env:
+          SOURCE_SHA: ${{ inputs.source-sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          pnpm build
+          pnpm exec vitest run
+          mkdir -p "$RUNNER_TEMP/bootstrap"
+          npm pack --pack-destination "$RUNNER_TEMP/bootstrap"
+          TARBALL=$(find "$RUNNER_TEMP/bootstrap" -maxdepth 1 -name 'scriptspect-*.tgz' -print -quit)
+          test -f "$TARBALL"
+          TARBALL_BASENAME=$(basename "$TARBALL")
+          (cd "$RUNNER_TEMP/bootstrap" && sha256sum "$TARBALL_BASENAME" > SHA256SUMS)
+          npm dist-tag ls scriptspect --json > "$RUNNER_TEMP/bootstrap/dist-tags-before.json" 2>/dev/null || printf '{}\n' > "$RUNNER_TEMP/bootstrap/dist-tags-before.json"
+          jq -n --arg sourceCommit "$SOURCE_SHA" --arg version "$VERSION" \
+            --arg basename "$TARBALL_BASENAME" \
+            --arg sha256 "$(sha256sum "$TARBALL" | cut -d' ' -f1)" \
+            --arg distTagsBeforeDigest "$(sha256sum "$RUNNER_TEMP/bootstrap/dist-tags-before.json" | cut -d' ' -f1)" '
+            {schemaVersion:"scriptspect-bootstrap-anchor/v1",sourceCommit:$sourceCommit,version:$version,
+              tarball:{basename:$basename,sha256:$sha256},distTagsBeforeDigest:$distTagsBeforeDigest}
+          ' > "$RUNNER_TEMP/bootstrap/bootstrap-anchor.json"
+      - name: Persist the exact bootstrap candidate before npm publication
+        if: steps.anchor.outputs.recovered != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-bootstrap-anchor-${{ inputs.version }}-${{ inputs.source-sha }}
+          path: |
+            ${{ runner.temp }}/bootstrap/scriptspect-*.tgz
+            ${{ runner.temp }}/bootstrap/SHA256SUMS
+            ${{ runner.temp }}/bootstrap/bootstrap-anchor.json
+            ${{ runner.temp }}/bootstrap/dist-tags-before.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Fresh-install and smoke-test the exact local tarball
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          TARBALL=$(find "$RUNNER_TEMP/bootstrap" -maxdepth 1 -name 'scriptspect-*.tgz' -print -quit)
+          INSTALL_ROOT="$RUNNER_TEMP/bootstrap/local-install"
+          FIXTURE="$RUNNER_TEMP/bootstrap/local-fixture"
+          mkdir -p "$INSTALL_ROOT" "$FIXTURE"
+          npm init -y --prefix "$INSTALL_ROOT" >/dev/null
+          npm install --prefix "$INSTALL_ROOT" "$TARBALL" --ignore-scripts
+          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "$VERSION" ]]
+          test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/config.schema.json"
+          test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/output.schema.json"
+          test -f "$INSTALL_ROOT/node_modules/scriptspect/dist/action.mjs"
+          printf '{"name":"bootstrap-smoke","scripts":{"build":"node -e \\"process.exit(0)\\""}}\n' > "$FIXTURE/package.json"
+          : > "$RUNNER_TEMP/bootstrap/local-action-output"
+          : > "$RUNNER_TEMP/bootstrap/local-action-summary"
+          (
+            cd "$FIXTURE"
+            GITHUB_WORKSPACE="$FIXTURE" INPUT_PATH=. \
+              GITHUB_OUTPUT="$RUNNER_TEMP/bootstrap/local-action-output" \
+              GITHUB_STEP_SUMMARY="$RUNNER_TEMP/bootstrap/local-action-summary" \
+              node "$INSTALL_ROOT/node_modules/scriptspect/dist/action.mjs"
+          )
+          grep -Eq '^exit-code=0$' "$RUNNER_TEMP/bootstrap/local-action-output"
+          test -s "$RUNNER_TEMP/bootstrap/local-action-summary"
+      - name: Verify npm ownership or package-name availability
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
+          OWNER=$(npm whoami)
+          if npm view scriptspect name --json > "$RUNNER_TEMP/package-name.json" 2> "$RUNNER_TEMP/package-name.err"; then
+            npm owner ls scriptspect --json > "$RUNNER_TEMP/package-owners.json"
+            jq -e --arg owner "$OWNER" 'has($owner)' "$RUNNER_TEMP/package-owners.json" >/dev/null
+          else
+            grep -Eq 'E404|404 Not Found' "$RUNNER_TEMP/package-name.err"
+          fi
+      - name: Publish once or verify the already-published exact version
+        id: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
+          (cd "$RUNNER_TEMP/bootstrap" && sha256sum --check SHA256SUMS)
+          LATEST_BEFORE=$(jq -r '.latest // ""' "$RUNNER_TEMP/bootstrap/dist-tags-before.json")
+          if npm view "scriptspect@$VERSION" version --json > "$RUNNER_TEMP/existing-version.json" 2> "$RUNNER_TEMP/existing-version.err"; then
+            [[ "$(jq -r . "$RUNNER_TEMP/existing-version.json")" == "$VERSION" ]]
+            echo 'already-published=true' >> "$GITHUB_OUTPUT"
+          else
+            grep -Eq 'E404|404 Not Found' "$RUNNER_TEMP/existing-version.err"
+            TARBALL=$(find "$RUNNER_TEMP/bootstrap" -maxdepth 1 -name 'scriptspect-*.tgz' -print -quit)
+            npm publish "$TARBALL" --tag bootstrap --access public
+            [[ "$(npm view scriptspect dist-tags.bootstrap)" == "$VERSION" ]]
+            echo 'already-published=false' >> "$GITHUB_OUTPUT"
+          fi
+          [[ "$(npm view "scriptspect@$VERSION" version)" == "$VERSION" ]]
+          npm dist-tag ls scriptspect --json > "$RUNNER_TEMP/dist-tags-after.json"
+          LATEST_AFTER=$(jq -r '.latest // ""' "$RUNNER_TEMP/dist-tags-after.json")
+          [[ "$LATEST_BEFORE" == "$LATEST_AFTER" ]]
+      - name: Verify registry bytes, canonical tree, CLI, schemas, and Action
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source-sha }}
+        run: |
+          set -euo pipefail
+          npm view "scriptspect@$VERSION" --json > "$RUNNER_TEMP/bootstrap/registry-metadata.json"
+          REGISTRY_URL=$(jq -er '.dist.tarball' "$RUNNER_TEMP/bootstrap/registry-metadata.json")
+          REGISTRY_SRI=$(jq -er '.dist.integrity' "$RUNNER_TEMP/bootstrap/registry-metadata.json")
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors "$REGISTRY_URL" -o "$RUNNER_TEMP/bootstrap/registry.tgz"
+          LOCAL_TARBALL=$(find "$RUNNER_TEMP/bootstrap" -maxdepth 1 -name 'scriptspect-*.tgz' -print -quit)
+          LOCAL_SRI="sha512-$(openssl dgst -sha512 -binary "$LOCAL_TARBALL" | openssl base64 -A)"
+          PUBLIC_SRI="sha512-$(openssl dgst -sha512 -binary "$RUNNER_TEMP/bootstrap/registry.tgz" | openssl base64 -A)"
+          [[ "$PUBLIC_SRI" == "$REGISTRY_SRI" ]]
+
+          node tools/release/canonical-tree.mjs digest --tarball "$LOCAL_TARBALL" \
+            > "$RUNNER_TEMP/bootstrap/local-tree.json"
+          node tools/release/canonical-tree.mjs digest --tarball "$RUNNER_TEMP/bootstrap/registry.tgz" \
+            > "$RUNNER_TEMP/bootstrap/registry-tree.json"
+          node tools/release/canonical-tree.mjs algorithm-digest \
+            > "$RUNNER_TEMP/bootstrap/comparator-source-bundle.json"
+          jq -e '
+            .algorithmDigest == .sourceBundle.digest and
+            .sourceBundle.schemaVersion == "scriptspect-canonical-tree-source-bundle/v1" and
+            (.sourceBundle.files | length > 0)
+          ' "$RUNNER_TEMP/bootstrap/comparator-source-bundle.json" >/dev/null
+          jq -e --slurpfile public "$RUNNER_TEMP/bootstrap/registry-tree.json" '
+            .treeDigest == $public[0].treeDigest and .algorithmDigest == $public[0].algorithmDigest
+          ' "$RUNNER_TEMP/bootstrap/local-tree.json" >/dev/null
+          jq -n --slurpfile local "$RUNNER_TEMP/bootstrap/local-tree.json" \
+            --slurpfile public "$RUNNER_TEMP/bootstrap/registry-tree.json" \
+            '{equal:($local[0].treeDigest==$public[0].treeDigest),local:$local[0],public:$public[0]}' \
+            > "$RUNNER_TEMP/bootstrap/canonical-tree.json"
+          COMPARATOR_ALGORITHM_DIGEST=$(jq -er '.algorithmDigest' "$RUNNER_TEMP/bootstrap/comparator-source-bundle.json")
+          [[ "$COMPARATOR_ALGORITHM_DIGEST" == "$(jq -er '.local.algorithmDigest' "$RUNNER_TEMP/bootstrap/canonical-tree.json")" ]]
+          MODE=canonical-tree-v1
+          if [[ "$(sha256sum "$LOCAL_TARBALL" | cut -d' ' -f1)" == "$(sha256sum "$RUNNER_TEMP/bootstrap/registry.tgz" | cut -d' ' -f1)" && "$LOCAL_SRI" == "$REGISTRY_SRI" ]]; then
+            MODE=exact-bytes
+          fi
+
+          INSTALL_ROOT="$RUNNER_TEMP/bootstrap/registry-install"
+          FIXTURE="$RUNNER_TEMP/bootstrap/registry-fixture"
+          mkdir -p "$INSTALL_ROOT" "$FIXTURE"
+          npm init -y --prefix "$INSTALL_ROOT" >/dev/null
+          npm install --prefix "$INSTALL_ROOT" "scriptspect@$VERSION" --ignore-scripts
+          npm audit signatures --prefix "$INSTALL_ROOT" --json > "$RUNNER_TEMP/bootstrap/audit-signatures.json"
+          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "$VERSION" ]]
+          test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/config.schema.json"
+          test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/output.schema.json"
+          test -f "$INSTALL_ROOT/node_modules/scriptspect/dist/action.mjs"
+          printf '{"name":"registry-smoke","scripts":{"build":"node -e \\"process.exit(0)\\""}}\n' > "$FIXTURE/package.json"
+          : > "$RUNNER_TEMP/bootstrap/registry-action-output"
+          : > "$RUNNER_TEMP/bootstrap/registry-action-summary"
+          (
+            cd "$FIXTURE"
+            GITHUB_WORKSPACE="$FIXTURE" INPUT_PATH=. \
+              GITHUB_OUTPUT="$RUNNER_TEMP/bootstrap/registry-action-output" \
+              GITHUB_STEP_SUMMARY="$RUNNER_TEMP/bootstrap/registry-action-summary" \
+              node "$INSTALL_ROOT/node_modules/scriptspect/dist/action.mjs"
+          )
+          grep -Eq '^exit-code=0$' "$RUNNER_TEMP/bootstrap/registry-action-output"
+          test -s "$RUNNER_TEMP/bootstrap/registry-action-summary"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg sourceCommit "$SOURCE_SHA" \
+            --arg mode "$MODE" \
+            --arg registryIntegrity "$REGISTRY_SRI" \
+            --arg comparatorAlgorithmDigest "$COMPARATOR_ALGORITHM_DIGEST" \
+            --arg workflowRunUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{
+              schemaVersion: 1,
+              package: "scriptspect",
+              bootstrapVersion: $version,
+              sourceCommit: $sourceCommit,
+              integrityMode: $mode,
+              registryIntegrity: $registryIntegrity,
+              comparatorAlgorithm: "scriptspect-canonical-tree/v1",
+              comparatorAlgorithmDigest: $comparatorAlgorithmDigest,
+              latestUnchanged: true,
+              workflowRunUrl: $workflowRunUrl,
+              nextRequiredActions: [
+                "Review and commit this file as docs/release/npm-integrity-contract.json with reviewedAt added",
+                "Configure npm Trusted Publisher for .github/workflows/npm-publish.yml with environment release",
+                "Revoke the granular npm token and remove NPM_BOOTSTRAP_TOKEN",
+                "Set NPM_BOOTSTRAP_ENABLED to false before formal publication"
+              ]
+            }' > "$RUNNER_TEMP/bootstrap/bootstrap-integrity-contract.json"
+      - name: Retain bootstrap evidence for maintainer review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-bootstrap-evidence-${{ inputs.version }}
+          path: |
+            ${{ runner.temp }}/bootstrap/bootstrap-integrity-contract.json
+            ${{ runner.temp }}/bootstrap/bootstrap-anchor.json
+            ${{ runner.temp }}/bootstrap/dist-tags-before.json
+            ${{ runner.temp }}/bootstrap/SHA256SUMS
+            ${{ runner.temp }}/bootstrap/registry-metadata.json
+            ${{ runner.temp }}/bootstrap/canonical-tree.json
+            ${{ runner.temp }}/bootstrap/comparator-source-bundle.json
+            ${{ runner.temp }}/bootstrap/audit-signatures.json
+          retention-days: 90
+          if-no-files-found: error

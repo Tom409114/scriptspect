@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="930" viewBox="0 0 1100 930" role="img" aria-labelledby="title desc">
+  <title id="title">ScriptSpect pre-release demo output</title>
+  <desc id="desc">Terminal output from checking the README demo fixture. The selectable text version is available beside this image.</desc>
+  <style>.terminal { fill: #0d1117; } .bar { fill: #161b22; } .terminal-line { fill: #c9d1d9; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; } .terminal-command { fill: #7ee787; } .terminal-section { fill: #79c0ff; font-weight: 600; } .terminal-error { fill: #ff7b72; font-weight: 600; } .terminal-advisory { fill: #d29922; font-weight: 600; } .terminal-summary { fill: #8b949e; }</style>
+  <rect class="terminal" width="100%" height="100%" rx="12"/>
+  <rect class="bar" width="100%" height="34" rx="12"/>
+  <circle cx="22" cy="17" r="5" fill="#ff7b72"/><circle cx="40" cy="17" r="5" fill="#d29922"/><circle cx="58" cy="17" r="5" fill="#3fb950"/>
+  <text x="28" y="52" class="terminal-line terminal-command" data-columns="21">$ node dist/cli.mjs .</text>
+  <text x="28" y="74" class="terminal-line" data-columns="0"> </text>
+  <text x="28" y="96" class="terminal-line terminal-section" data-columns="30">package.json  ›  scripts.build</text>
+  <text x="28" y="118" class="terminal-line" data-columns="0"> </text>
+  <text x="28" y="140" class="terminal-line terminal-error" data-columns="98">PS001  error  HIGH  POSIX inline env assignment `NODE_ENV=production` is not portable to non-POSIX</text>
+  <text x="28" y="162" class="terminal-line terminal-error" data-columns="33">                    target shells</text>
+  <text x="28" y="184" class="terminal-line" data-columns="37">       NODE_ENV=production vite build</text>
+  <text x="28" y="206" class="terminal-line" data-columns="26">       ^^^^^^^^^^^^^^^^^^^</text>
+  <text x="28" y="228" class="terminal-line" data-columns="20">       Affected: cmd</text>
+  <text x="28" y="250" class="terminal-line" data-columns="98">       Fix: rewrite as `NODE_ENV=production …` under cross-env (cross-env is already a dependency)</text>
+  <text x="28" y="272" class="terminal-line" data-columns="89">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS001.md</text>
+  <text x="28" y="294" class="terminal-line" data-columns="0"> </text>
+  <text x="28" y="316" class="terminal-line terminal-advisory" data-columns="97">PS050  advisory  MEDIUM  Target parses assign different structural roles to `NODE_ENV=production`</text>
+  <text x="28" y="338" class="terminal-line terminal-advisory" data-columns="65">                         (posix-sh: leading env; cmd: executable)</text>
+  <text x="28" y="360" class="terminal-line" data-columns="37">       NODE_ENV=production vite build</text>
+  <text x="28" y="382" class="terminal-line" data-columns="26">       ^^^^^^^^^^^^^^^^^^^</text>
+  <text x="28" y="404" class="terminal-line" data-columns="30">       Affected: posix-sh, cmd</text>
+  <text x="28" y="426" class="terminal-line" data-columns="79">       Fix: rewrite with syntax that has the same command graph on every target</text>
+  <text x="28" y="448" class="terminal-line" data-columns="89">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS050.md</text>
+  <text x="28" y="470" class="terminal-line" data-columns="0"> </text>
+  <text x="28" y="492" class="terminal-line terminal-advisory" data-columns="93">PS050  advisory  MEDIUM  Target parses assign different structural roles to `vite` (posix-sh:</text>
+  <text x="28" y="514" class="terminal-line terminal-advisory" data-columns="51">                         executable; cmd: argument)</text>
+  <text x="28" y="536" class="terminal-line" data-columns="37">       NODE_ENV=production vite build</text>
+  <text x="28" y="558" class="terminal-line" data-columns="31">                           ^^^^</text>
+  <text x="28" y="580" class="terminal-line" data-columns="30">       Affected: posix-sh, cmd</text>
+  <text x="28" y="602" class="terminal-line" data-columns="79">       Fix: rewrite with syntax that has the same command graph on every target</text>
+  <text x="28" y="624" class="terminal-line" data-columns="89">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS050.md</text>
+  <text x="28" y="646" class="terminal-line" data-columns="0"> </text>
+  <text x="28" y="668" class="terminal-line terminal-section" data-columns="30">package.json  ›  scripts.clean</text>
+  <text x="28" y="690" class="terminal-line" data-columns="0"> </text>
+  <text x="28" y="712" class="terminal-line terminal-error" data-columns="75">PS010  error  HIGH  `rm -rf` is not available in native Windows npm scripts</text>
+  <text x="28" y="734" class="terminal-line" data-columns="18">       rm -rf dist</text>
+  <text x="28" y="756" class="terminal-line" data-columns="9">       ^^</text>
+  <text x="28" y="778" class="terminal-line" data-columns="20">       Affected: cmd</text>
+  <text x="28" y="800" class="terminal-line" data-columns="66">       Fix: rewrite as `rimraf …` (rimraf is already a dependency)</text>
+  <text x="28" y="822" class="terminal-line" data-columns="89">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS010.md</text>
+  <text x="28" y="844" class="terminal-line" data-columns="0"> </text>
+  <text x="28" y="866" class="terminal-line terminal-summary" data-columns="73">Scanned 2 scripts across 1 package · 2 errors · 0 warnings · 2 advisories</text>
+  <text x="28" y="888" class="terminal-line terminal-summary" data-columns="12">exit code: 1</text>
+</svg>

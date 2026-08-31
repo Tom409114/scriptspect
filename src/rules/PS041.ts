@@ -27,9 +27,9 @@ export const PS041: RuleModule = {
         '.bat/.cmd/.exe are Windows executable formats; POSIX systems cannot run them directly.',
     },
   ],
-  check(ir, ctx: RuleContext): Finding[] {
+  check(matrix, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
-    for (const cmd of commandsOf(ir)) {
+    for (const cmd of commandsOf(matrix, 'posix-sh')) {
       // Only the invoked program (argv[0]) counts — a .exe path passed as an
       // argument (e.g. `node sign.js dist/app.exe`) is data, not an invocation.
       const first = cmd.argv[0];

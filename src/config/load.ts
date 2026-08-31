@@ -5,7 +5,8 @@
  * (package globs × script globs × rule ids). No DSL.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { canonicalizeRoot, RootBoundaryError, resolveContainedPath } from '../core/root';
 import { ALL_TARGETS, DEFAULT_TARGETS } from '../core/targets';
 import type { ShellTarget } from '../parser/ir';
 import { getRule } from '../rules';
@@ -46,6 +47,12 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
     throw new ConfigError(`${origin}: config root must be an object`);
   }
   const obj = raw as RawConfig;
+  const allowedRootKeys = new Set(['targets', 'severity', 'ignore']);
+  for (const key of Object.keys(obj)) {
+    if (!allowedRootKeys.has(key)) {
+      throw new ConfigError(`${origin}: unknown config key ${JSON.stringify(key)}`);
+    }
+  }
 
   let targets: readonly ShellTarget[] = DEFAULT_TARGETS;
   if (obj.targets !== undefined) {
@@ -59,7 +66,10 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
           `${origin}: invalid target ${JSON.stringify(t)} (expected one of ${ALL_TARGETS.join(', ')})`,
         );
       }
-      if (!parsed.includes(t as ShellTarget)) parsed.push(t as ShellTarget);
+      if (parsed.includes(t as ShellTarget)) {
+        throw new ConfigError(`${origin}: duplicate target ${JSON.stringify(t)}`);
+      }
+      parsed.push(t as ShellTarget);
     }
     targets = parsed;
   }
@@ -90,6 +100,12 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
         throw new ConfigError(`${origin}: ignore[${i}] must be an object`);
       }
       const e = entry as Record<string, unknown>;
+      const allowedIgnoreKeys = new Set(['packages', 'scripts', 'rules']);
+      for (const key of Object.keys(e)) {
+        if (!allowedIgnoreKeys.has(key)) {
+          throw new ConfigError(`${origin}: unknown key ${JSON.stringify(key)} in ignore[${i}]`);
+        }
+      }
       let specified = 0;
       for (const key of ['packages', 'scripts', 'rules'] as const) {
         const value = e[key];
@@ -97,13 +113,16 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
         if (
           !Array.isArray(value) ||
           value.length === 0 ||
-          value.some((v) => typeof v !== 'string')
+          value.some((v) => typeof v !== 'string' || v.length === 0)
         ) {
           throw new ConfigError(
             `${origin}: ignore[${i}].${key} must be a non-empty array of strings`,
           );
         }
         if (key === 'rules') {
+          if (new Set(value as string[]).size !== value.length) {
+            throw new ConfigError(`${origin}: ignore[${i}].rules must not contain duplicates`);
+          }
           for (const ruleId of value as string[]) {
             if (getRule(ruleId) === undefined) {
               throw new ConfigError(`${origin}: unknown rule id "${ruleId}" in ignore[${i}].rules`);
@@ -118,6 +137,9 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
         throw new ConfigError(
           `${origin}: ignore[${i}] must specify at least one of "packages", "scripts", or "rules" (blanket ignores are not allowed)`,
         );
+      }
+      if (e.rules === undefined) {
+        throw new ConfigError(`${origin}: ignore[${i}].rules is required`);
       }
       return {
         packages: e.packages as string[] | undefined,
@@ -135,6 +157,13 @@ export function loadConfig(
   root: string,
   explicitPath?: string,
 ): { config: ScriptspectConfig; source: string } {
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = canonicalizeRoot(root);
+  } catch (error) {
+    throw new ConfigError(error instanceof Error ? error.message : String(error));
+  }
+
   const readJson = (file: string): unknown => {
     try {
       return JSON.parse(readFileSync(file, 'utf8'));
@@ -143,12 +172,21 @@ export function loadConfig(
     }
   };
 
+  const containedFile = (candidate: string): string => {
+    try {
+      return resolveContainedPath(canonicalRoot, candidate);
+    } catch (error) {
+      if (error instanceof RootBoundaryError) throw new ConfigError(error.message);
+      throw error;
+    }
+  };
+
   if (explicitPath !== undefined) {
-    const file = resolve(explicitPath);
+    const file = containedFile(explicitPath);
     return { config: parseConfig(readJson(file), file), source: file };
   }
 
-  const pkgFile = join(root, 'package.json');
+  const pkgFile = containedFile('package.json');
   try {
     const pkg = readJson(pkgFile) as Record<string, unknown>;
     const field = pkg[PACKAGE_FIELD];
@@ -164,8 +202,9 @@ export function loadConfig(
   }
 
   for (const name of CONFIG_FILENAMES) {
-    const file = join(root, name);
-    if (!existsSync(file)) continue;
+    const logicalFile = join(canonicalRoot, name);
+    if (!existsSync(logicalFile)) continue;
+    const file = containedFile(name);
     return { config: parseConfig(readJson(file), file), source: file };
   }
 

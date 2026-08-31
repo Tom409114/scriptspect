@@ -50,7 +50,7 @@ describe('PS022 POSIX_SOURCE', () => {
 describe('PS023 POSIX_VAR_EXPANSION', () => {
   it('positive: $VAR forms', () => {
     expect(only(run('echo $npm_package_version'), 'PS023')).toHaveLength(1);
-    expect(only(run('node build.js --out ${OUT_DIR:-dist}'), 'PS023')).toHaveLength(1);
+    expect(only(run('node build.js --out $' + '{OUT_DIR:-dist}'), 'PS023')).toHaveLength(1);
     expect(only(run('ls $HOME'), 'PS023')).toHaveLength(1);
   });
 
@@ -81,6 +81,12 @@ describe('PS024 CMD_VAR_EXPANSION', () => {
     expect(only(run("printf '%s\\n' hello"), 'PS024')).toEqual([]);
     expect(only(run('date +%Y-%m-%d'), 'PS024')).toEqual([]);
     expect(only(run('echo 100%'), 'PS024')).toEqual([]);
+  });
+
+  it('derives PowerShell as affected for cmd percent expansion syntax', () => {
+    const [finding] = only(run('echo %TEMP%', { targets: ['powershell'] }), 'PS024');
+
+    expect(finding?.affectedTargets).toEqual(['powershell']);
   });
 });
 

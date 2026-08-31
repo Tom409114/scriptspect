@@ -1,10 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   applyRewritesToFile,
   locateScriptSpans,
+  PackageJsonEditError,
+  planRewritesForFile,
   rewriteScripts,
 } from '../../src/fixers/package-json';
 
@@ -37,6 +39,59 @@ describe('locateScriptSpans', () => {
 });
 
 describe('rewriteScripts preserves formatting', () => {
+  it('refuses an ambiguous manifest with duplicate root scripts keys', () => {
+    const text = '{"scripts":{"clean":"first"},"scripts":{"clean":"second"}}';
+
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
+  it('refuses duplicate script names inside the root scripts object', () => {
+    const text = '{"scripts":{"clean":"first","clean":"second"}}';
+
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
+  it('refuses a non-string value inside the root scripts object', () => {
+    const text = '{"scripts":{"clean":["rm","-rf","dist"]}}';
+
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
+  it.each([
+    '{"scripts":{"clean":"rm -rf dist",}}',
+    '{"scripts":{"clean":"rm -rf dist"},}',
+    '{"scripts":{/* comment */"clean":"rm -rf dist"}}',
+  ])('refuses non-standard or malformed JSON without rewriting it', (text) => {
+    expect(() => rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }])).toThrow(
+      PackageJsonEditError,
+    );
+  });
+
+  it('rewrites only the root scripts object when a nested scripts key appears first', () => {
+    const text = `{
+  "metadata": {
+    "scripts": {
+      "clean": "do-not-touch"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist"
+  }
+}
+`;
+
+    const next = rewriteScripts(text, [{ scriptName: 'clean', newValue: 'rimraf dist' }]);
+
+    expect(next).toBe(text.replace('"clean": "rm -rf dist"', '"clean": "rimraf dist"'));
+    expect(next).toContain('"clean": "do-not-touch"');
+  });
+
   it('changes only the target value with 2-space indentation', () => {
     const next = rewriteScripts(PKG_2SPACE, [{ scriptName: 'clean', newValue: 'rimraf dist' }]);
     expect(next).not.toBeNull();
@@ -87,6 +142,65 @@ describe('rewriteScripts preserves formatting', () => {
 });
 
 describe('applyRewritesToFile', () => {
+  it('plans against the exact source bytes and preserves a leading UTF-8 BOM', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-fix-'));
+    try {
+      const file = join(dir, 'package.json');
+      const original = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(PKG_2SPACE)]);
+      writeFileSync(file, original);
+
+      const plan = planRewritesForFile(dir, file, [
+        { scriptName: 'clean', newValue: 'rimraf dist' },
+      ]);
+
+      expect(plan?.expectedSha256).toBe(
+        '33c471cd345316751186c3b7380e9b4209d87be58240a9a93d418a1872c5f4d3',
+      );
+      expect(plan?.content.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+      expect(plan?.content.toString('utf8')).toContain('"clean": "rimraf dist"');
+      expect(readFileSync(file)).toEqual(original);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a source outside the canonical fix root before reading it', () => {
+    const fixRoot = mkdtempSync(join(tmpdir(), 'ss-fix-root-'));
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'ss-fix-outside-'));
+    try {
+      const outside = join(outsideRoot, 'package.json');
+      writeFileSync(outside, PKG_2SPACE);
+
+      expect(() =>
+        planRewritesForFile(fixRoot, outside, [{ scriptName: 'clean', newValue: 'rimraf dist' }]),
+      ).toThrow(/outside the analysis root/);
+      expect(readFileSync(outside, 'utf8')).toBe(PKG_2SPACE);
+    } finally {
+      rmSync(fixRoot, { recursive: true, force: true });
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses invalid UTF-8 and preserves the original bytes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-fix-'));
+    try {
+      const file = join(dir, 'package.json');
+      const bytes = Buffer.concat([
+        Buffer.from('{"name":"'),
+        Buffer.from([0xff]),
+        Buffer.from('","scripts":{"clean":"rm -rf dist"}}'),
+      ]);
+      writeFileSync(file, bytes);
+
+      expect(() =>
+        applyRewritesToFile(file, [{ scriptName: 'clean', newValue: 'rimraf dist' }], true),
+      ).toThrow(PackageJsonEditError);
+      expect(readFileSync(file)).toEqual(bytes);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('writes only when asked (dry-run leaves the file untouched)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-fix-'));
     try {
@@ -101,6 +215,7 @@ describe('applyRewritesToFile', () => {
       expect(readFileSync(file, 'utf8')).toBe(PKG_2SPACE);
       applyRewritesToFile(file, [{ scriptName: 'clean', newValue: 'rimraf dist' }], true);
       expect(readFileSync(file, 'utf8')).toContain('"clean": "rimraf dist"');
+      expect(existsSync(join(dir, '.scriptspect', 'transactions'))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

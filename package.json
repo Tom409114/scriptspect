@@ -4,7 +4,10 @@
   "description": "Static analyzer for package.json scripts - catches shell-specific commands before they break Windows, macOS, or Linux builds.",
   "type": "module",
   "license": "MIT",
-  "repository": "github:Tom409114/scriptspect",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tom409114/scriptspect.git"
+  },
   "bugs": "https://github.com/Tom409114/scriptspect/issues",
   "homepage": "https://github.com/Tom409114/scriptspect#readme",
   "author": "Tom409114",
@@ -29,17 +32,23 @@
   "files": [
     "dist",
     "README.md",
+    "README.zh-CN.md",
     "LICENSE",
-    "docs/rules"
+    "docs/README.md",
+    "docs/rules",
+    "schema"
   ],
   "scripts": {
     "build": "tsup",
+    "pretest": "pnpm build",
     "test": "vitest run",
     "watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "docs:rules": "tsx tools/gen-rule-docs.ts"
+    "docs:rules": "tsx tools/gen-rule-docs.ts",
+    "schemas:generate": "tsx tools/generate-schemas.ts",
+    "schemas:check": "pnpm schemas:generate && git diff --exit-code -- schema"
   },
   "dependencies": {
     "cac": "^7.0.0",
@@ -50,9 +59,12 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",
     "@types/node": "^26.4.0",
+    "@vitest/coverage-v8": "4.1.11",
+    "ajv": "8.20.0",
+    "scripts-doctor": "1.0.0",
     "tsup": "^8.5.1",
+    "tsx": "^4.20.0",
     "typescript": "~7.0.2",
-    "vitest": "^4.1.11",
-    "tsx": "^4.20.0"
+    "vitest": "^4.1.11"
   }
 }

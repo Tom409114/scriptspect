@@ -4,9 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       repo-count:
-        description: 'How many popular JS/TS repos to sample from GitHub search'
+        description: How many popular JS/TS repositories to sample
         required: false
         default: '100'
+  schedule:
+    - cron: '17 3 1 * *'
 
 permissions:
   contents: read
@@ -21,29 +23,114 @@ jobs:
         with:
           node-version: 22
           package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
-      - name: Build the repo sample (public search API, read-only)
+      - run: |
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Collect repository candidates
         env:
           GH_TOKEN: ${{ github.token }}
+          CANDIDATE_FILE: ${{ runner.temp }}/repository-candidates.txt
         run: |
-          gh api "search/repositories?q=language:typescript+stars:%3E2000&sort=stars&order=desc&per_page=${{ inputs.repo-count }}" \
-            --jq '.items[].full_name' > repos.txt || true
-          # JavaScript repos broaden the sample beyond the TypeScript search
-          gh api "search/repositories?q=language:javascript+stars:%3E5000&sort=stars&order=desc&per_page=50" \
-            --jq '.items[].full_name' >> repos.txt || true
+          set -euo pipefail
+          gh api 'search/repositories?q=language:typescript+stars:%3E2000&sort=stars&order=desc&per_page=100' \
+            --jq '.items[].full_name' > "$CANDIDATE_FILE"
+          gh api 'search/repositories?q=language:javascript+stars:%3E5000&sort=stars&order=desc&per_page=100' \
+            --jq '.items[].full_name' >> "$CANDIDATE_FILE"
+      - name: Select the exact deterministic repository sample
+        env:
+          REPO_COUNT: ${{ inputs.repo-count || '100' }}
+          CANDIDATE_FILE: ${{ runner.temp }}/repository-candidates.txt
+          SELECTED_FILE: ${{ runner.temp }}/repository-names.txt
+          SELECTION_FILE: repository-sample.json
+        run: |
+          set -euo pipefail
+          [[ "$REPO_COUNT" =~ ^([1-9]|[1-9][0-9]|100)$ ]]
+          [[ "$REPO_COUNT" -le 100 ]]
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          const countText = process.env.REPO_COUNT ?? '';
+          if (!/^(?:[1-9]|[1-9][0-9]|100)$/u.test(countText)) {
+            throw new Error('REPO_COUNT must be an integer from 1 through 100');
+          }
+          const requested = Number(countText);
+          const candidateFile = process.env.CANDIDATE_FILE;
+          const selectedFile = process.env.SELECTED_FILE;
+          const selectionFile = process.env.SELECTION_FILE;
+          if (!candidateFile || !selectedFile || !selectionFile) {
+            throw new Error('corpus selection file paths are required');
+          }
+
+          const candidates = readFileSync(candidateFile, 'utf8')
+            .split(/\r?\n/u)
+            .filter(Boolean);
+          for (const repository of candidates) {
+            if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
+              throw new Error(`invalid repository name: ${repository}`);
+            }
+          }
+          const uniqueCandidates = [...new Set(candidates)].sort();
+          if (uniqueCandidates.length < requested) {
+            throw new Error(
+              `requested ${requested} repositories but only ${uniqueCandidates.length} unique candidates were returned`,
+            );
+          }
+          const selected = uniqueCandidates.slice(0, requested);
+          writeFileSync(selectedFile, `${selected.join('\n')}\n`, 'utf8');
+          writeFileSync(
+            selectionFile,
+            `${JSON.stringify({ schemaVersion: 1, requested, actual: selected.length }, null, 2)}\n`,
+            'utf8',
+          );
+          NODE
+      - name: Resolve immutable repository commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_COUNT: ${{ inputs.repo-count || '100' }}
+          SELECTED_FILE: ${{ runner.temp }}/repository-names.txt
+        run: |
+          set -euo pipefail
+          : > repos.txt
+          while IFS= read -r repository; do
+            [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+            default_branch=$(gh api "repos/$repository" --jq '.default_branch')
+            [[ -n "$default_branch" ]]
+            commit=$(gh api -X GET "repos/$repository/commits" \
+              -f sha="$default_branch" -f per_page=1 --jq '.[0].sha')
+            [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+            printf '%s@%s\n' "$repository" "$commit" >> repos.txt
+          done < "$SELECTED_FILE"
           sort -u repos.txt -o repos.txt
-          wc -l repos.txt
-      - name: Scan scripts (never writes to any scanned repo)
+          awk '!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/ { exit 1 }' repos.txt
+          ACTUAL_COUNT=$(wc -l < repos.txt)
+          test "$ACTUAL_COUNT" -eq "$REPO_COUNT"
+      - name: Scan scripts without writing to sampled repositories
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          SCRIPTSPECT_SOURCE_COMMIT: ${{ github.sha }}
         run: pnpm exec tsx tools/corpus-scan.ts repos.txt
-      - name: Upload draft outputs for human precision sampling
+      - name: Create a deterministic 100-finding adjudication draft when available
+        if: always()
+        run: |
+          set -euo pipefail
+          test -f findings.jsonl || exit 0
+          FINDING_COUNT=$(wc -l < findings.jsonl)
+          if [[ "$FINDING_COUNT" -ge 100 ]]; then
+            pnpm exec tsx tools/corpus-sample.ts \
+              findings.jsonl adjudication-draft.jsonl 100 "$GITHUB_SHA"
+          fi
+      - name: Upload draft evidence for maintainer review
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: corpus-draft
+          name: corpus-draft-${{ github.run_id }}
           path: |
             repos.txt
+            repository-sample.json
             findings.jsonl
             summary.md
+            corpus-run.json
+            adjudication-draft.jsonl
           retention-days: 30
+          if-no-files-found: error

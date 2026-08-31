@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "nodeVersion": "22.23.2",
+  "scriptsDoctor": {
+    "package": "scripts-doctor",
+    "version": "1.0.0",
+    "integrity": "sha512-3eEtXD/UUrCeD6Gu2LPIkHDLIPHmPNNZUA5OFU1RWwP27PRyHlI5+rANi7rILbs4+3elZdwD0rcvA7+8O24feg==",
+    "repository": "https://github.com/Ashwani2529/scripts-doctor"
+  }
+}

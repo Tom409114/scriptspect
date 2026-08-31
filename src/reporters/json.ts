@@ -7,8 +7,9 @@ import type { AnalysisResult } from '../core/analyze';
 import { version } from '../core/version';
 import type { ShellTarget } from '../parser/ir';
 import type { Finding, FixSafety } from '../rules/types';
+import { JSON_SCHEMA_VERSION } from './schema-version';
 
-export const JSON_SCHEMA_VERSION = 1;
+export { JSON_SCHEMA_VERSION } from './schema-version';
 
 export interface JsonSpan {
   start: number;

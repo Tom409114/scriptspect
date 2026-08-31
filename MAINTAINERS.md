@@ -15,7 +15,7 @@
 
 - Releases are automated via release-please; the maintainer verifies CI is green on `main` before a release PR merges
 - npm publishing uses Trusted Publishing (OIDC) from GitHub Actions — no long-lived npm tokens
-- Each release publishes a GitHub Release plus an npm package with provenance; checksums are attached
+- After the first release, each successful release must publish the same tarball to npm and GitHub Releases with provenance and attached checksums
 
 ## Triaging
 

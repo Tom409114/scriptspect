@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Tom409114/scriptspect/main/docs/evidence/adjudication.schema.json",
+  "title": "scriptspect corpus adjudication record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "findingId",
+    "repository",
+    "commit",
+    "packagePath",
+    "scriptName",
+    "ruleId",
+    "severity",
+    "confidence",
+    "evidenceUrl",
+    "outcome",
+    "rationale",
+    "reviewer",
+    "reviewedAt",
+    "secondaryReview"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "findingId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "packagePath": { "type": "string", "minLength": 1 },
+    "scriptName": { "type": "string" },
+    "ruleId": { "type": "string", "pattern": "^PS[0-9]{3}$" },
+    "severity": { "enum": ["error", "warn", "advisory"] },
+    "confidence": { "enum": ["high", "medium"] },
+    "evidenceUrl": { "type": "string", "format": "uri", "pattern": "/blob/[a-f0-9]{40}/" },
+    "outcome": { "enum": ["pending", "true_positive", "false_positive", "unclear", "disputed"] },
+    "rationale": { "type": ["string", "null"] },
+    "reviewer": { "type": ["string", "null"] },
+    "reviewedAt": { "type": ["string", "null"], "format": "date-time" },
+    "secondaryReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "rationale", "reviewer", "reviewedAt"],
+      "properties": {
+        "outcome": { "enum": [null, "agree", "disagree", "unclear"] },
+        "rationale": { "type": ["string", "null"] },
+        "reviewer": { "type": ["string", "null"] },
+        "reviewedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  }
+}

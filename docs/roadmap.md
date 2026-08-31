@@ -1,18 +1,20 @@
 # Roadmap and milestones
 
-Built milestone by milestone; each merges behind a PR with CI green on all three OSes.
+The links below record when each implementation slice first landed. A merged
+slice is not the same as satisfying its exit condition: release, hosted-CI,
+corpus, and adoption gates stay open until their public evidence exists.
 
 | Milestone | Theme | Key deliverables | Exit condition | Status |
 | --- | --- | --- | --- | --- |
-| M0 | Remote repo and competitive baseline | GitHub repo, license, CI skeleton, issue/PR templates, scripts-doctor parity checklist, name-availability gate | main is buildable by Actions; zero project files on any local machine | ✅ merged (#44) |
-| M1 | Parser / IR | quote/escape/operator-aware lexer + IR; 10 key negative-case fixtures | parser tests green; quoted operators never mis-split | ✅ merged (#44) |
-| M2 | P0 portability rules | PS001/010/011/012/013/020/021/022/030/040 + the full v0.1 rule set | at least 50 deterministic tests; sampled false-positive rate acceptable | ✅ merged (#45–47) |
-| M3 | Reporter + explain | stylish/json/github reporters; rule docs; `explain` command | one command yields actionable findings; JSON schema frozen | ✅ merged (#48) |
-| M4 | Safe fixer | fix safety model, dry-run, cross-env/rimraf/shx conditional fixes | idempotency tests green; no half-fixed states | ✅ merged (#49) |
-| M5 | Workspaces | npm/pnpm/Yarn/Bun discovery; PS040 workspace-bin awareness | real monorepo fixtures; 100 packages scanned in under 2 seconds | ✅ merged (#50) |
-| M6 | GitHub Action | Action + annotations + job summary; 3-OS matrix | external repo runs with `uses: …@v1` | ✅ merged (#51) |
-| M7 | Release | npm trusted publishing, provenance, release notes, checksums | tag → npm entirely via GitHub Actions, no local tokens | ✅ merged (#53) |
-| M8 | Validation and real corpus | scan public OSS, human-verified sampling, false-positive ledger, public validation report | two-week kill-or-commit gate before expanding rules | ✅ merged (#52) |
+| M0 | Remote repo and competitive baseline | GitHub repo, license, CI skeleton, issue/PR templates, scripts-doctor parity checklist, name-availability gate | `main` is buildable by hosted Actions and repository controls are recorded | implementation merged; hosted controls pending |
+| M1 | Parser / IR | target-aware lexer, parse matrix, exact spans, negative fixtures | parser matrix and scoped coverage gates pass on all supported OS/Node combinations | hardening in progress |
+| M2 | P0 portability rules | PS001/010/011/012/013/020/021/022/030/040 + the full v0.1 rule set | deterministic positive/negative fixtures and reviewed precision evidence | implementation merged; final matrix pending |
+| M3 | Reporter + explain | stylish/json/github reporters; rule docs; `explain` command | one command yields actionable findings; published JSON schemas are frozen | implementation merged; publication pending |
+| M4 | Safe fixer | fix safety model, dry-run, cross-env/rimraf/shx conditional fixes | idempotency, concurrency, rollback, and recovery tests pass | hardening in progress |
+| M5 | Workspaces | npm/pnpm/Yarn/Bun discovery; PS040 workspace-bin awareness | real manager fixtures and a hosted 100-package benchmark under 2 seconds | implementation merged; hosted benchmark pending |
+| M6 | GitHub Action | bundled Node Action + annotations + job summary; 3-OS matrix | immutable released reference runs in an external repository | implementation in progress; release evidence pending |
+| M7 | Release | npm trusted publishing, provenance, release notes, checksums | one immutable tarball reaches npm and GitHub Release through Actions | workflow hardening in progress; first release pending |
+| M8 | Validation and real corpus | read-only public scan, human sampling, false-positive ledger, public validation report | two-week gate, at least 100 reviewed findings, shared-corpus comparison, and real interest evidence | partial: first report merged in PR #64 |
 
 ## v0.1 validation gates (kill-or-commit)
 
@@ -28,9 +30,9 @@ Built milestone by milestone; each merges behind a PR with CI green on all three
 
 | Gate | Status | Evidence |
 | --- | --- | --- |
-| Precision | ✅ pass | 62/62 verified true positives in a stratified 14-rule sample; P0 error rules 100% |
+| Precision | ⚠️ promising, sample incomplete | 62/62 verified true positives in a stratified 14-rule sample; the ≥100 review gate is not met |
 | Real-problem density | ✅ pass | 534 findings across 68 repos and 14 rule categories; verified sample spans 35 repos |
-| Competitive edge | ✅ pass (corpus evidence) | verified findings in categories beyond scripts-doctor's documented scope, zero false positives |
+| Competitive edge | ⏳ pending | category coverage is promising, but no shared-fixture head-to-head has been run |
 | External interest | ⏳ not yet met | 0 external issues as of 2026-08-31 (pre-release) |
 | Onboarding | ⏳ pending | requires the v0.1 npm publish |
 

@@ -2,7 +2,7 @@
  * Rule engine types: metadata contract, findings, and the per-script context
  * rules analyze. All metadata fields are required (docs/contributing-rules.md).
  */
-import type { ScriptIr, ScriptNode, ShellTarget } from '../parser/ir';
+import type { ParseMatrix, ScriptNode, ShellTarget } from '../parser/ir';
 
 export type Severity = 'error' | 'warn' | 'advisory';
 export type Confidence = 'high' | 'medium';
@@ -34,6 +34,8 @@ export interface Finding {
   /** Shells this finding breaks, intersected with the active targets. */
   affectedTargets: ShellTarget[];
   message: string;
+  /** Stable parser/rule subtype used for deterministic evidence merging. */
+  subtype?: string;
   fix?: FixCandidate;
 }
 
@@ -66,7 +68,7 @@ export interface RuleMetadata {
 }
 
 export interface RuleModule extends RuleMetadata {
-  check(ir: ScriptIr, ctx: RuleContext): Finding[];
+  check(matrix: ParseMatrix, ctx: RuleContext): Finding[];
 }
 
 /** Utilities every rule receives for walking the IR. */

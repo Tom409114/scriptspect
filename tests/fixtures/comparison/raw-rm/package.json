@@ -1,0 +1,10 @@
+{
+  "name": "comparison-raw-rm",
+  "private": true,
+  "scripts": {
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "rimraf": "6.0.1"
+  }
+}

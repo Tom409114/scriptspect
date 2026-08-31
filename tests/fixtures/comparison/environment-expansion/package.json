@@ -1,0 +1,7 @@
+{
+  "name": "comparison-environment-expansion",
+  "private": true,
+  "scripts": {
+    "home": "echo $HOME"
+  }
+}

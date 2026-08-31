@@ -137,6 +137,18 @@ describe('CLI: options', () => {
     expect(await runCli([dir, '--max-warnings', '2'], io)).toBe(0);
   });
 
+  it('uses hidden warnings for the failure budget before display filtering', async () => {
+    project({ a: 'chmod +x f' });
+    const code = await runCli([dir, '--severity', 'error', '--max-warnings', '0'], io);
+    expect(code).toBe(1);
+    expect(outLines.join('\n')).not.toContain('PS015');
+  });
+
+  it('fails when config explicitly promotes a medium-confidence finding to error', async () => {
+    project({ a: 'echo $HOME' }, { scriptspect: { severity: { PS023: 'error' } } });
+    expect(await runCli([dir, '--severity', 'warn'], io)).toBe(1);
+  });
+
   it('--max-warnings rejects non-integers', async () => {
     project({ a: 'node x' });
     expect(await runCli([dir, '--max-warnings', 'abc'], io)).toBe(2);
@@ -148,6 +160,12 @@ describe('CLI: options', () => {
     const text = outLines.join('\n');
     expect(text).toContain('PS010');
     expect(text).toContain('Scanned 1 script');
+  });
+
+  it('--no-color removes every ANSI escape from real CLI rendering', async () => {
+    project({ clean: 'rm -rf dist' });
+    await runCli([dir, '--no-color'], io);
+    expect(outLines.join('\n')).not.toContain(`${String.fromCharCode(27)}[`);
   });
 });
 

@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unpkg.com/scriptspect/schema/output.schema.json",
+  "title": "ScriptSpect JSON report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "tool",
+    "root",
+    "targets",
+    "findings",
+    "summary"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "scriptspect"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "root": {
+      "type": "string"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "posix-sh",
+          "cmd",
+          "powershell"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ruleId",
+          "scriptName",
+          "packagePath",
+          "span",
+          "severity",
+          "confidence",
+          "affectedTargets",
+          "message"
+        ],
+        "properties": {
+          "ruleId": {
+            "enum": [
+              "PS001",
+              "PS002",
+              "PS003",
+              "PS010",
+              "PS011",
+              "PS012",
+              "PS013",
+              "PS014",
+              "PS015",
+              "PS016",
+              "PS017",
+              "PS018",
+              "PS019",
+              "PS020",
+              "PS021",
+              "PS022",
+              "PS023",
+              "PS024",
+              "PS025",
+              "PS026",
+              "PS030",
+              "PS031",
+              "PS032",
+              "PS040",
+              "PS041",
+              "PS050",
+              "PS051"
+            ]
+          },
+          "scriptName": {
+            "type": "string"
+          },
+          "packagePath": {
+            "type": "string"
+          },
+          "span": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warn",
+              "advisory"
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium"
+            ]
+          },
+          "affectedTargets": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "posix-sh",
+                "cmd",
+                "powershell"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "message": {
+            "type": "string"
+          },
+          "fix": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "safety",
+              "description"
+            ],
+            "properties": {
+              "safety": {
+                "enum": [
+                  "safe",
+                  "conditional",
+                  "manual"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "requiresDependency": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scriptsScanned",
+        "packagesScanned",
+        "errors",
+        "warnings",
+        "advisories"
+      ],
+      "properties": {
+        "scriptsScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "packagesScanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warnings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "advisories": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

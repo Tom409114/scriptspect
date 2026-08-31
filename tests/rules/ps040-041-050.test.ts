@@ -79,4 +79,57 @@ describe('PS050 SHELL_SPECIFIC_SEPARATOR', () => {
   it('negative: quoted separators do not split', () => {
     expect(only(run('echo "a; b"'), 'PS050')).toEqual([]);
   });
+
+  it('compares target graphs for single quotes and dialect-specific escapes', () => {
+    expect(only(run("echo 'a & b'"), 'PS050')).toHaveLength(1);
+    expect(only(run('echo \\& echo next'), 'PS050')).toHaveLength(1);
+    expect(only(run('echo ^& echo next'), 'PS050')).toHaveLength(1);
+  });
+
+  it('reports executable-role drift caused by POSIX leading assignments', () => {
+    const findings = only(run('FOO=x node app.js'), 'PS050');
+
+    expect(findings).toEqual([
+      expect.objectContaining({ span: [0, 5] }),
+      expect.objectContaining({ span: [6, 10] }),
+    ]);
+  });
+
+  it('walks grouped command graphs while locating the divergent separator', () => {
+    expect(only(run('(a; b)'), 'PS050')).toEqual([
+      expect.objectContaining({ span: [2, 3], affectedTargets: ['posix-sh', 'cmd'] }),
+    ]);
+  });
+
+  it('distinguishes POSIX backslash escapes from cmd redirection syntax', () => {
+    expect(only(run('echo \\> out'), 'PS050')).toEqual([
+      expect.objectContaining({ span: [6, 7], affectedTargets: ['posix-sh', 'cmd'] }),
+    ]);
+  });
+
+  it('reports caret-escaped redirection graph divergence at the raw operator span', () => {
+    const findings = only(run('echo ^> /dev/null'), 'PS050');
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        affectedTargets: ['posix-sh', 'cmd'],
+        span: [6, 7],
+      }),
+    ]);
+    expect(only(run('echo ^> /dev/null'), 'PS025')).toEqual([]);
+  });
+
+  it('derives graph-divergence targets from the active comparison set', () => {
+    expect(only(run('echo ^> out', { targets: ['posix-sh'] }), 'PS050')).toEqual([]);
+    expect(
+      only(run('echo ^> out', { targets: ['posix-sh', 'cmd'] }), 'PS050')[0]?.affectedTargets,
+    ).toEqual(['posix-sh', 'cmd']);
+  });
+
+  it('does not substitute the generic graph for PowerShell outside its subset', () => {
+    expect(
+      only(run('a; b', { targets: ['posix-sh', 'cmd', 'powershell'] }), 'PS050')[0]
+        ?.affectedTargets,
+    ).toEqual(['posix-sh', 'cmd']);
+  });
 });

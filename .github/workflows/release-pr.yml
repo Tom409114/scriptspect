@@ -1,0 +1,60 @@
+name: Release PR
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-please-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Update the release pull request only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Select the safe release-PR CI mode
+        env:
+          RELEASE_PR_CI_MODE: ${{ vars.RELEASE_PR_CI_MODE || 'manual-approval' }}
+          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_PR_CI_MODE" in
+            github-app)
+              test -n "$RELEASE_APP_ID"
+              test -n "$RELEASE_APP_PRIVATE_KEY"
+              ;;
+            manual-approval)
+              {
+                echo '### Release PR CI mode: manual approval'
+                echo 'The default GITHUB_TOKEN cannot trigger PR workflows. A maintainer must use **Approve and run workflows** on the release PR before merging.'
+                echo 'Preferred unattended mode: install a least-privilege GitHub App, set RELEASE_PR_CI_MODE=github-app, RELEASE_APP_ID, RELEASE_APP_PRIVATE_KEY, and include its bot login in RELEASE_PR_ACTORS.'
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo '::error::RELEASE_PR_CI_MODE must be github-app or manual-approval'
+              exit 1
+              ;;
+          esac
+      - name: Mint the preferred least-privilege GitHub App token
+        id: app-token
+        if: vars.RELEASE_PR_CI_MODE == 'github-app'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: scriptspect
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

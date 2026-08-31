@@ -1,102 +1,165 @@
-# scriptspect
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-**Static analyzer for `package.json` scripts — catches shell-specific commands before they break Windows, macOS, or Linux builds.**
+<p align="center">
+  <img src="docs/assets/brand/hero.svg" width="100%" alt="ScriptSpect analyzes package scripts for POSIX shell, Windows cmd, and PowerShell portability problems before the scripts run">
+</p>
 
-Like ShellCheck, but for npm/pnpm/Yarn/Bun scripts. `scriptspect` parses every script in your project (including monorepo workspaces), flags commands that only work in some shells, explains *why* they fail, and — when it is provably safe — offers the fix.
+<p align="center">
+  <a href="https://github.com/Tom409114/scriptspect/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Tom409114/scriptspect/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-6f7bf7.svg"></a>
+</p>
 
-## Try it in one command
+<p align="center"><strong>One script. Multiple shell interpretations. A finding tied to the target that breaks.</strong></p>
+
+ScriptSpect statically checks npm-style `package.json` scripts without running
+them. It identifies constructs that mean different things to `posix-sh`,
+Windows `cmd`, or optional `powershell`, points to the relevant span, and keeps
+automatic fixes behind explicit safety gates.
+
+> [!IMPORTANT]
+> This repository is a **pre-release source evaluation**. The npm package and
+> public Action tag do not exist yet; the copy-paste paths below deliberately
+> use an immutable source commit.
+
+**[See the real demo](#before-result-and-after)** · **[Evaluate from source](#evaluate-from-source-pre-release)** · **[GitHub Actions](#github-actions-preview-pre-release)** · **[Rules](docs/rules/README.md)**
+
+<!-- readme-section: why -->
+## Why it is useful
+
+| Catch the breakage | Explain the target | Keep fixes reviewable |
+| --- | --- | --- |
+| Finds shell-dependent commands, operators, expansion, redirection, paths, and undeclared executables before another OS runs them. | Every finding carries a stable rule ID, package/script path, source span, severity, confidence, and affected targets. | `safe`, `conditional`, and `manual` classes prevent “helpful” rewrites when equivalence cannot be proved. |
+
+ScriptSpect uses a target-specific structural parser rather than scanning quoted
+text with a stack of regular expressions. It is intentionally not a full shell
+interpreter: findings should still be reviewed in the project that owns the
+script.
+
+<!-- readme-section: evaluate -->
+## Evaluate from source (pre-release)
+
+Requires Node.js 22 or newer and pnpm via Corepack. Clone the repository, check
+out the reviewed commit, install exactly from the lockfile, build, and scan the
+versioned demo fixture. Findings exit `1`; a clean scan exits `0`; invalid input,
+configuration, or I/O exits `2`.
 
 ```bash
-npx scriptspect
-# or: pnpm dlx scriptspect / bunx scriptspect
+git clone https://github.com/Tom409114/scriptspect.git
+cd scriptspect
+git checkout 13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+node dist/cli.mjs tests/fixtures/readme-demo
 ```
 
-Zero config. It finds your project root, discovers your workspaces, and analyzes every script against the shells npm actually uses (`sh` on macOS/Linux, `cmd.exe` on Windows).
+There is deliberately no `npx scriptspect` quick start yet. The machine-readable
+release state is [docs/readme-status.json](docs/readme-status.json).
 
-## What it looks like
+<!-- readme-section: demo -->
+## Before, result, and after
 
-<!-- Sample output reflects the reporter format shipped in v0.1 (milestones M3–M8). -->
+Everything here is generated from the versioned
+[demo fixture](tests/fixtures/readme-demo/package.json), so the screenshot and
+patch cannot drift away from executable behavior.
 
-```text
-package.json  ›  scripts.build
+**Before — two scripts that assume a POSIX shell:**
 
-PS001  error  HIGH  POSIX inline env assignment `NODE_ENV=production` is not portable to cmd.exe
-       NODE_ENV=production vite build
-       ^^^^^^^^^^^^^^^^^^^
-       Affected: cmd
-       Fix: add cross-env as a devDependency, then wrap the assignment
-       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS001.md
-
-packages/web/package.json  ›  scripts.clean
-
-PS010  error  HIGH  `rm -rf` is not available in native Windows npm scripts
-       rm -rf dist
-       ^^
-       Affected: cmd
-       Fix: add rimraf (or shx) as a devDependency, then re-run --fix
-       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS010.md
-
-Scanned 2 scripts across 2 packages · 2 errors · 0 warnings
+```json
+{
+  "name": "portable-demo",
+  "private": true,
+  "scripts": {
+    "build": "NODE_ENV=production vite build",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "rimraf": "^6.0.1",
+    "vite": "^7.0.0"
+  }
+}
 ```
 
-Every finding carries a stable rule ID, the exact script and span, the affected shells, a confidence level, and an actionable fix path.
+**Result — `PS001` and `PS010` identify the exact cmd-incompatible spans:**
 
-## Why
+![Generated terminal transcript showing ScriptSpect findings for PS001 and PS010](docs/assets/demo/terminal.svg)
 
-npm scripts run through `sh` on macOS/Linux and `cmd.exe` on Windows. `rm -rf dist`, `FOO=bar node .`, `mkdir -p`, `$(...)` are all fine on a Mac and broken on a Windows contributor's machine — usually minutes after they clone. Existing tools sprinkle `cross-env`/`shx` advice one crash at a time; `scriptspect` checks the whole project statically, in CI, before the PR merges.
+[Selectable terminal text](docs/assets/demo/terminal.txt) · [Full generated patch](docs/assets/demo/fix.patch) · [Verified after file](docs/assets/demo/package.after.json)
 
-Key properties:
+**After — the conditional rewrites use dependencies already declared by the project:**
 
-- **Shell-aware parsing** — quote/escape/operator-aware lexer + command IR, not regex stacking. Strings like `echo "rm -rf dist"` never false-positive.
-- **Target shell matrix** — every finding says which shells break: `posix-sh`, `cmd`, `powershell`.
-- **Confidence + severity** — `high`/`medium` confidence, `error`/`warn`/`advisory` severity; CI fails only on high-confidence errors by default.
-- **Monorepo first-class** — npm/pnpm/Yarn/Bun workspaces, per-package findings.
-- **Safe fixes only** — `safe` / `conditional` / `manual` fix classes; `--fix` never installs dependencies or rewrites lockfiles; `--fix-dry-run` shows the diff first.
-- **No execution, no telemetry, no AI** — pure static analysis, deterministic and offline. Your scripts are never run; your code never leaves the machine.
+```diff
+-"build": "NODE_ENV=production vite build"
+-"clean": "rm -rf dist"
++"build": "cross-env NODE_ENV=production vite build"
++"clean": "rimraf dist"
+```
 
-## Support matrix
+`--fix-dry-run` prints this patch without writing. `--fix` uses staged writes,
+post-write analysis, and a recovery journal; it never installs dependencies or
+rewrites a lockfile. Regenerate all demo assets with
+`pnpm exec tsx tools/generate-readme-demo.ts`.
 
-| Capability | v0.1 status |
-| --- | --- |
-| package.json scripts (single package) | ✅ |
-| npm / Yarn / Bun workspaces | ✅ |
-| pnpm-workspace.yaml | ✅ |
-| Targets: posix-sh + cmd (npm defaults) | ✅ |
-| powershell target (opt-in) | ✅ |
-| Formats: stylish / json / github annotations | ✅ |
-| Safe + conditional auto-fix with dry-run | ✅ |
-| GitHub Action | ✅ |
-| SARIF output | 🚧 later |
+<!-- readme-section: cli -->
+## CLI at a glance
 
-Rules: [docs/rules](docs/rules) — each with why/bad/good examples, false-positive notes, fix safety, and provenance.
+The source build supports human, JSON, and GitHub-friendly output, focused rule
+runs, explicit target matrices, and opt-in fixes.
 
-## Relationship to other tools
+```bash
+node dist/cli.mjs [path]
+node dist/cli.mjs [path] --format json
+node dist/cli.mjs [path] --target posix-sh,cmd,powershell
+node dist/cli.mjs [path] --rule PS001,PS010
+node dist/cli.mjs [path] --fix-dry-run
+node dist/cli.mjs [path] --fix
+node dist/cli.mjs explain PS010
+```
 
-- **[scripts-doctor](https://github.com/Ashwani2529/scripts-doctor)** — a package-scripts linter with overlapping basics (rm→rimraf, cross-env suggestions, missing-bin checks, `--fix`). We cover the same basics; our edge is a shell-aware parser, per-shell target matrix, confidence/severity tiers, monorepo discovery, and a CI-grade safe-fix engine. See [docs/comparison.md](docs/comparison.md).
-- **cross-env / shx / rimraf** — these *fix* portability problems; `scriptspect` *finds* them and tells you when one of these tools is the right fix. Complements, not competitors.
-- **ShellCheck** — the mental model (rule IDs, explainable diagnostics, static analysis) applied to package scripts.
+Presentation filters do not hide failure semantics: any configured `error`
+fails, and the unfiltered warning count is compared with `--max-warnings`.
 
-## Use it in CI
+<!-- readme-section: action -->
+## GitHub Actions preview (pre-release)
 
-The GitHub Action runs the same CLI core, emits inline annotations plus a job summary, and fails the job on high-confidence errors (or when the warning budget is exceeded):
+This complete example checks out both the consumer and an immutable ScriptSpect
+source commit, then runs the bundled local Action. Do not replace the commit
+with the nonexistent `Tom409114/scriptspect@v0.1` tag. After a verified release,
+security-sensitive workflows should continue pinning a full commit SHA.
 
 ```yaml
-- uses: Tom409114/scriptspect@v0.1
-  with:
-    path: .            # project path to analyze (default: repository root)
-    # target / severity are optional. Omit them (as here) to honor the
-    # project's scriptspect.config.json; set them to override it.
+name: scriptspect pre-release evaluation
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Tom409114/scriptspect
+          ref: 13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5
+          path: .scriptspect
+          persist-credentials: false
+      - uses: ./.scriptspect
+        with:
+          path: .
 ```
 
-Or call the CLI directly:
+The Action writes annotations, a job summary, and numeric outputs named
+`exit-code`, `packages`, `scripts`, `errors`, `warnings`, and `advisories` before
+marking a finding run as failed. Its default mode is read-only.
 
-```yaml
-- run: npx scriptspect --format github
-```
+<!-- readme-section: config -->
+## Minimal configuration
 
-## Configure
-
-Zero config works. To tune, add a `scriptspect` field to package.json or a `scriptspect.config.json`:
+Defaults target `posix-sh` and `cmd`. Put the same small contract in the root
+`package.json` under `scriptspect`, or in `scriptspect.config.json`:
 
 ```json
 {
@@ -109,12 +172,70 @@ Zero config works. To tune, add a `scriptspect` field to package.json or a `scri
 }
 ```
 
-A published JSON Schema gives editor completion for every field.
+Precedence is deterministic and replacement-based:
+`--config` → `package.json#scriptspect` → `scriptspect.config.json` → defaults.
+`--target` then replaces only the selected config's target list. Config sources
+are never merged. Ignore entries must name rules and should stay narrow enough
+to explain an intentional platform-specific script.
 
-## Status
+Contracts: [config JSON Schema](schema/config.schema.json) · [JSON output Schema](schema/output.schema.json)
 
-All milestones [M0–M8](docs/roadmap.md) are merged and CI-green on main. The M8 corpus gate has run on 133 public repos (5083 scripts): a 62-finding human-verified precision sample found zero false positives — see the [corpus validation report](docs/validation/corpus-2026-08.md). Rule IDs are a stable API once published; semantic changes are tracked in release notes.
+<!-- readme-section: support -->
+## Scope and honest limits
 
+| Area | Current source-evaluation behavior |
+| --- | --- |
+| Projects | root `package.json` plus npm/Yarn/Bun workspaces and `pnpm-workspace.yaml` |
+| Targets | `posix-sh` + `cmd` by default; opt-in `powershell` evidence |
+| Findings | error, warning, and advisory with high/medium confidence |
+| Output | stylish terminal text, versioned JSON, GitHub annotations + summary |
+| Fixes | dry-run plus provable safe/conditional rewrites; ambiguous cases stay manual |
+| Privacy | offline analysis; scripts are not executed; no telemetry |
+| Release | pre-release; no npm package or public Action reference yet |
+
+The homepage does not claim external adoption, measured precision, comparative
+superiority, hosted performance, or completed release gates. The
+[validation ledger](docs/validation/spec-compliance-2026-09-01.md) keeps
+repository-controlled work separate from evidence that only real users and a
+public release can create.
+
+<!-- readme-section: faq -->
+## FAQ and troubleshooting
+
+**Does it run my scripts?** No. It reads package manifests and performs static
+structural analysis.
+
+**Why did the scan exit `1` when I filtered warnings from the display?** Failure
+is calculated before presentation filtering: configured errors and the full
+warning budget still count. Use `--format json` to inspect the complete contract.
+
+**Why was no automatic fix offered?** The parser must agree on the replacement's
+structural role across active targets, and conditional fixes require the exact
+dependency to be declared. Otherwise the finding remains explanatory and manual.
+
+**Which config won?** Explicit `--config` wins, followed by the `package.json`
+field, the standalone file, then defaults. Non-default sources are reported in
+human-readable output.
+
+**Can I use it in production CI today?** Treat this source checkout as an
+evaluation build. Wait for public npm, Release, provenance, checksum, and
+immutable Action-consumer evidence before depending on a released reference.
+
+<!-- readme-section: navigation -->
+## Go deeper
+
+- [Documentation index](docs/README.md)
+- [All rules](docs/rules/README.md)
+- [Architecture and parser contract](docs/architecture.md)
+- [Comparison boundary](docs/comparison.md)
+- [Compliance audit](docs/validation/spec-compliance-2026-09-01.md)
+- [Corpus methodology](docs/evidence/corpus-method.md)
+- [Security policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Roadmap](docs/roadmap.md)
+- [Evidence policy](docs/evidence/README.md)
+
+<!-- readme-section: license -->
 ## License
 
 [MIT](LICENSE)

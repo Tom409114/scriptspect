@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unpkg.com/scriptspect/schema/config.schema.json",
+  "title": "ScriptSpect configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "posix-sh",
+          "cmd",
+          "powershell"
+        ]
+      }
+    },
+    "severity": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "PS001",
+          "PS002",
+          "PS003",
+          "PS010",
+          "PS011",
+          "PS012",
+          "PS013",
+          "PS014",
+          "PS015",
+          "PS016",
+          "PS017",
+          "PS018",
+          "PS019",
+          "PS020",
+          "PS021",
+          "PS022",
+          "PS023",
+          "PS024",
+          "PS025",
+          "PS026",
+          "PS030",
+          "PS031",
+          "PS032",
+          "PS040",
+          "PS041",
+          "PS050",
+          "PS051"
+        ]
+      },
+      "additionalProperties": {
+        "enum": [
+          "error",
+          "warn",
+          "advisory"
+        ]
+      }
+    },
+    "ignore": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rules"
+        ],
+        "properties": {
+          "packages": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "scripts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "rules": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "PS001",
+                "PS002",
+                "PS003",
+                "PS010",
+                "PS011",
+                "PS012",
+                "PS013",
+                "PS014",
+                "PS015",
+                "PS016",
+                "PS017",
+                "PS018",
+                "PS019",
+                "PS020",
+                "PS021",
+                "PS022",
+                "PS023",
+                "PS024",
+                "PS025",
+                "PS026",
+                "PS030",
+                "PS031",
+                "PS032",
+                "PS040",
+                "PS041",
+                "PS050",
+                "PS051"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
