@@ -23,9 +23,17 @@ describe('GitHub Action contract (spec §12.1)', () => {
     expect(action).toContain('severity:');
   });
 
-  it('defaults mirror the CLI defaults (posix-sh + cmd, advisory)', () => {
-    expect(action).toContain("default: 'posix-sh,cmd'");
-    expect(action).toContain("default: 'advisory'");
+  it('omits --target/--severity when unset so config-file settings are honored', () => {
+    // With empty defaults, the CLI falls back to scriptspect.config.json
+    // (then its own defaults). Flags are appended only when set explicitly.
+    expect(action).toContain("default: ''");
+    expect(action).toContain('if [ -n "${{ inputs.target }}" ]; then');
+    expect(action).toContain('if [ -n "${{ inputs.severity }}" ]; then');
+  });
+
+  it('still supports explicit target/severity overrides', () => {
+    expect(action).toContain('--target "${{ inputs.target }}"');
+    expect(action).toContain('--severity "${{ inputs.severity }}"');
   });
 
   it('supports explicit paths and warning budgets', () => {
