@@ -1,9 +1,10 @@
 /**
  * PS022 — POSIX_SOURCE: `source` / `.` dot-sourcing requires a POSIX shell.
  */
-import { availabilityRule } from './util';
+
 import type { CommandNode } from '../parser/ir';
 import type { RuleModule } from './types';
+import { availabilityRule } from './util';
 
 function isSourceInvocation(cmd: CommandNode): boolean {
   const name = cmd.argv[0]?.value ?? '';
@@ -20,12 +21,14 @@ export const PS022: RuleModule = availabilityRule(
     affectedTargets: ['cmd', 'powershell'],
     badExamples: ['source ./env.sh', '. ./scripts/env.sh'],
     goodExamples: ['node -r dotenv/config app.js', 'bash ./env.sh'],
-    falsePositiveNotes: 'Only the dot form with a following argument counts; a bare `.` is not a source command.',
+    falsePositiveNotes:
+      'Only the dot form with a following argument counts; a bare `.` is not a source command.',
     fixSafety: 'manual',
     provenance: [
       {
         source: 'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#dot',
-        claim: '`.` (dot) executes a file in the current shell — POSIX builtin; source is the bash synonym.',
+        claim:
+          '`.` (dot) executes a file in the current shell — POSIX builtin; source is the bash synonym.',
       },
     ],
   },

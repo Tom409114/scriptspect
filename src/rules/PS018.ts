@@ -1,8 +1,9 @@
 /**
  * PS018 — POSIX_SED: `sed` does not exist under cmd.exe.
  */
-import { availabilityRule } from './util';
+
 import type { RuleModule } from './types';
+import { availabilityRule } from './util';
 
 export const PS018: RuleModule = availabilityRule(
   {
@@ -18,7 +19,8 @@ export const PS018: RuleModule = availabilityRule(
     fixSafety: 'conditional',
     provenance: [
       {
-        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
+        source:
+          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
         claim: 'cmd.exe ships no sed equivalent.',
       },
     ],
