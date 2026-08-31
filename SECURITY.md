@@ -2,12 +2,14 @@
 
 ## Supported versions
 
-scriptspect is pre-1.0. Security fixes target the latest published release on npm and the `main` branch.
+scriptspect is pre-1.0. No npm release has been published yet, so security fixes
+currently target the `main` branch. After publication, the latest npm release
+will be supported alongside `main`.
 
 | Version | Supported |
 | ------- | --------- |
-| latest npm release | ✅ |
-| older 0.x | ❌ — upgrade |
+| `main` (pre-release) | ✅ |
+| npm releases | not published yet |
 
 ## Reporting a vulnerability
 

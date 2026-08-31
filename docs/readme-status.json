@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "releaseState": "pre-release",
+  "packageName": "scriptspect",
+  "packageVersion": "0.0.0",
+  "sourceCommit": "56c53c9ef055820c4096de3c0a56b4640be458e2",
+  "nodeMajor": 22,
+  "repository": "https://github.com/Tom409114/scriptspect"
+}

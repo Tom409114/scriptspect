@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="864" viewBox="0 0 1100 864" role="img" aria-labelledby="title desc">
+  <title id="title">ScriptSpect pre-release demo output</title>
+  <desc id="desc">Terminal output from checking the README demo fixture. The selectable text version is available beside this image.</desc>
+  <style>.terminal { fill: #0d1117; } .bar { fill: #161b22; } .terminal-line { fill: #c9d1d9; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }</style>
+  <rect class="terminal" width="100%" height="100%" rx="12"/>
+  <rect class="bar" width="100%" height="34" rx="12"/>
+  <circle cx="22" cy="17" r="5" fill="#ff7b72"/><circle cx="40" cy="17" r="5" fill="#d29922"/><circle cx="58" cy="17" r="5" fill="#3fb950"/>
+  <text x="28" y="52" class="terminal-line">$ node dist/cli.mjs .</text>
+  <text x="28" y="74" class="terminal-line"> </text>
+  <text x="28" y="96" class="terminal-line">package.json  ›  scripts.build</text>
+  <text x="28" y="118" class="terminal-line"> </text>
+  <text x="28" y="140" class="terminal-line">PS001  error  HIGH  POSIX inline env assignment `NODE_ENV=production` is not portable to non-POSIX target shells</text>
+  <text x="28" y="162" class="terminal-line">       NODE_ENV=production vite build</text>
+  <text x="28" y="184" class="terminal-line">       ^^^^^^^^^^^^^^^^^^^</text>
+  <text x="28" y="206" class="terminal-line">       Affected: cmd</text>
+  <text x="28" y="228" class="terminal-line">       Fix: rewrite as `NODE_ENV=production …` under cross-env (cross-env is already a dependency)</text>
+  <text x="28" y="250" class="terminal-line">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS001.md</text>
+  <text x="28" y="272" class="terminal-line"> </text>
+  <text x="28" y="294" class="terminal-line">PS050  advisory  MEDIUM  Target parses assign different structural roles to `NODE_ENV=production` (posix-sh: leading env; cmd: executable)</text>
+  <text x="28" y="316" class="terminal-line">       NODE_ENV=production vite build</text>
+  <text x="28" y="338" class="terminal-line">       ^^^^^^^^^^^^^^^^^^^</text>
+  <text x="28" y="360" class="terminal-line">       Affected: posix-sh, cmd</text>
+  <text x="28" y="382" class="terminal-line">       Fix: rewrite with syntax that has the same command graph on every target</text>
+  <text x="28" y="404" class="terminal-line">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS050.md</text>
+  <text x="28" y="426" class="terminal-line"> </text>
+  <text x="28" y="448" class="terminal-line">PS050  advisory  MEDIUM  Target parses assign different structural roles to `vite` (posix-sh: executable; cmd: argument)</text>
+  <text x="28" y="470" class="terminal-line">       NODE_ENV=production vite build</text>
+  <text x="28" y="492" class="terminal-line">                           ^^^^</text>
+  <text x="28" y="514" class="terminal-line">       Affected: posix-sh, cmd</text>
+  <text x="28" y="536" class="terminal-line">       Fix: rewrite with syntax that has the same command graph on every target</text>
+  <text x="28" y="558" class="terminal-line">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS050.md</text>
+  <text x="28" y="580" class="terminal-line"> </text>
+  <text x="28" y="602" class="terminal-line">package.json  ›  scripts.clean</text>
+  <text x="28" y="624" class="terminal-line"> </text>
+  <text x="28" y="646" class="terminal-line">PS010  error  HIGH  `rm -rf` is not available in native Windows npm scripts</text>
+  <text x="28" y="668" class="terminal-line">       rm -rf dist</text>
+  <text x="28" y="690" class="terminal-line">       ^^</text>
+  <text x="28" y="712" class="terminal-line">       Affected: cmd</text>
+  <text x="28" y="734" class="terminal-line">       Fix: rewrite as `rimraf …` (rimraf is already a dependency)</text>
+  <text x="28" y="756" class="terminal-line">       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS010.md</text>
+  <text x="28" y="778" class="terminal-line"> </text>
+  <text x="28" y="800" class="terminal-line">Scanned 2 scripts across 1 package · 2 errors · 0 warnings · 2 advisories</text>
+  <text x="28" y="822" class="terminal-line">exit code: 1</text>
+</svg>

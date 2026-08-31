@@ -1,0 +1,36 @@
+$ node dist/cli.mjs .
+
+package.json  ›  scripts.build
+
+PS001  error  HIGH  POSIX inline env assignment `NODE_ENV=production` is not portable to non-POSIX target shells
+       NODE_ENV=production vite build
+       ^^^^^^^^^^^^^^^^^^^
+       Affected: cmd
+       Fix: rewrite as `NODE_ENV=production …` under cross-env (cross-env is already a dependency)
+       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS001.md
+
+PS050  advisory  MEDIUM  Target parses assign different structural roles to `NODE_ENV=production` (posix-sh: leading env; cmd: executable)
+       NODE_ENV=production vite build
+       ^^^^^^^^^^^^^^^^^^^
+       Affected: posix-sh, cmd
+       Fix: rewrite with syntax that has the same command graph on every target
+       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS050.md
+
+PS050  advisory  MEDIUM  Target parses assign different structural roles to `vite` (posix-sh: executable; cmd: argument)
+       NODE_ENV=production vite build
+                           ^^^^
+       Affected: posix-sh, cmd
+       Fix: rewrite with syntax that has the same command graph on every target
+       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS050.md
+
+package.json  ›  scripts.clean
+
+PS010  error  HIGH  `rm -rf` is not available in native Windows npm scripts
+       rm -rf dist
+       ^^
+       Affected: cmd
+       Fix: rewrite as `rimraf …` (rimraf is already a dependency)
+       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS010.md
+
+Scanned 2 scripts across 1 package · 2 errors · 0 warnings · 2 advisories
+exit code: 1
