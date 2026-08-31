@@ -59,8 +59,8 @@ jobs:
           git cat-file -e "$STATUS_COMMIT^{commit}"
           git merge-base --is-ancestor "$STATUS_COMMIT" HEAD
           test "$STATUS_COMMIT" != "$(git rev-parse HEAD)"
-          git diff-tree --root --no-commit-id --name-only -r "$STATUS_COMMIT" -- src package.json action.yml \
-            | grep -Eq '^(src/|package\.json$|action\.yml$)'
+          git diff --quiet "$STATUS_COMMIT" HEAD -- \
+            src dist schema package.json pnpm-lock.yaml action.yml tsconfig.json tsup.config.ts
           git diff --exit-code -- \
             schema \
             docs/rules \

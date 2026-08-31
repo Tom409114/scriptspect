@@ -1,0 +1,9 @@
+ScriptSpect hosted Action evidence
+workflow run: 33449906358 (success)
+workflow URL: https://github.com/Tom409114/scriptspect/actions/runs/33449906358
+source commit: 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+clean consumer: exit 0 · 1 package · 1 script · 0 errors
+broken fixture: 2 annotations
+- Action failure contract — .github: scriptspect action failed
+- PS010: scripts.clean — package.json: `rm -rf` is not available in native Windows npm scripts · affected: cmd · scripts.clean
+job summary SHA-256: 6f404488da1babb4ba885e873c5187e4e1c5179a2c868bc5324a2e3b8c71c404

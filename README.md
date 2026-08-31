@@ -1,7 +1,10 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 <p align="center">
-  <img src="docs/assets/brand/hero.svg" width="100%" alt="ScriptSpect analyzes package scripts for POSIX shell, Windows cmd, and PowerShell portability problems before the scripts run">
+  <picture>
+    <source media="(max-width: 700px)" srcset="docs/assets/brand/hero-mobile.svg">
+    <img src="docs/assets/brand/hero.svg" width="100%" alt="ScriptSpect analyzes package scripts for POSIX shell, Windows cmd, and PowerShell portability problems before the scripts run">
+  </picture>
 </p>
 
 <p align="center">
@@ -34,27 +37,6 @@ ScriptSpect uses a target-specific structural parser rather than scanning quoted
 text with a stack of regular expressions. It is intentionally not a full shell
 interpreter: findings should still be reviewed in the project that owns the
 script.
-
-<!-- readme-section: evaluate -->
-## Evaluate from source (pre-release)
-
-Requires Node.js 22 or newer and pnpm via Corepack. Clone the repository, check
-out the reviewed commit, install exactly from the lockfile, build, and scan the
-versioned demo fixture. Findings exit `1`; a clean scan exits `0`; invalid input,
-configuration, or I/O exits `2`.
-
-```bash
-git clone https://github.com/Tom409114/scriptspect.git
-cd scriptspect
-git checkout 13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-node dist/cli.mjs tests/fixtures/readme-demo
-```
-
-There is deliberately no `npx scriptspect` quick start yet. The machine-readable
-release state is [docs/readme-status.json](docs/readme-status.json).
 
 <!-- readme-section: demo -->
 ## Before, result, and after
@@ -101,6 +83,27 @@ post-write analysis, and a recovery journal; it never installs dependencies or
 rewrites a lockfile. Regenerate all demo assets with
 `pnpm exec tsx tools/generate-readme-demo.ts`.
 
+<!-- readme-section: evaluate -->
+## Evaluate from source (pre-release)
+
+Requires Node.js 22 or newer and pnpm via Corepack. Clone the repository, check
+out the reviewed commit, install exactly from the lockfile, build, and scan the
+versioned demo fixture. Findings exit `1`; a clean scan exits `0`; invalid input,
+configuration, or I/O exits `2`.
+
+```bash
+git clone https://github.com/Tom409114/scriptspect.git
+cd scriptspect
+git checkout 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+node dist/cli.mjs tests/fixtures/readme-demo
+```
+
+There is deliberately no `npx scriptspect` quick start yet. The machine-readable
+release state is [docs/readme-status.json](docs/readme-status.json).
+
 <!-- readme-section: cli -->
 ## CLI at a glance
 
@@ -143,7 +146,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Tom409114/scriptspect
-          ref: 13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5
+          ref: 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
           path: .scriptspect
           persist-credentials: false
       - uses: ./.scriptspect
@@ -154,6 +157,16 @@ jobs:
 The Action writes annotations, a job summary, and numeric outputs named
 `exit-code`, `packages`, `scripts`, `errors`, `warnings`, and `advisories` before
 marking a finding run as failed. Its default mode is read-only.
+
+**Real hosted proof — not a mock screenshot.** On `main` at `0898538`, public
+[CI run #33449906358](https://github.com/Tom409114/scriptspect/actions/runs/33449906358)
+consumed `uses: ./` against both clean and broken fixtures. The clean consumer
+reported `1 package · 1 script · 0 errors`; the broken fixture emitted 2 check
+annotations, including `PS010: scripts.clean` on `package.json`.
+
+![Generated card summarizing the verified hosted Action run](docs/assets/demo/action.svg)
+
+[Selectable Action evidence](docs/assets/demo/action.txt) · [Committed source evidence](docs/validation/readme-action-evidence.json) · [Open the hosted job](https://github.com/Tom409114/scriptspect/actions/runs/33449906358/job/99677215357)
 
 <!-- readme-section: config -->
 ## Minimal configuration

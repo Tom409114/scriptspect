@@ -1,7 +1,10 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 <p align="center">
-  <img src="docs/assets/brand/hero.svg" width="100%" alt="ScriptSpect 在脚本运行前检查 POSIX shell、Windows cmd 与 PowerShell 的可移植性问题">
+  <picture>
+    <source media="(max-width: 700px)" srcset="docs/assets/brand/hero-mobile.svg">
+    <img src="docs/assets/brand/hero.svg" width="100%" alt="ScriptSpect 在脚本运行前检查 POSIX shell、Windows cmd 与 PowerShell 的可移植性问题">
+  </picture>
 </p>
 
 <p align="center">
@@ -26,23 +29,6 @@ ScriptSpect 会静态检查 npm 风格的 `package.json` scripts，并且不会�
 | 在另一种操作系统真正执行前，找出依赖特定 shell 的命令、operator、expansion、redirection、path 与未声明 executable。 | 每条 finding 都带有稳定 rule ID、package/script path、source span、severity、confidence 与受影响 targets。 | `safe`、`conditional`、`manual` 三类安全级别，避免在无法证明等价时进行“热心”改写。 |
 
 ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正则表达式扫描 quoted text。它有意不做完整 shell interpreter；finding 仍应由拥有该 script 的项目审查。
-
-<!-- readme-section: evaluate -->
-## 从源码评估（Evaluate from source (pre-release)）
-
-需要 Node.js 22 或更高版本，并通过 Corepack 使用 pnpm。克隆仓库、检出经审阅的 commit、严格按 lockfile 安装、构建，再扫描版本化 demo fixture。存在 finding 时退出 `1`；clean scan 退出 `0`；无效输入、配置或 I/O 退出 `2`。
-
-```bash
-git clone https://github.com/Tom409114/scriptspect.git
-cd scriptspect
-git checkout 13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-node dist/cli.mjs tests/fixtures/readme-demo
-```
-
-这里特意还没有 `npx scriptspect` 快速开始。机器可读的 release state 见 [docs/readme-status.json](docs/readme-status.json)。
 
 <!-- readme-section: demo -->
 ## 修复前、分析结果与修复后
@@ -84,6 +70,23 @@ node dist/cli.mjs tests/fixtures/readme-demo
 
 `--fix-dry-run` 只打印 patch 而不写入。`--fix` 使用 staged writes、写后重新分析与 recovery journal；它不会安装依赖或改写 lockfile。使用 `pnpm exec tsx tools/generate-readme-demo.ts` 可重新生成全部 demo assets。
 
+<!-- readme-section: evaluate -->
+## 从源码评估（Evaluate from source (pre-release)）
+
+需要 Node.js 22 或更高版本，并通过 Corepack 使用 pnpm。克隆仓库、检出经审阅的 commit、严格按 lockfile 安装、构建，再扫描版本化 demo fixture。存在 finding 时退出 `1`；clean scan 退出 `0`；无效输入、配置或 I/O 退出 `2`。
+
+```bash
+git clone https://github.com/Tom409114/scriptspect.git
+cd scriptspect
+git checkout 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+corepack enable
+pnpm install --frozen-lockfile
+pnpm build
+node dist/cli.mjs tests/fixtures/readme-demo
+```
+
+这里特意还没有 `npx scriptspect` 快速开始。机器可读的 release state 见 [docs/readme-status.json](docs/readme-status.json)。
+
 <!-- readme-section: cli -->
 ## CLI 快速参考
 
@@ -121,7 +124,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Tom409114/scriptspect
-          ref: 13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5
+          ref: 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
           path: .scriptspect
           persist-credentials: false
       - uses: ./.scriptspect
@@ -130,6 +133,12 @@ jobs:
 ```
 
 Action 会先写入 annotations、job summary 以及名为 `exit-code`、`packages`、`scripts`、`errors`、`warnings`、`advisories` 的数字 outputs，再把 finding run 标记为失败。默认模式只读。
+
+**真实托管证据——不是模拟截图。** 在 `main` 的 `0898538` 上，公开的 [CI run #33449906358](https://github.com/Tom409114/scriptspect/actions/runs/33449906358) 使用 `uses: ./` 分别消费 clean 与 broken fixture。clean consumer 返回 `1 package · 1 script · 0 errors`；broken fixture 产生 2 条 check annotations，其中包括落在 `package.json` 上的 `PS010: scripts.clean`。
+
+![根据真实托管 Action run 生成的验证卡片](docs/assets/demo/action.svg)
+
+[可选择的 Action 证据文本](docs/assets/demo/action.txt) · [提交进仓库的源证据](docs/validation/readme-action-evidence.json) · [打开托管 job](https://github.com/Tom409114/scriptspect/actions/runs/33449906358/job/99677215357)
 
 <!-- readme-section: config -->
 ## 最小配置

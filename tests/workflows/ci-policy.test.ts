@@ -199,6 +199,8 @@ describe('reproducible CI', () => {
     expect(generatedRun).toContain('docs/readme-status.json');
     expect(generatedRun).toContain('git cat-file -e');
     expect(generatedRun).toContain('git merge-base --is-ancestor');
+    expect(generatedRun).toContain('git diff --quiet "$STATUS_COMMIT" HEAD --');
+    expect(generatedRun).not.toContain('git diff-tree');
     expect(generatedRun).toContain('git diff --exit-code');
 
     const generatedCheckout = (ci.jobs?.generated?.steps ?? []).find((step) =>
