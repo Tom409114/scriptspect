@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { walkCommands } from '../../src/parser/ir';
+import { commandIs, walkCommands } from '../../src/parser/ir';
+import { tokenizeForTarget } from '../../src/parser/lexer';
 import { parseForTarget, parseScript } from '../../src/parser/parse';
 
 describe('dialect edge contracts', () => {
@@ -58,6 +59,45 @@ describe('dialect edge contracts', () => {
     expect(parseForTarget(')', 'cmd').diagnostics).toContainEqual(
       expect.objectContaining({ code: 'unbalanced-group', span: [0, 1] }),
     );
+  });
+
+  it('matches command names case-insensitively and rejects empty command leaves', () => {
+    const [named] = [...walkCommands(parseForTarget('Git status', 'posix-sh').root)];
+    const [empty] = [...walkCommands(parseForTarget('> output', 'posix-sh').root)];
+
+    if (named === undefined || empty === undefined)
+      throw new Error('expected parsed command leaves');
+    expect(commandIs(named, new Set(['git']))).toBe(true);
+    expect(commandIs(named, new Set(['node']))).toBe(false);
+    expect(commandIs(empty, new Set(['git']))).toBe(false);
+  });
+
+  it('stops PowerShell words at inline comments without emitting comment tokens', () => {
+    expect(
+      tokenizeForTarget('echo value# private note', 'powershell').map((token) => token.value),
+    ).toEqual(['echo', 'value']);
+  });
+
+  it('keeps trailing PowerShell escape markers literal inside and outside quotes', () => {
+    expect(tokenizeForTarget('echo value`', 'powershell')[1]?.value).toBe('value`');
+    expect(tokenizeForTarget('echo "value`', 'powershell')[1]?.value).toBe('value`');
+  });
+
+  it('removes a POSIX escaped newline inside double quotes', () => {
+    expect(tokenizeForTarget('echo "one\\\ntwo"', 'posix-sh')[1]?.value).toBe('onetwo');
+  });
+
+  it('keeps unterminated quoted command substitutions as one bounded expansion', () => {
+    expect(tokenizeForTarget("echo $('unterminated", 'posix-sh')[1]?.expansions).toEqual([
+      expect.objectContaining({ kind: 'command', raw: "$('unterminated" }),
+    ]);
+  });
+
+  it('tracks nested braces until the matching parameter-expansion delimiter', () => {
+    const expansion = ['$', '{OUT:-$', '{FALLBACK}}'].join('');
+    expect(tokenizeForTarget(`echo ${expansion}`, 'posix-sh')[1]?.expansions).toEqual([
+      expect.objectContaining({ kind: 'braced', raw: expansion }),
+    ]);
   });
 });
 

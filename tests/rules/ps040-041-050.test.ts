@@ -86,6 +86,27 @@ describe('PS050 SHELL_SPECIFIC_SEPARATOR', () => {
     expect(only(run('echo ^& echo next'), 'PS050')).toHaveLength(1);
   });
 
+  it('reports executable-role drift caused by POSIX leading assignments', () => {
+    const findings = only(run('FOO=x node app.js'), 'PS050');
+
+    expect(findings).toEqual([
+      expect.objectContaining({ span: [0, 5] }),
+      expect.objectContaining({ span: [6, 10] }),
+    ]);
+  });
+
+  it('walks grouped command graphs while locating the divergent separator', () => {
+    expect(only(run('(a; b)'), 'PS050')).toEqual([
+      expect.objectContaining({ span: [2, 3], affectedTargets: ['posix-sh', 'cmd'] }),
+    ]);
+  });
+
+  it('distinguishes POSIX backslash escapes from cmd redirection syntax', () => {
+    expect(only(run('echo \\> out'), 'PS050')).toEqual([
+      expect.objectContaining({ span: [6, 7], affectedTargets: ['posix-sh', 'cmd'] }),
+    ]);
+  });
+
   it('reports caret-escaped redirection graph divergence at the raw operator span', () => {
     const findings = only(run('echo ^> /dev/null'), 'PS050');
 

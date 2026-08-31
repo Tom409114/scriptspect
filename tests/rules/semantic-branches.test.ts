@@ -30,4 +30,23 @@ describe('rule semantic branches', () => {
     ).toEqual(['powershell']);
     expect(only(run('tool.exe', { targets: ['cmd'] }), 'PS041')).toEqual([]);
   });
+
+  it('drops evidence-only syntax when none of the rule affected targets are active', () => {
+    expect(only(run('set BUILD_MODE=ci', { targets: ['cmd'] }), 'PS002')).toEqual([]);
+    expect(only(run('$env:BUILD_MODE=ci', { targets: ['powershell'] }), 'PS003')).toEqual([]);
+    expect(only(run('echo $(date)', { targets: ['posix-sh'] }), 'PS020')).toEqual([]);
+    expect(only(run('echo $HOME', { targets: ['posix-sh'] }), 'PS023')).toEqual([]);
+    expect(only(run('echo %TEMP%', { targets: ['cmd'] }), 'PS024')).toEqual([]);
+  });
+
+  it('does not diagnose an inline assignment already delegated to cross-env', () => {
+    expect(only(run('MODE=ci cross-env node build.js'), 'PS001')).toEqual([]);
+  });
+
+  it('handles operand-less redirections without manufacturing path findings', () => {
+    expect(only(run('echo $(date) >'), 'PS020')).toHaveLength(1);
+    expect(only(run('echo $HOME >'), 'PS023')).toHaveLength(1);
+    expect(only(run('echo %TEMP% >'), 'PS024')).toHaveLength(1);
+    expect(only(run('node app.js >'), 'PS025')).toEqual([]);
+  });
 });
