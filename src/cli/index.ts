@@ -44,10 +44,6 @@ function exitCodeFor(result: AnalysisResult, options: CliOptions): number {
   return 0;
 }
 
-interface CheckArgs {
-  path?: string;
-}
-
 async function runCheck(
   pathArg: string | undefined,
   raw: Record<string, unknown>,
@@ -128,33 +124,33 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
   cli.option('--max-warnings <n>', 'exit 1 when warnings exceed this number');
   cli.option('--config <path>', 'explicit config file path');
 
-  const checkAction = (args: CheckArgs, raw: Record<string, unknown>): Promise<number> =>
-    runCheck(args.path, raw, io);
+  const checkAction = (path: string | undefined, raw: Record<string, unknown>): Promise<number> =>
+    runCheck(path, raw, io);
 
   let outcome: Promise<number> | undefined;
 
   cli
     .command('[path]', 'analyze package.json scripts for cross-platform portability')
-    .action((args: CheckArgs, raw) => {
-      outcome = checkAction(args, raw);
+    .action((path: string | undefined, raw) => {
+      outcome = checkAction(path, raw);
       return outcome;
     });
 
   const check = cli.command('check [path]', 'analyze (explicit form of the default command)');
-  check.action((args: CheckArgs, raw) => {
-    outcome = checkAction(args, raw);
+  check.action((path: string | undefined, raw) => {
+    outcome = checkAction(path, raw);
     return outcome;
   });
 
   cli
     .command('explain <ruleId>', 'show rule documentation offline')
-    .action((args: { ruleId: string }) => {
-      outcome = runExplain(args.ruleId, io);
+    .action((ruleId: string) => {
+      outcome = runExplain(ruleId, io);
       return outcome;
     });
 
   try {
-    cli.parse(argv, { run: true });
+    cli.parse(['node', 'scriptspect.mjs', ...argv], { run: true });
   } catch (err) {
     io.err(`scriptspect: ${err instanceof Error ? err.message : String(err)}`);
     return 2;
