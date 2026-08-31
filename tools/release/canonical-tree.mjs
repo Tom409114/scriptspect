@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { lstat, readdir, readFile, readlink, realpath } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { emitJson, isMain, ReleaseToolError, runCli, stableJson } from './shared.mjs';
 
@@ -111,21 +112,93 @@ export const CANONICAL_TREE_BEHAVIOR_VECTOR_DIGEST = sha256(
   Buffer.from(stableJson(behaviorVectorContract), 'utf8'),
 );
 
-const algorithmContract = {
-  archive:
-    'gzip tar with verified headers and safe paths; regular files, directories, and symlinks; implicit directories mode 0755',
-  behaviorVectorDigest: CANONICAL_TREE_BEHAVIOR_VECTOR_DIGEST,
-  contentDigest: 'sha256 raw file bytes; sha256 utf8 link target; null for directory',
-  entryOrder: 'relative POSIX path ascending by UTF-8 code unit',
-  entryRecord: 'path NUL type NUL mode-octal NUL content-digest-or-empty LF',
-  mode: 'lstat mode & 0o7777 encoded as four lowercase octal digits',
-  root: 'realpath directory; root entry excluded',
-  version: CANONICAL_TREE_ALGORITHM,
-};
+function normalizePortableSource(bytes) {
+  const normalized = Buffer.allocUnsafe(bytes.length);
+  let outputOffset = 0;
+  for (let inputOffset = 0; inputOffset < bytes.length; inputOffset += 1) {
+    if (bytes[inputOffset] === 0x0d && bytes[inputOffset + 1] === 0x0a) {
+      normalized[outputOffset] = 0x0a;
+      outputOffset += 1;
+      inputOffset += 1;
+    } else {
+      normalized[outputOffset] = bytes[inputOffset];
+      outputOffset += 1;
+    }
+  }
+  return normalized.subarray(0, outputOffset);
+}
 
-export const CANONICAL_TREE_ALGORITHM_DIGEST = createHash('sha256')
-  .update(stableJson(algorithmContract), 'utf8')
-  .digest('hex');
+function localModuleSpecifiers(source) {
+  if (/\bimport\s*\(/u.test(source) || /\brequire\s*\(/u.test(source)) {
+    throw new ReleaseToolError(
+      'canonical tree source bundle does not permit dynamic imports or require calls',
+    );
+  }
+  const specifiers = new Set();
+  for (const pattern of [/\bfrom\s*(['"])(\.[^'"]+)\1/gu, /\bimport\s*(['"])(\.[^'"]+)\1/gu]) {
+    for (const match of source.matchAll(pattern)) specifiers.add(match[2]);
+  }
+  return [...specifiers];
+}
+
+function portableSourcePath(rootPath, sourcePath) {
+  const path = relative(rootPath, sourcePath);
+  if (path === '' || path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+    throw new ReleaseToolError('canonical tree source dependency escapes its bundle root');
+  }
+  return path.split(sep).join('/');
+}
+
+function measureCanonicalTreeSourceBundle() {
+  const entryPath = fileURLToPath(import.meta.url);
+  const rootPath = dirname(entryPath);
+  const pending = [entryPath];
+  const measured = new Map();
+  while (pending.length > 0) {
+    const sourcePath = pending.pop();
+    const path = portableSourcePath(rootPath, sourcePath);
+    if (measured.has(path)) continue;
+    let bytes;
+    try {
+      bytes = normalizePortableSource(readFileSync(sourcePath));
+    } catch {
+      throw new ReleaseToolError(`canonical tree source dependency ${path} could not be read`);
+    }
+    measured.set(path, sha256(bytes));
+    const source = bytes.toString('utf8');
+    for (const specifier of localModuleSpecifiers(source)) {
+      if (!specifier.endsWith('.mjs')) {
+        throw new ReleaseToolError(
+          `canonical tree source dependency ${specifier} must use an explicit .mjs extension`,
+        );
+      }
+      const dependencyPath = resolve(dirname(sourcePath), specifier);
+      portableSourcePath(rootPath, dependencyPath);
+      pending.push(dependencyPath);
+    }
+  }
+  const files = [...measured]
+    .map(([path, sourceSha256]) => ({ path, sourceSha256 }))
+    .sort((left, right) =>
+      Buffer.compare(Buffer.from(left.path, 'utf8'), Buffer.from(right.path, 'utf8')),
+    );
+  const records = files.map((file) => `${file.path}\0${file.sourceSha256}\n`).join('');
+  const digest = sha256(
+    Buffer.from(
+      `scriptspect-canonical-tree-source-bundle/v1\0canonical-tree.mjs\n${records}`,
+      'utf8',
+    ),
+  );
+  return {
+    schemaVersion: 'scriptspect-canonical-tree-source-bundle/v1',
+    entry: 'canonical-tree.mjs',
+    files,
+    digest,
+  };
+}
+
+export const CANONICAL_TREE_SOURCE_BUNDLE = measureCanonicalTreeSourceBundle();
+export const CANONICAL_TREE_ALGORITHM_DIGEST = CANONICAL_TREE_SOURCE_BUNDLE.digest;
 
 function canonicalMode(mode) {
   return (mode & 0o7777).toString(8).padStart(4, '0');
@@ -562,6 +635,8 @@ async function main() {
     emitJson({
       algorithm: CANONICAL_TREE_ALGORITHM,
       algorithmDigest: CANONICAL_TREE_ALGORITHM_DIGEST,
+      behaviorVectorDigest: CANONICAL_TREE_BEHAVIOR_VECTOR_DIGEST,
+      sourceBundle: CANONICAL_TREE_SOURCE_BUNDLE,
     });
     return;
   }

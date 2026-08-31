@@ -9,8 +9,17 @@ import { parse } from 'yaml';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const temporaryDirectories: string[] = [];
-const canonicalTreeAlgorithmDigest =
-  'e4134401ced1d74c8f082a6a7950ef074d5a0ec9c24d6c1531a25254c9661ea3';
+const canonicalTreeDigestProcess = spawnSync(
+  process.execPath,
+  [join(root, 'tools', 'release', 'canonical-tree.mjs'), 'algorithm-digest'],
+  { encoding: 'utf8' },
+);
+if (canonicalTreeDigestProcess.status !== 0) {
+  throw new Error(`canonical tree digest failed: ${canonicalTreeDigestProcess.stderr}`);
+}
+const canonicalTreeAlgorithmDigest = (
+  JSON.parse(canonicalTreeDigestProcess.stdout) as { algorithmDigest: string }
+).algorithmDigest;
 
 type Step = {
   name?: string;
@@ -25,7 +34,7 @@ type Job = {
   needs?: string | string[];
   if?: string;
   environment?: string | { name?: string };
-  concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+  concurrency?: { group?: string; 'cancel-in-progress'?: boolean; queue?: string };
   permissions?: Record<string, string>;
   steps?: Step[];
   'timeout-minutes'?: number;
@@ -34,7 +43,7 @@ type Job = {
 type Workflow = {
   on?: Record<string, unknown>;
   permissions?: Record<string, string>;
-  concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+  concurrency?: { group?: string; 'cancel-in-progress'?: boolean; queue?: string };
   jobs?: Record<string, Job>;
 };
 
@@ -136,13 +145,14 @@ function runIntegrityVerifier(
   candidate: string,
   registry: string,
   registrySri = npmSri(registry),
+  verifier = join(root, 'tools', 'release', 'verify-package-integrity.mjs'),
 ) {
   const contractPath = join(dirname(candidate), `contract-${String(contract.integrityMode)}.json`);
   writeFileSync(contractPath, `${JSON.stringify(contract)}\n`);
   return spawnSync(
     process.execPath,
     [
-      join(root, 'tools', 'release', 'verify-package-integrity.mjs'),
+      verifier,
       '--contract',
       contractPath,
       '--candidate',
@@ -339,6 +349,11 @@ describe('release coordinator trust and recovery', () => {
       integrityMode: 'canonical-tree-v1',
       comparatorAlgorithm: 'scriptspect-canonical-tree/v1',
       comparatorAlgorithmDigest: canonicalTreeAlgorithmDigest,
+      comparatorSourceBundle: {
+        schemaVersion: 'scriptspect-canonical-tree-source-bundle/v1',
+        digest: canonicalTreeAlgorithmDigest,
+        files: [{ path: 'canonical-tree.mjs' }, { path: 'shared.mjs' }],
+      },
       treeEqual: true,
       byteEqual: false,
     });
@@ -368,6 +383,36 @@ describe('release coordinator trust and recovery', () => {
     expect(driftedDigest.stderr).toMatch(/comparator algorithm digest/i);
   });
 
+  it('rejects source drift that leaves the declarative behavior vectors unchanged', () => {
+    const { candidate, exactRegistry } = integrityTarballs('integrity-source-drift');
+    const releaseDirectory = join(temporaryDirectory('integrity-drifted-tools'), 'release');
+    mkdirSync(releaseDirectory);
+    for (const name of ['verify-package-integrity.mjs', 'shared.mjs']) {
+      copyFileSync(join(root, 'tools', 'release', name), join(releaseDirectory, name));
+    }
+    const comparatorPath = join(root, 'tools', 'release', 'canonical-tree.mjs');
+    const comparator = readFileSync(comparatorPath, 'utf8');
+    const drifted = comparator.replace(
+      'canonical tree root must be a directory',
+      'canonical tree input root must be a directory',
+    );
+    expect(drifted).not.toBe(comparator);
+    writeFileSync(join(releaseDirectory, 'canonical-tree.mjs'), drifted);
+
+    const result = runIntegrityVerifier(
+      integrityContract('canonical-tree-v1'),
+      candidate,
+      exactRegistry,
+      npmSri(exactRegistry),
+      join(releaseDirectory, 'verify-package-integrity.mjs'),
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(
+      /comparator algorithm digest does not match the executable comparator/i,
+    );
+  });
+
   it('verifies the reviewed integrity mode before recording npm publication', () => {
     const publish = jobSource('npm-publish.yml', 'publish');
     const verifier = 'verify-package-integrity.mjs';
@@ -380,27 +425,41 @@ describe('release coordinator trust and recovery', () => {
     expect(publish).not.toContain('[[ "$REGISTRY_SRI" == "$CANDIDATE_SRI" ]]');
   });
 
-  it('serializes every mutating transition by the verified version', () => {
+  it('serializes every state mutation under one per-SHA mutex and every publisher under one alias mutex', () => {
     expect(workflow('release-intent.yml').jobs?.['record-intent']?.concurrency).toEqual({
       group: `release-state-\${{ github.repository }}-\${{ github.sha }}`,
       'cancel-in-progress': false,
+      queue: 'max',
     });
     const release = workflow('release.yml');
     for (const jobName of ['build-candidate', 'stage-release']) {
       expect(release.jobs?.[jobName]?.concurrency).toEqual({
         group: `release-state-\${{ github.repository }}-\${{ needs.authorize.outputs.sha }}`,
         'cancel-in-progress': false,
+        queue: 'max',
       });
     }
     const publisher = workflow('npm-publish.yml');
+    expect(publisher.concurrency).toEqual({
+      group: `release-aliases-\${{ github.repository }}`,
+      'cancel-in-progress': false,
+      queue: 'max',
+    });
     expect(publisher.jobs?.publish?.concurrency).toEqual({
       group: `release-state-\${{ github.repository }}-\${{ github.sha }}`,
       'cancel-in-progress': false,
+      queue: 'max',
     });
-    expect(publisher.jobs?.['record-verification']?.concurrency).toEqual({
-      group: `release-state-\${{ github.repository }}-\${{ needs.publish.outputs.sha }}`,
-      'cancel-in-progress': false,
-    });
+    for (const jobName of ['advance-aliases', 'record-verification', 'rollback-aliases']) {
+      expect(publisher.jobs?.[jobName]?.concurrency).toEqual({
+        group: `release-state-\${{ github.repository }}-\${{ needs.publish.outputs.sha }}`,
+        'cancel-in-progress': false,
+        queue: 'max',
+      });
+    }
+    expect(publisher.jobs?.['advance-aliases']?.concurrency?.group).not.toContain(
+      'release-aliases',
+    );
   });
 
   it('stages one authoritative draft asset and checksums before npm access', () => {
@@ -413,12 +472,18 @@ describe('release coordinator trust and recovery', () => {
     expect(stage).toContain('release-manifest.json');
     expect(stage).toContain('SHA256SUMS');
     expect(stage).not.toContain('--clobber');
+    expect(stage).toContain('ACTUAL_RELEASE_ASSET_COUNT');
+    expect(stage.indexOf('ACTUAL_RELEASE_ASSET_COUNT')).toBeLessThan(stage.indexOf('staged-draft'));
 
     expect(source('release.yml')).not.toContain('npm publish');
     const publish = jobSource('npm-publish.yml', 'publish');
     expect(publish).toContain('gh release download');
     expect(publish).toContain('release-manifest.json');
     expect(publish).toContain('verify-publish-anchors');
+    expect(publish).toContain('ACTUAL_RELEASE_ASSET_COUNT');
+    expect(publish.indexOf('ACTUAL_RELEASE_ASSET_COUNT')).toBeLessThan(
+      publish.indexOf('npm publish'),
+    );
     expect(publish).toContain('sha256sum --check');
     expect(publish).toContain('npm publish "$RUNNER_TEMP/release/$TARBALL"');
     expect(publish).toContain('--provenance');
@@ -461,6 +526,7 @@ describe('release coordinator trust and recovery', () => {
       expect(run).toContain(predicate);
     }
     expect(run.indexOf('verify-publish-anchors')).toBeLessThan(run.indexOf('npm publish'));
+    expect(run).not.toContain('payload:.npmVerified');
     expect(jobSource('release.yml', 'authorize')).toContain('releasePrHeadRepo');
     expect(jobSource('release.yml', 'authorize')).toContain('releasePrHeadSha');
   });
@@ -484,13 +550,16 @@ describe('release coordinator trust and recovery', () => {
       'staged-draft',
       'npm-published',
       'npm-verified',
+      'alias-planned',
       'aliases-verified',
+      'final-planned',
       'consumed',
     ]) {
       expect(release).toContain(state);
     }
     expect(release).toContain('recovery-decision');
     expect(release).toContain('compare-and-update');
+    expect(jobSource('release.yml', 'authorize')).toContain('alias-planned');
   });
 
   it('keeps aliases unchanged until registry and immutable-tag consumers pass', () => {
@@ -502,12 +571,66 @@ describe('release coordinator trust and recovery', () => {
     expect(finalize).not.toContain('v1');
     expect(finalize).toContain('gh release edit');
     expect(finalize).toContain('--draft=false');
+    expect(finalize).toContain('--latest=false');
+    expect(finalize).not.toMatch(/--latest(?:\s|$)/u);
+    expect(finalize).toContain('verify-release-snapshot');
+    expect(finalize).toContain('verify-published-release');
+    expect(finalize.indexOf('verify-release-snapshot')).toBeLessThan(
+      finalize.indexOf('gh release edit'),
+    );
+    expect(finalize.indexOf('gh release edit')).toBeLessThan(
+      finalize.indexOf('verify-published-release'),
+    );
+    expect(finalize.indexOf('verify-published-release')).toBeLessThan(
+      finalize.indexOf('apply_alias "$MINOR_ALIAS"'),
+    );
+    expect(finalize).toContain('alias-planned');
+    expect(finalize).toContain('compare-and-update');
+    expect(finalize.indexOf('alias-planned')).toBeLessThan(finalize.indexOf('git push origin'));
     expect(finalize).not.toContain("':refs/tags/v0.1'");
-    expect(source('npm-publish.yml')).not.toContain('git push origin ":refs/tags/');
     expect(publisher.jobs?.publish?.concurrency).toBeDefined();
-    expect(source('npm-publish.yml')).toContain(`release-aliases-\${{ github.repository }}`);
+    expect(workflow('npm-publish.yml').concurrency?.group).toBe(
+      `release-aliases-\${{ github.repository }}`,
+    );
     expect(finalize).toContain('semver-monotonic');
     expect(finalize).toContain('merge-base --is-ancestor');
+    expect(finalize.indexOf('semver-monotonic')).toBeLessThan(finalize.indexOf('gh release edit'));
+    expect(finalize.indexOf('preflight_alias "$MAJOR_ALIAS"')).toBeLessThan(
+      finalize.indexOf('gh release edit'),
+    );
+
+    const rollback = publisher.jobs?.['rollback-aliases'];
+    expect(rollback?.needs).toEqual(['publish', 'advance-aliases', 'record-verification']);
+    expect(rollback?.if).toContain('always()');
+    const rollbackRun = jobSource('npm-publish.yml', 'rollback-aliases');
+    expect(rollbackRun).toContain('.aliasPlan.aliases | reverse[]');
+    expect(rollbackRun).toContain('alias-rollback');
+    expect(rollbackRun).toContain('--force-with-lease');
+    expect(rollbackRun).toContain('git push origin ":refs/tags/$NAME"');
+  });
+
+  it('uses the observed Release draft value and bounded exact-version registry retrieval', () => {
+    const publish = jobSource('npm-publish.yml', 'publish');
+    expect(publish).toContain('--argjson releaseDraft');
+    expect(publish).toContain('draft:$releaseDraft');
+    expect(publish).not.toContain('draft:true');
+    expect(publish).toContain('then tostring else error("draft is not boolean") end');
+    expect(publish).not.toContain('jq -er \'.draft | if type == "boolean" then .');
+    expect(publish).toContain('fetch-npm-artifact.mjs probe');
+    expect(publish).toContain('fetch-npm-artifact.mjs fetch');
+    expect(publish).toContain('--attempts 12');
+    expect(publish).toContain('--base-delay-ms 5000');
+    expect(publish).toContain('--max-delay-ms 30000');
+    expect(publish).toContain('--request-timeout-ms 15000');
+    expect(publish).not.toContain('npm view');
+    expect(publish).not.toContain('2>/dev/null || true');
+    expect(publish.indexOf('fetch-npm-artifact.mjs fetch')).toBeLessThan(
+      publish.indexOf('verify-package-integrity.mjs'),
+    );
+
+    const aliases = jobSource('npm-publish.yml', 'advance-aliases');
+    expect(aliases).toContain('then tostring else error("draft is not boolean") end');
+    expect(aliases).not.toContain("jq -er '.draft'");
   });
 
   it('decodes the signed SLSA statement before matching repository and commit', () => {
@@ -525,6 +648,48 @@ describe('release coordinator trust and recovery', () => {
     expect(record).toContain('/check-runs/');
     expect(record).toContain('consumed');
     expect(record).toContain('final-idempotency');
+  });
+
+  it('write-ahead logs final evidence and deletes an unconsumed exact upload before alias rollback', () => {
+    const record = jobSource('npm-publish.yml', 'record-verification');
+    const finalPlanPatch = record.indexOf('approved-final-planned-state.json');
+    const upload = record.indexOf('gh release upload');
+    const consumedPatch = record.indexOf('approved-consumed-state.json');
+
+    expect(finalPlanPatch).toBeGreaterThanOrEqual(0);
+    expect(upload).toBeGreaterThan(finalPlanPatch);
+    expect(consumedPatch).toBeGreaterThan(upload);
+    expect(record).toContain('final-planned');
+    expect(record).toContain('final-idempotency');
+    expect(record.match(/alias_target "\$MINOR_ALIAS"/gu)).toHaveLength(2);
+    expect(record.match(/alias_target "\$MAJOR_ALIAS"/gu)).toHaveLength(2);
+    expect(record.indexOf('verify-published-release')).toBeLessThan(
+      record.indexOf('approved-consumed-state.json'),
+    );
+    expect(record.lastIndexOf('alias_target "$MAJOR_ALIAS"')).toBeLessThan(
+      record.indexOf('approved-consumed-state.json'),
+    );
+    expect(record.indexOf('approved-consumed-state.json')).toBeLessThan(
+      record.indexOf('gh release edit "$TAG" --repo "$REPOSITORY" --latest'),
+    );
+    expect(record.indexOf('latest-promotion')).toBeLessThan(
+      record.indexOf('gh release edit "$TAG" --repo "$REPOSITORY" --latest'),
+    );
+
+    const rollback = jobSource('npm-publish.yml', 'rollback-aliases');
+    const finalDelete = rollback.indexOf('releases/assets/$FINAL_ASSET_ID');
+    const aliasRollback = rollback.indexOf('.aliasPlan.aliases | reverse[]');
+    const releaseIdentity = rollback.indexOf('ROLLBACK_RELEASE_ID');
+    const immutableTagIdentity = rollback.indexOf('rollback-tag-ref.json');
+    expect(rollback).toContain('.finalPlanned.finalVerificationDigest');
+    expect(finalDelete).toBeGreaterThanOrEqual(0);
+    expect(releaseIdentity).toBeGreaterThanOrEqual(0);
+    expect(immutableTagIdentity).toBeGreaterThanOrEqual(0);
+    expect(releaseIdentity).toBeLessThan(finalDelete);
+    expect(immutableTagIdentity).toBeLessThan(finalDelete);
+    expect(aliasRollback).toBeGreaterThan(finalDelete);
+    expect(rollback).toContain('sha256:$FINAL_DIGEST');
+    expect(rollback).toContain('FINAL_COUNT');
   });
 });
 
@@ -549,6 +714,11 @@ describe('one-time npm bootstrap', () => {
     expect(run).toContain('node_modules/scriptspect/dist/action.mjs');
     expect(run).toContain('canonical-tree');
     expect(run).toContain('comparatorAlgorithmDigest');
+    expect(run).toContain('canonical-tree.mjs algorithm-digest');
+    expect(run).toContain('comparator-source-bundle.json');
+    expect(source('npm-bootstrap.yml')).toContain(
+      `\${{ runner.temp }}/bootstrap/comparator-source-bundle.json`,
+    );
     expect(bootstrap.jobs?.bootstrap?.concurrency).toEqual({
       group: `npm-bootstrap-\${{ github.repository }}`,
       'cancel-in-progress': false,

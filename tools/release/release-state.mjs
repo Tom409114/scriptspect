@@ -25,7 +25,9 @@ const stateOrder = [
   'staged-draft',
   'npm-published',
   'npm-verified',
+  'alias-planned',
   'aliases-verified',
+  'final-planned',
   'consumed',
 ];
 
@@ -34,7 +36,9 @@ const stateField = {
   'staged-draft': 'stagedDraft',
   'npm-published': 'npmPublished',
   'npm-verified': 'npmVerified',
+  'alias-planned': 'aliasPlan',
   'aliases-verified': 'aliasesVerified',
+  'final-planned': 'finalPlanned',
   consumed: 'consumed',
 };
 
@@ -118,6 +122,40 @@ function validateAssets(value, label) {
   return assets;
 }
 
+function validateObservedReleaseAssets(state, value, label) {
+  const assets = validateAssets(value, label);
+  const immutableAssets = assets.filter((asset) => asset.name !== 'final-verification.json');
+  assertAssetSetEqual(immutableAssets, state.stagedDraft.assets, label);
+  const finalAssets = assets.filter((asset) => asset.name === 'final-verification.json');
+  if (finalAssets.length > 1) {
+    throw new ReleaseToolError(`${label} must contain at most one final verification asset`);
+  }
+  const finalRank = stateOrder.indexOf('final-planned');
+  const stateRank = stateOrder.indexOf(state.state);
+  if (finalAssets.length === 1) {
+    if (stateRank < finalRank) {
+      throw new ReleaseToolError(
+        'published release has final verification before its durable plan',
+      );
+    }
+    assertEqual(
+      finalAssets[0].sha256,
+      state.finalPlanned.finalVerificationDigest,
+      'final verification digest',
+    );
+    if (state.state === 'consumed') {
+      assertEqual(
+        finalAssets[0].assetId,
+        state.consumed.finalVerificationAssetId,
+        'final verification assetId',
+      );
+    }
+  } else if (state.state === 'consumed') {
+    throw new ReleaseToolError('consumed release is missing final verification');
+  }
+  return assets;
+}
+
 function validateRetainedCandidate(value) {
   const candidate = requireExactKeys(value, 'retained candidate', [
     'runId',
@@ -138,19 +176,39 @@ function validateRetainedCandidate(value) {
   };
 }
 
-function validateStagedDraft(value) {
+function validateStagedDraft(value, version) {
   const draft = requireExactKeys(value, 'staged draft', [
     'releaseId',
     'assets',
     'releaseManifestDigest',
   ]);
+  const releaseManifestDigest = requireSha256(
+    draft.releaseManifestDigest,
+    'staged draft releaseManifestDigest',
+  );
+  const assets = validateAssets(draft.assets, 'staged draft assets');
+  const expectedNames = new Set([
+    `scriptspect-${requireStableSemver(version, 'staged draft version')}.tgz`,
+    'SHA256SUMS',
+    'candidate-manifest.json',
+    'release-manifest.json',
+  ]);
+  if (
+    assets.length !== expectedNames.size ||
+    assets.some((asset) => !expectedNames.has(asset.name))
+  ) {
+    throw new ReleaseToolError('staged draft assets must be the exact immutable Release asset set');
+  }
+  const releaseManifest = assets.find((asset) => asset.name === 'release-manifest.json');
+  assertEqual(
+    releaseManifest.sha256,
+    releaseManifestDigest,
+    'staged draft release-manifest.json digest',
+  );
   return {
     releaseId: requirePositiveInteger(draft.releaseId, 'staged draft releaseId'),
-    assets: validateAssets(draft.assets, 'staged draft assets'),
-    releaseManifestDigest: requireSha256(
-      draft.releaseManifestDigest,
-      'staged draft releaseManifestDigest',
-    ),
+    assets,
+    releaseManifestDigest,
   };
 }
 
@@ -225,12 +283,66 @@ function validateAliasesVerified(value, expectedCommit, version) {
   return { aliases };
 }
 
+function validateAliasPlan(value, expectedCommit, expectedVersion) {
+  const input = requireExactKeys(value, 'alias plan', ['version', 'commit', 'aliases']);
+  const version = requireStableSemver(input.version, 'alias plan version');
+  assertEqual(version, expectedVersion, 'alias plan version');
+  const commit = requireCommitSha(input.commit, 'alias plan commit');
+  assertEqual(commit, expectedCommit, 'alias plan commit');
+  const expectedNames = aliasNamesForVersion(version);
+  const aliases = requireArray(input.aliases, 'alias plan aliases').map((entry, index) => {
+    const alias = requireExactKeys(entry, `alias plan aliases[${index}]`, [
+      'name',
+      'previousTarget',
+      'target',
+    ]);
+    if (!expectedNames.includes(alias.name)) {
+      throw new ReleaseToolError(`alias plan aliases[${index}].name is not allowed`);
+    }
+    const target = requireCommitSha(alias.target, `alias plan aliases[${index}].target`);
+    assertEqual(target, commit, `alias plan ${alias.name} target`);
+    return {
+      name: alias.name,
+      previousTarget: requireNullableCommit(
+        alias.previousTarget,
+        `alias plan aliases[${index}].previousTarget`,
+      ),
+      target,
+    };
+  });
+  if (
+    aliases.length !== 2 ||
+    new Set(aliases.map((alias) => alias.name)).size !== aliases.length ||
+    !expectedNames.every((name) => aliases.some((alias) => alias.name === name))
+  ) {
+    throw new ReleaseToolError(`alias plan must contain ${expectedNames.join(' and ')}`);
+  }
+  return { version, commit, aliases };
+}
+
 function validateConsumed(value) {
-  const consumed = requireExactKeys(value, 'consumed transition', ['finalVerificationDigest']);
+  const consumed = requireExactKeys(value, 'consumed transition', [
+    'finalVerificationDigest',
+    'finalVerificationAssetId',
+  ]);
   return {
     finalVerificationDigest: requireSha256(
       consumed.finalVerificationDigest,
       'consumed finalVerificationDigest',
+    ),
+    finalVerificationAssetId: requirePositiveInteger(
+      consumed.finalVerificationAssetId,
+      'consumed finalVerificationAssetId',
+    ),
+  };
+}
+
+function validateFinalPlanned(value) {
+  const planned = requireExactKeys(value, 'final plan', ['finalVerificationDigest']);
+  return {
+    finalVerificationDigest: requireSha256(
+      planned.finalVerificationDigest,
+      'final plan finalVerificationDigest',
     ),
   };
 }
@@ -355,19 +467,31 @@ export function validateReleaseState(value) {
     intent,
   };
   if (rank >= 1) result.retainedCandidate = validateRetainedCandidate(raw.retainedCandidate);
-  if (rank >= 2) result.stagedDraft = validateStagedDraft(raw.stagedDraft);
+  if (rank >= 2) result.stagedDraft = validateStagedDraft(raw.stagedDraft, intent.version);
   if (rank >= 3) result.npmPublished = validateNpmPublished(raw.npmPublished, result);
   if (rank >= 4) {
     result.npmVerified = validateNpmVerified(raw.npmVerified);
   }
   if (rank >= 5) {
+    result.aliasPlan = validateAliasPlan(raw.aliasPlan, intent.mergeCommitSha, intent.version);
+  }
+  if (rank >= 6) {
     result.aliasesVerified = validateAliasesVerified(
       raw.aliasesVerified,
       intent.mergeCommitSha,
       intent.version,
     );
+    assertEqual(result.aliasesVerified.aliases, result.aliasPlan.aliases, 'durable alias plan');
   }
-  if (rank >= 6) result.consumed = validateConsumed(raw.consumed);
+  if (rank >= 7) result.finalPlanned = validateFinalPlanned(raw.finalPlanned);
+  if (rank >= 8) {
+    result.consumed = validateConsumed(raw.consumed);
+    assertEqual(
+      result.consumed.finalVerificationDigest,
+      result.finalPlanned.finalVerificationDigest,
+      'final verification digest',
+    );
+  }
   return result;
 }
 
@@ -376,13 +500,17 @@ function validateTransitionPayload(target, payload, state) {
     case 'retained-candidate':
       return validateRetainedCandidate(payload);
     case 'staged-draft':
-      return validateStagedDraft(payload);
+      return validateStagedDraft(payload, state.intent.version);
     case 'npm-published':
       return validateNpmPublished(payload, state);
     case 'npm-verified':
       return validateNpmVerified(payload);
+    case 'alias-planned':
+      return validateAliasPlan(payload, state.intent.mergeCommitSha, state.intent.version);
     case 'aliases-verified':
       return validateAliasesVerified(payload, state.intent.mergeCommitSha, state.intent.version);
+    case 'final-planned':
+      return validateFinalPlanned(payload);
     case 'consumed':
       return validateConsumed(payload);
     default:
@@ -496,13 +624,32 @@ export function planFloatingAliases(value) {
   return { version, commit, aliases };
 }
 
+export function decideLatestPromotion(value) {
+  const input = requireExactKeys(value, 'latest promotion', [
+    'candidateVersion',
+    'currentLatestVersion',
+  ]);
+  const candidateVersion = requireStableSemver(input.candidateVersion, 'latest candidate version');
+  const currentLatestVersion =
+    input.currentLatestVersion === null
+      ? null
+      : requireStableSemver(input.currentLatestVersion, 'current latest version');
+  const shouldPromote =
+    currentLatestVersion === null ||
+    compareStableSemver(currentLatestVersion, candidateVersion) < 0;
+  return {
+    action: shouldPromote ? 'promote' : 'retain',
+    version: shouldPromote ? candidateVersion : currentLatestVersion,
+  };
+}
+
 export function decideAliasRollback(value) {
   const input = requireExactKeys(value, 'alias rollback', ['current', 'candidate', 'previous']);
   const current = requireCommitSha(input.current, 'alias rollback current');
   const candidate = requireCommitSha(input.candidate, 'alias rollback candidate');
   const previous = requireNullableCommit(input.previous, 'alias rollback previous');
   if (current !== candidate) throw new ReleaseToolError('alias rollback CAS conflict');
-  if (previous === null) return { action: 'retain', target: candidate };
+  if (previous === null) return { action: 'delete', target: null };
   return { action: 'restore', target: previous };
 }
 
@@ -671,6 +818,13 @@ export function validateReleaseManifest(value, candidateValue) {
   );
   if (!result.assets.some((asset) => asset.name === 'SHA256SUMS')) {
     throw new ReleaseToolError('release manifest is missing SHA256SUMS');
+  }
+  const expectedNames = new Set([candidate.tarball.name, 'SHA256SUMS', 'candidate-manifest.json']);
+  if (
+    result.assets.length !== expectedNames.size ||
+    result.assets.some((asset) => !expectedNames.has(asset.name))
+  ) {
+    throw new ReleaseToolError('release manifest assets must be the exact immutable input set');
   }
   return result;
 }
@@ -846,7 +1000,10 @@ export function verifyPublishAnchors(value) {
   );
   assertEqual(state.retainedCandidate.npmSRI, candidate.tarball.npmSRI, 'publish npmSRI');
   assertEqual(state.stagedDraft.releaseId, release.releaseId, 'publish releaseId');
-  assertAssetSetEqual(state.stagedDraft.assets, release.assets, 'publish release assets');
+  const manifestAssets = state.stagedDraft.assets.filter(
+    (asset) => asset.name !== 'release-manifest.json',
+  );
+  assertAssetSetEqual(manifestAssets, release.assets, 'publish release assets');
   assertEqual(
     state.stagedDraft.releaseManifestDigest,
     canonicalJsonDigest(release),
@@ -880,8 +1037,7 @@ export function verifyPublishAnchors(value) {
   ) {
     throw new ReleaseToolError('publish release anchor conflict');
   }
-  const observedAssets = validateAssets(observed.assets, 'observed publish assets');
-  assertAssetSetEqual(observedAssets, release.assets, 'publish asset anchors');
+  validateObservedReleaseAssets(state, observed.assets, 'publish asset anchors');
   const tarball = release.assets.find((asset) => asset.name === candidate.tarball.name);
   return {
     releaseId: release.releaseId,
@@ -890,6 +1046,97 @@ export function verifyPublishAnchors(value) {
     sha256: tarball.sha256,
     npmSRI: candidate.tarball.npmSRI,
   };
+}
+
+function verifyReleaseSnapshotWithLabel(value, label) {
+  const input = requireExactKeys(value, `${label} verification`, ['state', 'observed']);
+  const state = validateReleaseState(input.state);
+  if (stateOrder.indexOf(state.state) < stateOrder.indexOf('staged-draft')) {
+    throw new ReleaseToolError(`${label} verification requires staged-draft state`);
+  }
+  const observed = requireExactKeys(input.observed, `observed ${label}`, [
+    'releaseId',
+    'tag',
+    'commit',
+    'draft',
+    'assets',
+  ]);
+  const releaseId = requirePositiveInteger(observed.releaseId, `observed ${label} releaseId`);
+  const tag = requireString(observed.tag, `observed ${label} tag`);
+  const commit = requireCommitSha(observed.commit, `observed ${label} commit`);
+  if (typeof observed.draft !== 'boolean') {
+    throw new ReleaseToolError(`observed ${label} draft must be boolean`);
+  }
+  if (
+    releaseId !== state.stagedDraft.releaseId ||
+    tag !== state.intent.tag ||
+    commit !== state.intent.mergeCommitSha
+  ) {
+    throw new ReleaseToolError(`${label} anchor conflict`);
+  }
+  const assets = validateObservedReleaseAssets(state, observed.assets, `${label} assets`);
+  return { releaseId, tag, commit, draft: observed.draft, assets };
+}
+
+export function verifyReleaseSnapshot(value) {
+  return verifyReleaseSnapshotWithLabel(value, 'release snapshot');
+}
+
+export function verifyPublishedRelease(value) {
+  const state = validateReleaseState(requireObject(value, 'published release verification').state);
+  if (stateOrder.indexOf(state.state) < stateOrder.indexOf('npm-verified')) {
+    throw new ReleaseToolError('published release verification requires npm-verified state');
+  }
+  const snapshot = verifyReleaseSnapshotWithLabel(value, 'published release');
+  if (snapshot.draft !== false) {
+    throw new ReleaseToolError('observed published release must not be a draft');
+  }
+  const { draft: _draft, ...published } = snapshot;
+  return published;
+}
+
+export function decideFinalEvidenceRollback(value) {
+  const input = requireExactKeys(value, 'final evidence rollback input', ['state', 'assets']);
+  const state = validateReleaseState(input.state);
+  const rawAssets = requireArray(input.assets, 'final evidence rollback assets');
+  const rawFinals = rawAssets.filter(
+    (asset) =>
+      requireObject(asset, 'final evidence rollback asset').name === 'final-verification.json',
+  );
+  if (rawFinals.length > 1) {
+    throw new ReleaseToolError('rollback requires exactly one final verification asset');
+  }
+  const assets = validateAssets(input.assets, 'final evidence rollback assets');
+  const finals = assets.filter((asset) => asset.name === 'final-verification.json');
+  const stateRank = stateOrder.indexOf(state.state);
+  const plannedRank = stateOrder.indexOf('final-planned');
+  if (stateRank < plannedRank) {
+    if (finals.length > 0) {
+      throw new ReleaseToolError('final verification exists without a durable final plan');
+    }
+    return { action: 'none' };
+  }
+  if (finals.length === 0) {
+    if (state.state === 'consumed') {
+      throw new ReleaseToolError('consumed state is missing final verification');
+    }
+    return { action: 'none' };
+  }
+  const final = finals[0];
+  assertEqual(
+    final.sha256,
+    state.finalPlanned.finalVerificationDigest,
+    'final verification digest',
+  );
+  if (state.state === 'consumed') {
+    assertEqual(
+      final.assetId,
+      state.consumed.finalVerificationAssetId,
+      'consumed final verification assetId',
+    );
+    return { action: 'retain', assetId: final.assetId, sha256: final.sha256 };
+  }
+  return { action: 'delete', assetId: final.assetId, sha256: final.sha256 };
 }
 
 function validateFinalVerification(value) {
@@ -1113,6 +1360,15 @@ async function main() {
       result = planFloatingAliases(readJson(path, 'floating alias plan'));
       break;
     }
+    case 'latest-promotion': {
+      const [path] = commandArguments(
+        arguments_,
+        1,
+        'release-state.mjs latest-promotion <promotion-input>',
+      );
+      result = decideLatestPromotion(readJson(path, 'latest promotion input'));
+      break;
+    }
     case 'alias-rollback': {
       const [path] = commandArguments(
         arguments_,
@@ -1167,6 +1423,33 @@ async function main() {
         'release-state.mjs verify-publish-anchors <input>',
       );
       result = verifyPublishAnchors(readJson(path, 'publish anchor input'));
+      break;
+    }
+    case 'verify-published-release': {
+      const [path] = commandArguments(
+        arguments_,
+        1,
+        'release-state.mjs verify-published-release <input>',
+      );
+      result = verifyPublishedRelease(readJson(path, 'published release verification input'));
+      break;
+    }
+    case 'verify-release-snapshot': {
+      const [path] = commandArguments(
+        arguments_,
+        1,
+        'release-state.mjs verify-release-snapshot <input>',
+      );
+      result = verifyReleaseSnapshot(readJson(path, 'release snapshot verification input'));
+      break;
+    }
+    case 'final-rollback-decision': {
+      const [path] = commandArguments(
+        arguments_,
+        1,
+        'release-state.mjs final-rollback-decision <input>',
+      );
+      result = decideFinalEvidenceRollback(readJson(path, 'final evidence rollback input'));
       break;
     }
     case 'final-idempotency': {

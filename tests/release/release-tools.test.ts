@@ -69,6 +69,7 @@ const stagedDraft = {
     { name: 'scriptspect-0.1.0.tgz', assetId: 7101, sha256: shaB },
     { name: 'SHA256SUMS', assetId: 7102, sha256: shaC },
     { name: 'candidate-manifest.json', assetId: 7103, sha256: shaA },
+    { name: 'release-manifest.json', assetId: 7104, sha256: shaD },
   ],
   releaseManifestDigest: shaD,
 };
@@ -76,6 +77,12 @@ const stagedDraft = {
 type CanonicalTreeModule = {
   CANONICAL_TREE_ALGORITHM_DIGEST: string;
   CANONICAL_TREE_BEHAVIOR_VECTOR_DIGEST: string;
+  CANONICAL_TREE_SOURCE_BUNDLE: {
+    schemaVersion: string;
+    entry: string;
+    files: Array<{ path: string; sourceSha256: string }>;
+    digest: string;
+  };
   canonicalizeTarball(path: string): {
     algorithm: string;
     algorithmDigest: string;
@@ -113,11 +120,15 @@ type ReleaseStateModule = {
   canonicalJsonDigest(input: unknown): string;
   decideReleaseRecovery(input: unknown): unknown;
   verifyPublishAnchors(input: unknown): unknown;
+  verifyPublishedRelease(input: unknown): unknown;
   verifyFinalIdempotency(existing: unknown, proposed: unknown): unknown;
+  decideFinalEvidenceRollback(input: unknown): unknown;
   selectExactCiRun(runs: unknown, expected: unknown): unknown;
   compareAndUpdateReleaseState(current: unknown, proposed: unknown): unknown;
   planFloatingAliases(input: unknown): unknown;
+  decideLatestPromotion(input: unknown): unknown;
   decideAliasRollback(input: unknown): unknown;
+  verifyReleaseSnapshot(input: unknown): unknown;
 };
 
 type ProvenanceModule = {
@@ -313,34 +324,128 @@ const expectedBehaviorVectorContract = {
   ],
 };
 const expectedBehaviorVectorDigest = fixtureDigest(expectedBehaviorVectorContract);
-const expectedAlgorithmDigest = fixtureDigest({
-  archive:
-    'gzip tar with verified headers and safe paths; regular files, directories, and symlinks; implicit directories mode 0755',
-  behaviorVectorDigest: expectedBehaviorVectorDigest,
-  contentDigest: 'sha256 raw file bytes; sha256 utf8 link target; null for directory',
-  entryOrder: 'relative POSIX path ascending by UTF-8 code unit',
-  entryRecord: 'path NUL type NUL mode-octal NUL content-digest-or-empty LF',
-  mode: 'lstat mode & 0o7777 encoded as four lowercase octal digits',
-  root: 'realpath directory; root entry excluded',
-  version: 'scriptspect-canonical-tree/v1',
-});
 
 describe('versioned canonical tree comparison', () => {
-  it('binds the public algorithm digest to executable immutable behavior vectors', async () => {
+  it('binds the reviewed digest to executable sources and verifies immutable behavior vectors', async () => {
     const tools = await loadModule<CanonicalTreeModule>('../../tools/release/canonical-tree.mjs');
 
     expect(expectedBehaviorVectorDigest).toBe(
       'd5a50eff68ef6d9efc4f0bf58c8e2a4c4dd9df869b67ac277dc53c8adc33c1bc',
     );
-    expect(expectedAlgorithmDigest).toBe(
-      'e4134401ced1d74c8f082a6a7950ef074d5a0ec9c24d6c1531a25254c9661ea3',
-    );
     expect(tools.CANONICAL_TREE_BEHAVIOR_VECTOR_DIGEST).toBe(expectedBehaviorVectorDigest);
-    expect(tools.CANONICAL_TREE_ALGORITHM_DIGEST).toBe(expectedAlgorithmDigest);
+    expect(tools.CANONICAL_TREE_SOURCE_BUNDLE).toMatchObject({
+      schemaVersion: 'scriptspect-canonical-tree-source-bundle/v1',
+      entry: 'canonical-tree.mjs',
+      files: [
+        { path: 'canonical-tree.mjs', sourceSha256: expect.stringMatching(/^[0-9a-f]{64}$/u) },
+        { path: 'shared.mjs', sourceSha256: expect.stringMatching(/^[0-9a-f]{64}$/u) },
+      ],
+      digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    expect(tools.CANONICAL_TREE_ALGORITHM_DIGEST).toBe(tools.CANONICAL_TREE_SOURCE_BUNDLE.digest);
     expect(tools.verifyCanonicalTreeBehaviorVectors()).toEqual({
       behaviorVectorDigest: expectedBehaviorVectorDigest,
       verifiedVectors: expectedBehaviorVectorContract.vectors.map((vector) => vector.name),
     });
+  });
+
+  it('changes the reviewed digest when executable source drifts outside the behavior vectors', () => {
+    const directory = temporaryDirectory('tree-source-drift');
+    const releaseDirectory = join(directory, 'release');
+    mkdirSync(releaseDirectory);
+    const sourcePath = join(root, 'tools', 'release', 'canonical-tree.mjs');
+    const source = readFileSync(sourcePath, 'utf8');
+    const drifted = source.replace(
+      'canonical tree root must be a directory',
+      'canonical tree input root must be a directory',
+    );
+    expect(drifted).not.toBe(source);
+    writeFileSync(join(releaseDirectory, 'canonical-tree.mjs'), drifted);
+    writeFileSync(
+      join(releaseDirectory, 'shared.mjs'),
+      readFileSync(join(root, 'tools', 'release', 'shared.mjs')),
+    );
+
+    const original = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(root, 'tools', 'release', 'canonical-tree.mjs'), 'algorithm-digest'],
+        { encoding: 'utf8' },
+      ),
+    ) as { algorithmDigest: string; behaviorVectorDigest: string };
+    const changed = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(releaseDirectory, 'canonical-tree.mjs'), 'algorithm-digest'],
+        { encoding: 'utf8' },
+      ),
+    ) as { algorithmDigest: string; behaviorVectorDigest: string };
+
+    expect(changed.behaviorVectorDigest).toBe(original.behaviorVectorDigest);
+    expect(changed.algorithmDigest).not.toBe(original.algorithmDigest);
+  });
+
+  it('changes the reviewed digest when an imported source dependency drifts', () => {
+    const directory = temporaryDirectory('tree-dependency-drift');
+    const releaseDirectory = join(directory, 'release');
+    mkdirSync(releaseDirectory);
+    writeFileSync(
+      join(releaseDirectory, 'canonical-tree.mjs'),
+      readFileSync(join(root, 'tools', 'release', 'canonical-tree.mjs')),
+    );
+    const sharedPath = join(root, 'tools', 'release', 'shared.mjs');
+    const shared = readFileSync(sharedPath, 'utf8');
+    const drifted = shared.replace(
+      'JSON numbers must be finite',
+      'canonical JSON numbers must be finite',
+    );
+    expect(drifted).not.toBe(shared);
+    writeFileSync(join(releaseDirectory, 'shared.mjs'), drifted);
+
+    const original = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(root, 'tools', 'release', 'canonical-tree.mjs'), 'algorithm-digest'],
+        { encoding: 'utf8' },
+      ),
+    ) as { algorithmDigest: string; behaviorVectorDigest: string };
+    const changed = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(releaseDirectory, 'canonical-tree.mjs'), 'algorithm-digest'],
+        { encoding: 'utf8' },
+      ),
+    ) as { algorithmDigest: string; behaviorVectorDigest: string };
+
+    expect(changed.behaviorVectorDigest).toBe(original.behaviorVectorDigest);
+    expect(changed.algorithmDigest).not.toBe(original.algorithmDigest);
+  });
+
+  it('normalizes checkout line endings in the portable source bundle digest', () => {
+    const directory = temporaryDirectory('tree-source-line-endings');
+    const releaseDirectory = join(directory, 'release');
+    mkdirSync(releaseDirectory);
+    for (const name of ['canonical-tree.mjs', 'shared.mjs']) {
+      const source = readFileSync(join(root, 'tools', 'release', name), 'utf8');
+      writeFileSync(join(releaseDirectory, name), source.replace(/\r?\n/gu, '\r\n'));
+    }
+
+    const original = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(root, 'tools', 'release', 'canonical-tree.mjs'), 'algorithm-digest'],
+        { encoding: 'utf8' },
+      ),
+    ) as { algorithmDigest: string };
+    const windowsCheckout = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(releaseDirectory, 'canonical-tree.mjs'), 'algorithm-digest'],
+        { encoding: 'utf8' },
+      ),
+    ) as { algorithmDigest: string };
+
+    expect(windowsCheckout.algorithmDigest).toBe(original.algorithmDigest);
   });
 
   it('applies local PAX path and linkpath once', async () => {
@@ -500,9 +605,6 @@ describe('versioned canonical tree comparison', () => {
     const rightTree = await tools.canonicalizeTree(right);
 
     expect(leftTree.algorithm).toBe('scriptspect-canonical-tree/v1');
-    expect(leftTree.algorithmDigest).toBe(
-      'e4134401ced1d74c8f082a6a7950ef074d5a0ec9c24d6c1531a25254c9661ea3',
-    );
     expect(tools.CANONICAL_TREE_ALGORITHM_DIGEST).toBe(leftTree.algorithmDigest);
     expect(leftTree.entries.map((entry) => entry.path)).toEqual([
       'lib',
@@ -566,10 +668,21 @@ describe('versioned canonical tree comparison', () => {
       }),
     );
 
-    expect(algorithm).toEqual({
+    expect(algorithm).toMatchObject({
       algorithm: 'scriptspect-canonical-tree/v1',
-      algorithmDigest: 'e4134401ced1d74c8f082a6a7950ef074d5a0ec9c24d6c1531a25254c9661ea3',
+      algorithmDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      behaviorVectorDigest: expectedBehaviorVectorDigest,
+      sourceBundle: {
+        schemaVersion: 'scriptspect-canonical-tree-source-bundle/v1',
+        entry: 'canonical-tree.mjs',
+        digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      },
     });
+    expect(algorithm.sourceBundle.files.map((file: { path: string }) => file.path)).toEqual([
+      'canonical-tree.mjs',
+      'shared.mjs',
+    ]);
+    expect(algorithm.algorithmDigest).toBe(algorithm.sourceBundle.digest);
     expect(manifest.entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ path: 'package/package.json', type: 'file' }),
@@ -621,18 +734,63 @@ describe('durable release state and anchors', () => {
         provenanceDigest: shaB,
       },
     });
-    const aliasesVerified = tools.transitionReleaseState(npmVerified, {
+    expect(
+      tools.transitionReleaseState(npmVerified, {
+        to: 'npm-verified',
+        payload: {
+          registryNpmSRI,
+          registryManifestDigest: shaA,
+          provenanceDigest: shaB,
+        },
+      }),
+    ).toEqual(npmVerified);
+    expect(() =>
+      tools.transitionReleaseState(npmVerified, {
+        to: 'npm-verified',
+        payload: {
+          registryNpmSRI,
+          registryManifestDigest: shaA,
+          provenanceDigest: shaD,
+        },
+      }),
+    ).toThrow(/npm-verified.*idempotency conflict/i);
+    const aliasPlan = {
+      version: '0.1.0',
+      commit,
+      aliases: [
+        { name: 'v0.1', previousTarget: null, target: commit },
+        { name: 'v0', previousTarget: '2'.repeat(40), target: commit },
+      ],
+    };
+    const aliasPlanned = tools.transitionReleaseState(npmVerified, {
+      to: 'alias-planned',
+      payload: aliasPlan,
+    });
+    const aliasesVerified = tools.transitionReleaseState(aliasPlanned, {
       to: 'aliases-verified',
       payload: {
-        aliases: [
-          { name: 'v0.1', previousTarget: null, target: commit },
-          { name: 'v0', previousTarget: '2'.repeat(40), target: commit },
-        ],
+        aliases: aliasPlan.aliases,
       },
     });
-    const consumed = tools.transitionReleaseState(aliasesVerified, {
-      to: 'consumed',
+    const finalPlanned = tools.transitionReleaseState(aliasesVerified, {
+      to: 'final-planned',
       payload: { finalVerificationDigest: shaC },
+    });
+    expect(
+      tools.transitionReleaseState(finalPlanned, {
+        to: 'final-planned',
+        payload: { finalVerificationDigest: shaC },
+      }),
+    ).toEqual(finalPlanned);
+    expect(() =>
+      tools.transitionReleaseState(finalPlanned, {
+        to: 'final-planned',
+        payload: { finalVerificationDigest: shaD },
+      }),
+    ).toThrow(/final-planned.*conflict/i);
+    const consumed = tools.transitionReleaseState(finalPlanned, {
+      to: 'consumed',
+      payload: { finalVerificationDigest: shaC, finalVerificationAssetId: 8101 },
     });
 
     expect(consumed).toMatchObject({
@@ -642,7 +800,9 @@ describe('durable release state and anchors', () => {
       retainedCandidate,
       stagedDraft,
       npmVerified: { registryNpmSRI, registryManifestDigest: shaA, provenanceDigest: shaB },
-      consumed: { finalVerificationDigest: shaC },
+      aliasPlan,
+      finalPlanned: { finalVerificationDigest: shaC },
+      consumed: { finalVerificationDigest: shaC, finalVerificationAssetId: 8101 },
     });
     expect(
       tools.transitionReleaseState(consumed, {
@@ -662,6 +822,38 @@ describe('durable release state and anchors', () => {
         payload: { ...stagedDraft, releaseId: 9999 },
       }),
     ).toThrow(/conflict/i);
+    expect(() =>
+      tools.transitionReleaseState(aliasesVerified, {
+        to: 'consumed',
+        payload: { finalVerificationDigest: shaC, finalVerificationAssetId: 8101 },
+      }),
+    ).toThrow(/invalid transition/i);
+    expect(() =>
+      tools.transitionReleaseState(finalPlanned, {
+        to: 'consumed',
+        payload: { finalVerificationDigest: shaD, finalVerificationAssetId: 8101 },
+      }),
+    ).toThrow(/final verification digest.*conflict/i);
+  });
+
+  it('requires the fourth staged asset to be the exact release manifest digest', async () => {
+    const tools = await loadModule<ReleaseStateModule>('../../tools/release/release-state.mjs');
+    const retained = tools.transitionReleaseState(tools.createReleaseState(intent), {
+      to: 'retained-candidate',
+      payload: retainedCandidate,
+    });
+
+    expect(() =>
+      tools.transitionReleaseState(retained, {
+        to: 'staged-draft',
+        payload: {
+          ...stagedDraft,
+          assets: stagedDraft.assets.map((asset) =>
+            asset.name === 'release-manifest.json' ? { ...asset, sha256: shaA } : asset,
+          ),
+        },
+      }),
+    ).toThrow(/release-manifest.*digest/i);
   });
 
   it('checks every requested anchor against the durable state', async () => {
@@ -721,9 +913,90 @@ describe('durable release state and anchors', () => {
     ).toThrow(/state.*regression/i);
     expect(tools.compareAndUpdateReleaseState(staged, staged)).toEqual(staged);
   });
+
+  it('persists the first alias CAS plan and preserves previous targets across crash retries', async () => {
+    const tools = await loadModule<ReleaseStateModule>('../../tools/release/release-state.mjs');
+    const retained = tools.transitionReleaseState(tools.createReleaseState(intent), {
+      to: 'retained-candidate',
+      payload: retainedCandidate,
+    });
+    const staged = tools.transitionReleaseState(retained, {
+      to: 'staged-draft',
+      payload: stagedDraft,
+    });
+    const published = tools.transitionReleaseState(staged, {
+      to: 'npm-published',
+      payload: { publishedVersion: '0.1.0', npmSRI, publishRunId: 9001 },
+    });
+    const verified = tools.transitionReleaseState(published, {
+      to: 'npm-verified',
+      payload: { registryNpmSRI, registryManifestDigest: shaA, provenanceDigest: shaB },
+    });
+    const originalPlan = {
+      version: '0.1.0',
+      commit,
+      aliases: [
+        { name: 'v0.1', previousTarget: null, target: commit },
+        { name: 'v0', previousTarget: '2'.repeat(40), target: commit },
+      ],
+    };
+
+    const planned = tools.transitionReleaseState(verified, {
+      to: 'alias-planned',
+      payload: originalPlan,
+    });
+
+    expect(planned).toMatchObject({ state: 'alias-planned', aliasPlan: originalPlan });
+    expect(
+      tools.transitionReleaseState(planned, { to: 'alias-planned', payload: originalPlan }),
+    ).toEqual(planned);
+    expect(() =>
+      tools.transitionReleaseState(planned, {
+        to: 'alias-planned',
+        payload: {
+          ...originalPlan,
+          aliases: originalPlan.aliases.map((alias) => ({
+            ...alias,
+            previousTarget: commit,
+          })),
+        },
+      }),
+    ).toThrow(/alias-planned.*conflict/i);
+    expect(() =>
+      tools.transitionReleaseState(verified, {
+        to: 'aliases-verified',
+        payload: { aliases: originalPlan.aliases },
+      }),
+    ).toThrow(/invalid transition/i);
+    expect(() =>
+      tools.transitionReleaseState(planned, {
+        to: 'aliases-verified',
+        payload: {
+          aliases: originalPlan.aliases.map((alias) => ({
+            ...alias,
+            previousTarget: '3'.repeat(40),
+          })),
+        },
+      }),
+    ).toThrow(/durable alias plan.*conflict/i);
+  });
 });
 
 describe('monotonic floating aliases', () => {
+  it('never lets a stale completed retry reclaim the latest marker', async () => {
+    const tools = await loadModule<ReleaseStateModule>('../../tools/release/release-state.mjs');
+
+    expect(
+      tools.decideLatestPromotion({ candidateVersion: '2.0.0', currentLatestVersion: '1.9.9' }),
+    ).toEqual({ action: 'promote', version: '2.0.0' });
+    expect(
+      tools.decideLatestPromotion({ candidateVersion: '2.0.0', currentLatestVersion: '2.0.0' }),
+    ).toEqual({ action: 'retain', version: '2.0.0' });
+    expect(
+      tools.decideLatestPromotion({ candidateVersion: '1.9.9', currentLatestVersion: '2.0.0' }),
+    ).toEqual({ action: 'retain', version: '2.0.0' });
+  });
+
   it('maps aliases dynamically and rejects an older version retry', async () => {
     const tools = await loadModule<ReleaseStateModule>('../../tools/release/release-state.mjs');
 
@@ -770,8 +1043,8 @@ describe('monotonic floating aliases', () => {
       target: previous,
     });
     expect(tools.decideAliasRollback({ current: candidate, candidate, previous: null })).toEqual({
-      action: 'retain',
-      target: candidate,
+      action: 'delete',
+      target: null,
     });
     expect(() =>
       tools.decideAliasRollback({ current: '3'.repeat(40), candidate, previous }),
@@ -828,16 +1101,31 @@ describe('candidate, draft, recovery, and final verification', () => {
     expect(() =>
       tools.validateReleaseManifest({ ...release, candidateManifestDigest: shaD }, candidate),
     ).toThrow(/candidateManifestDigest.*conflict/i);
+    expect(() =>
+      tools.validateReleaseManifest(
+        {
+          ...release,
+          assets: [
+            ...release.assets,
+            { name: 'release-manifest.json', assetId: 7104, sha256: shaD },
+          ],
+        },
+        candidate,
+      ),
+    ).toThrow(/exact immutable input set/i);
   });
 
   it('decides deterministic recovery for tag-only, partial draft, conflict, and loss', async () => {
     const tools = await loadModule<ReleaseStateModule>('../../tools/release/release-state.mjs');
+    const candidateAssets = stagedDraft.assets.filter(
+      (asset) => asset.name !== 'release-manifest.json',
+    );
     const expected = {
       tag: 'v0.1.0',
       commit,
       retainedArtifactDigest: shaD,
       candidateManifestDigest: shaA,
-      assets: stagedDraft.assets,
+      assets: candidateAssets,
     };
     const retained = { artifactDigest: shaD, candidateManifestDigest: shaA };
 
@@ -856,7 +1144,7 @@ describe('candidate, draft, recovery, and final verification', () => {
             releaseId: 7001,
             tag: 'v0.1.0',
             commit,
-            assets: stagedDraft.assets.slice(1),
+            assets: candidateAssets.slice(1),
           },
           retainedCandidate: retained,
         },
@@ -890,7 +1178,10 @@ describe('candidate, draft, recovery, and final verification', () => {
 
   it('decides partial-draft recovery before GitHub asset IDs are known', async () => {
     const tools = await loadModule<ReleaseStateModule>('../../tools/release/release-state.mjs');
-    const expectedAssets = stagedDraft.assets.map(({ name, sha256 }) => ({ name, sha256 }));
+    const candidateAssets = stagedDraft.assets.filter(
+      (asset) => asset.name !== 'release-manifest.json',
+    );
+    const expectedAssets = candidateAssets.map(({ name, sha256 }) => ({ name, sha256 }));
 
     expect(
       tools.decideReleaseRecovery({
@@ -907,7 +1198,7 @@ describe('candidate, draft, recovery, and final verification', () => {
             releaseId: 7001,
             tag: 'v0.1.0',
             commit,
-            assets: [stagedDraft.assets[1]],
+            assets: [candidateAssets[1]],
           },
           retainedCandidate: { artifactDigest: shaD, candidateManifestDigest: shaA },
         },
@@ -924,6 +1215,11 @@ describe('candidate, draft, recovery, and final verification', () => {
     const candidate = candidateManifest();
     const candidateDigest = tools.canonicalJsonDigest(candidate);
     const release = releaseManifest(candidateDigest);
+    const releaseDigest = tools.canonicalJsonDigest(release);
+    const immutableAssets = [
+      ...release.assets,
+      { name: 'release-manifest.json', assetId: 7104, sha256: releaseDigest },
+    ];
     const retained = tools.transitionReleaseState(tools.createReleaseState(intent), {
       to: 'retained-candidate',
       payload: { ...retainedCandidate, candidateManifestDigest: candidateDigest },
@@ -932,14 +1228,14 @@ describe('candidate, draft, recovery, and final verification', () => {
       to: 'staged-draft',
       payload: {
         releaseId: 7001,
-        assets: release.assets,
-        releaseManifestDigest: tools.canonicalJsonDigest(release),
+        assets: immutableAssets,
+        releaseManifestDigest: releaseDigest,
       },
     });
     const observed = {
       tag: { name: 'v0.1.0', commit },
       release: { releaseId: 7001, tag: 'v0.1.0', commit, draft: true },
-      assets: release.assets,
+      assets: immutableAssets,
     };
 
     expect(tools.verifyPublishAnchors({ state, candidate, release, observed })).toEqual({
@@ -989,12 +1285,154 @@ describe('candidate, draft, recovery, and final verification', () => {
       }),
     ).toMatchObject({ releaseId: 7001, assetId: 7101 });
 
+    const publishedRelease = {
+      releaseId: 7001,
+      tag: 'v0.1.0',
+      commit,
+      draft: false,
+      assets: immutableAssets,
+    };
+    expect(
+      tools.verifyReleaseSnapshot({
+        state: verified,
+        observed: { ...publishedRelease, draft: true },
+      }),
+    ).toMatchObject({ releaseId: 7001, draft: true, assets: immutableAssets });
+    expect(() =>
+      tools.verifyReleaseSnapshot({
+        state: verified,
+        observed: {
+          ...publishedRelease,
+          draft: true,
+          assets: [...immutableAssets, { name: 'unexpected.txt', assetId: 7999, sha256: shaA }],
+        },
+      }),
+    ).toThrow(/release snapshot assets/i);
+    expect(tools.verifyPublishedRelease({ state: verified, observed: publishedRelease })).toEqual({
+      releaseId: 7001,
+      tag: 'v0.1.0',
+      commit,
+      assets: immutableAssets,
+    });
+    expect(() =>
+      tools.verifyPublishedRelease({
+        state: verified,
+        observed: { ...publishedRelease, draft: true },
+      }),
+    ).toThrow(/published release.*draft/i);
+    expect(() =>
+      tools.verifyPublishedRelease({
+        state: verified,
+        observed: { ...publishedRelease, assets: immutableAssets.slice(1) },
+      }),
+    ).toThrow(/published release.*asset/i);
+    expect(() =>
+      tools.verifyPublishedRelease({
+        state: verified,
+        observed: {
+          ...publishedRelease,
+          assets: immutableAssets.map((asset) =>
+            asset.name === 'release-manifest.json' ? { ...asset, sha256: shaA } : asset,
+          ),
+        },
+      }),
+    ).toThrow(/published release.*asset/i);
+
+    const aliasPlan = {
+      version: '0.1.0',
+      commit,
+      aliases: [
+        { name: 'v0.1', previousTarget: null, target: commit },
+        { name: 'v0', previousTarget: '2'.repeat(40), target: commit },
+      ],
+    };
+    const planned = tools.transitionReleaseState(verified, {
+      to: 'alias-planned',
+      payload: aliasPlan,
+    });
+    const aliasesVerified = tools.transitionReleaseState(planned, {
+      to: 'aliases-verified',
+      payload: { aliases: aliasPlan.aliases },
+    });
+    const finalDigest = shaD;
+    const finalPlanned = tools.transitionReleaseState(aliasesVerified, {
+      to: 'final-planned',
+      payload: { finalVerificationDigest: finalDigest },
+    });
+    const finalAsset = {
+      name: 'final-verification.json',
+      assetId: 7105,
+      sha256: finalDigest,
+    };
+    expect(
+      tools.verifyPublishAnchors({
+        state: finalPlanned,
+        candidate,
+        release,
+        observed: {
+          ...observed,
+          release: { ...observed.release, draft: false },
+          assets: [...immutableAssets, finalAsset],
+        },
+      }),
+    ).toMatchObject({ releaseId: 7001, assetId: 7101 });
+    expect(() =>
+      tools.verifyPublishAnchors({
+        state: finalPlanned,
+        candidate,
+        release,
+        observed: {
+          ...observed,
+          release: { ...observed.release, draft: false },
+          assets: [
+            ...immutableAssets,
+            finalAsset,
+            { name: 'unexpected.txt', assetId: 7999, sha256: shaA },
+          ],
+        },
+      }),
+    ).toThrow(/publish asset/i);
+    expect(
+      tools.verifyPublishedRelease({
+        state: finalPlanned,
+        observed: { ...publishedRelease, assets: [...immutableAssets, finalAsset] },
+      }),
+    ).toMatchObject({ assets: [...immutableAssets, finalAsset] });
+    expect(() =>
+      tools.verifyPublishedRelease({
+        state: finalPlanned,
+        observed: {
+          ...publishedRelease,
+          assets: [...immutableAssets, { ...finalAsset, sha256: shaA }],
+        },
+      }),
+    ).toThrow(/final verification.*digest/i);
+    const consumed = tools.transitionReleaseState(finalPlanned, {
+      to: 'consumed',
+      payload: { finalVerificationDigest: finalDigest, finalVerificationAssetId: 7105 },
+    });
+    expect(
+      tools.verifyPublishedRelease({
+        state: consumed,
+        observed: { ...publishedRelease, assets: [...immutableAssets, finalAsset] },
+      }),
+    ).toMatchObject({ assets: [...immutableAssets, finalAsset] });
+    expect(() =>
+      tools.verifyPublishedRelease({
+        state: consumed,
+        observed: {
+          ...publishedRelease,
+          assets: [...immutableAssets, { ...finalAsset, assetId: 9999 }],
+        },
+      }),
+    ).toThrow(/final verification assetId/i);
+
     const reorderedState = tools.transitionReleaseState(retained, {
       to: 'staged-draft',
       payload: {
         releaseId: 7001,
-        assets: [...release.assets].reverse(),
-        releaseManifestDigest: tools.canonicalJsonDigest(release),
+        assets: [...immutableAssets].reverse(),
+        releaseManifestDigest: releaseDigest,
       },
     });
     expect(
@@ -1002,7 +1440,7 @@ describe('candidate, draft, recovery, and final verification', () => {
         state: reorderedState,
         candidate,
         release,
-        observed: { ...observed, assets: [...release.assets].reverse() },
+        observed: { ...observed, assets: [...immutableAssets].reverse() },
       }),
     ).toMatchObject({ releaseId: 7001, assetId: 7101 });
   });
@@ -1041,6 +1479,94 @@ describe('candidate, draft, recovery, and final verification', () => {
         releaseId: 9999,
       }),
     ).toThrow(/final verification conflict/i);
+  });
+
+  it('deletes only one exact unconsumed final asset and retains consumed evidence', async () => {
+    const tools = await loadModule<ReleaseStateModule>('../../tools/release/release-state.mjs');
+    const retained = tools.transitionReleaseState(tools.createReleaseState(intent), {
+      to: 'retained-candidate',
+      payload: retainedCandidate,
+    });
+    const staged = tools.transitionReleaseState(retained, {
+      to: 'staged-draft',
+      payload: stagedDraft,
+    });
+    const published = tools.transitionReleaseState(staged, {
+      to: 'npm-published',
+      payload: { publishedVersion: '0.1.0', npmSRI, publishRunId: 9001 },
+    });
+    const verified = tools.transitionReleaseState(published, {
+      to: 'npm-verified',
+      payload: { registryNpmSRI, registryManifestDigest: shaA, provenanceDigest: shaB },
+    });
+    const aliasPlan = {
+      version: '0.1.0',
+      commit,
+      aliases: [
+        { name: 'v0.1', previousTarget: null, target: commit },
+        { name: 'v0', previousTarget: '2'.repeat(40), target: commit },
+      ],
+    };
+    const aliasPlanned = tools.transitionReleaseState(verified, {
+      to: 'alias-planned',
+      payload: aliasPlan,
+    });
+    const aliasesVerified = tools.transitionReleaseState(aliasPlanned, {
+      to: 'aliases-verified',
+      payload: { aliases: aliasPlan.aliases },
+    });
+    const finalPlanned = tools.transitionReleaseState(aliasesVerified, {
+      to: 'final-planned',
+      payload: { finalVerificationDigest: shaC },
+    });
+    const exact = { name: 'final-verification.json', assetId: 8101, sha256: shaC };
+
+    expect(tools.decideFinalEvidenceRollback({ state: finalPlanned, assets: [] })).toEqual({
+      action: 'none',
+    });
+    expect(tools.decideFinalEvidenceRollback({ state: finalPlanned, assets: [exact] })).toEqual({
+      action: 'delete',
+      assetId: 8101,
+      sha256: shaC,
+    });
+    const directory = temporaryDirectory('final-rollback-cli');
+    const inputPath = join(directory, 'input.json');
+    writeFileSync(inputPath, `${JSON.stringify({ state: finalPlanned, assets: [exact] })}\n`);
+    expect(
+      JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            join(root, 'tools', 'release', 'release-state.mjs'),
+            'final-rollback-decision',
+            inputPath,
+          ],
+          { encoding: 'utf8' },
+        ),
+      ),
+    ).toEqual({ action: 'delete', assetId: 8101, sha256: shaC });
+    expect(() =>
+      tools.decideFinalEvidenceRollback({
+        state: finalPlanned,
+        assets: [{ ...exact, sha256: shaD }],
+      }),
+    ).toThrow(/final verification.*digest/i);
+    expect(() =>
+      tools.decideFinalEvidenceRollback({ state: finalPlanned, assets: [exact, exact] }),
+    ).toThrow(/exactly one final verification/i);
+
+    const consumed = tools.transitionReleaseState(finalPlanned, {
+      to: 'consumed',
+      payload: { finalVerificationDigest: shaC, finalVerificationAssetId: 8101 },
+    });
+    expect(tools.decideFinalEvidenceRollback({ state: consumed, assets: [exact] })).toEqual({
+      action: 'retain',
+      assetId: 8101,
+      sha256: shaC,
+    });
+    expect(() => tools.decideFinalEvidenceRollback({ state: consumed, assets: [] })).toThrow(
+      /consumed.*final verification/i,
+    );
   });
 
   it('persists transition output atomically through the JSON CLI', async () => {

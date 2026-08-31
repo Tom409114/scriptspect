@@ -228,6 +228,13 @@ jobs:
             > "$RUNNER_TEMP/bootstrap/local-tree.json"
           node tools/release/canonical-tree.mjs digest --tarball "$RUNNER_TEMP/bootstrap/registry.tgz" \
             > "$RUNNER_TEMP/bootstrap/registry-tree.json"
+          node tools/release/canonical-tree.mjs algorithm-digest \
+            > "$RUNNER_TEMP/bootstrap/comparator-source-bundle.json"
+          jq -e '
+            .algorithmDigest == .sourceBundle.digest and
+            .sourceBundle.schemaVersion == "scriptspect-canonical-tree-source-bundle/v1" and
+            (.sourceBundle.files | length > 0)
+          ' "$RUNNER_TEMP/bootstrap/comparator-source-bundle.json" >/dev/null
           jq -e --slurpfile public "$RUNNER_TEMP/bootstrap/registry-tree.json" '
             .treeDigest == $public[0].treeDigest and .algorithmDigest == $public[0].algorithmDigest
           ' "$RUNNER_TEMP/bootstrap/local-tree.json" >/dev/null
@@ -235,7 +242,8 @@ jobs:
             --slurpfile public "$RUNNER_TEMP/bootstrap/registry-tree.json" \
             '{equal:($local[0].treeDigest==$public[0].treeDigest),local:$local[0],public:$public[0]}' \
             > "$RUNNER_TEMP/bootstrap/canonical-tree.json"
-          COMPARATOR_ALGORITHM_DIGEST=$(jq -er '.local.algorithmDigest' "$RUNNER_TEMP/bootstrap/canonical-tree.json")
+          COMPARATOR_ALGORITHM_DIGEST=$(jq -er '.algorithmDigest' "$RUNNER_TEMP/bootstrap/comparator-source-bundle.json")
+          [[ "$COMPARATOR_ALGORITHM_DIGEST" == "$(jq -er '.local.algorithmDigest' "$RUNNER_TEMP/bootstrap/canonical-tree.json")" ]]
           MODE=canonical-tree-v1
           if [[ "$(sha256sum "$LOCAL_TARBALL" | cut -d' ' -f1)" == "$(sha256sum "$RUNNER_TEMP/bootstrap/registry.tgz" | cut -d' ' -f1)" && "$LOCAL_SRI" == "$REGISTRY_SRI" ]]; then
             MODE=exact-bytes
@@ -300,6 +308,7 @@ jobs:
             ${{ runner.temp }}/bootstrap/SHA256SUMS
             ${{ runner.temp }}/bootstrap/registry-metadata.json
             ${{ runner.temp }}/bootstrap/canonical-tree.json
+            ${{ runner.temp }}/bootstrap/comparator-source-bundle.json
             ${{ runner.temp }}/bootstrap/audit-signatures.json
           retention-days: 90
           if-no-files-found: error

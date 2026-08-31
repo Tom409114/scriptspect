@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   CANONICAL_TREE_ALGORITHM,
   CANONICAL_TREE_ALGORITHM_DIGEST,
+  CANONICAL_TREE_SOURCE_BUNDLE,
   canonicalizeTarball,
 } from './canonical-tree.mjs';
 import {
@@ -183,6 +184,7 @@ export function verifyPackageIntegrity(input) {
     treeEqual,
     comparatorAlgorithm: CANONICAL_TREE_ALGORITHM,
     comparatorAlgorithmDigest: contract.comparatorAlgorithmDigest,
+    comparatorSourceBundle: CANONICAL_TREE_SOURCE_BUNDLE,
     candidateTree,
     registryTree,
   };

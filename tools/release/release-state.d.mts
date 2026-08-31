@@ -33,10 +33,16 @@ export type NpmVerified = {
   registryManifestDigest: string;
   provenanceDigest: string;
 };
+export type AliasPlan = {
+  version: string;
+  commit: string;
+  aliases: Array<{ name: string; previousTarget: string | null; target: string }>;
+};
 export type AliasesVerified = {
   aliases: Array<{ name: string; previousTarget: string | null; target: string }>;
 };
-export type Consumed = { finalVerificationDigest: string };
+export type FinalPlanned = { finalVerificationDigest: string };
+export type Consumed = { finalVerificationDigest: string; finalVerificationAssetId: number };
 
 export type IntentRecordedState = {
   schemaVersion: 'scriptspect-release-state/v1';
@@ -60,11 +66,19 @@ export type NpmVerifiedState = Omit<NpmPublishedState, 'state'> & {
   state: 'npm-verified';
   npmVerified: NpmVerified;
 };
-export type AliasesVerifiedState = Omit<NpmVerifiedState, 'state'> & {
+export type AliasPlannedState = Omit<NpmVerifiedState, 'state'> & {
+  state: 'alias-planned';
+  aliasPlan: AliasPlan;
+};
+export type AliasesVerifiedState = Omit<AliasPlannedState, 'state'> & {
   state: 'aliases-verified';
   aliasesVerified: AliasesVerified;
 };
-export type ConsumedState = Omit<AliasesVerifiedState, 'state'> & {
+export type FinalPlannedState = Omit<AliasesVerifiedState, 'state'> & {
+  state: 'final-planned';
+  finalPlanned: FinalPlanned;
+};
+export type ConsumedState = Omit<FinalPlannedState, 'state'> & {
   state: 'consumed';
   consumed: Consumed;
 };
@@ -75,7 +89,9 @@ export type ReleaseState =
   | StagedDraftState
   | NpmPublishedState
   | NpmVerifiedState
+  | AliasPlannedState
   | AliasesVerifiedState
+  | FinalPlannedState
   | ConsumedState;
 
 export type CandidateManifest = {
@@ -125,9 +141,13 @@ export function planFloatingAliases(value: unknown): {
   commit: string;
   aliases: Array<{ name: string; previousTarget: string | null; target: string }>;
 };
+export function decideLatestPromotion(value: unknown): {
+  action: 'promote' | 'retain';
+  version: string;
+};
 export function decideAliasRollback(
   value: unknown,
-): { action: 'restore'; target: string } | { action: 'retain'; target: string };
+): { action: 'restore'; target: string } | { action: 'delete'; target: null };
 export function validateReleaseAnchors(value: unknown, expected: unknown): ReleaseState;
 export function canonicalJsonDigest(value: unknown): string;
 export function validateCandidateManifest(value: unknown): CandidateManifest;
@@ -145,6 +165,25 @@ export function verifyPublishAnchors(value: unknown): {
   sha256: string;
   npmSRI: string;
 };
+export function verifyPublishedRelease(value: unknown): {
+  releaseId: number;
+  tag: string;
+  commit: string;
+  assets: ReleaseAsset[];
+};
+export function verifyReleaseSnapshot(value: unknown): {
+  releaseId: number;
+  tag: string;
+  commit: string;
+  draft: boolean;
+  assets: ReleaseAsset[];
+};
+export function decideFinalEvidenceRollback(
+  value: unknown,
+):
+  | { action: 'none' }
+  | { action: 'delete'; assetId: number; sha256: string }
+  | { action: 'retain'; assetId: number; sha256: string };
 export function verifyFinalIdempotency(
   existing: unknown,
   proposed: unknown,
