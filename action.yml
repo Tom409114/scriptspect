@@ -21,37 +21,29 @@ inputs:
     default: ''
   severity:
     description: >-
-      Minimum severity to display: error, warn, or advisory. Omit to honor the
-      project's scriptspect.config.json (CLI default: advisory).
+      Minimum severity to display: error, warn, or advisory. Omit to display
+      every configured finding (CLI default: advisory).
     required: false
     default: ''
   max-warnings:
     description: 'Fail the job when warnings exceed this number (omit for unlimited).'
     required: false
     default: ''
-  version:
-    description: 'scriptspect npm version or dist-tag to run (e.g. latest, 0.1.0).'
-    required: false
-    default: 'latest'
+
+outputs:
+  exit-code:
+    description: 'Analyzer exit code (0, 1, or 2).'
+  packages:
+    description: 'Number of packages scanned.'
+  scripts:
+    description: 'Number of scripts scanned.'
+  errors:
+    description: 'Number of reported errors.'
+  warnings:
+    description: 'Number of reported warnings.'
+  advisories:
+    description: 'Number of reported advisories.'
 
 runs:
-  using: 'composite'
-  steps:
-    - name: Run scriptspect
-      shell: bash
-      run: |
-        # Spec §12.1: the Action uses the same CLI core — one rule engine,
-        # never a fork. It never modifies the repository (fix mode is not
-        # offered in CI). When target/severity are not set the flags are
-        # omitted so the CLI honors scriptspect.config.json settings.
-        ARGS=(check "${{ inputs.path }}" --format github)
-        if [ -n "${{ inputs.target }}" ]; then
-          ARGS+=(--target "${{ inputs.target }}")
-        fi
-        if [ -n "${{ inputs.severity }}" ]; then
-          ARGS+=(--severity "${{ inputs.severity }}")
-        fi
-        if [ -n "${{ inputs.max-warnings }}" ]; then
-          ARGS+=(--max-warnings "${{ inputs.max-warnings }}")
-        fi
-        npx --yes "scriptspect@${{ inputs.version }}" "${ARGS[@]}"
+  using: 'node24'
+  main: 'dist/action.mjs'
