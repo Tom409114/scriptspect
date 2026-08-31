@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -54,6 +54,14 @@ describe('parseConfig', () => {
     expect(() => parseConfig({ targets: ['fish'] }, 'test')).toThrow(ConfigError);
   });
 
+  it('rejects duplicate targets instead of silently deduplicating them', () => {
+    expect(() => parseConfig({ targets: ['cmd', 'cmd'] }, 'test')).toThrow(ConfigError);
+  });
+
+  it('rejects unknown root keys that are likely configuration typos', () => {
+    expect(() => parseConfig({ target: ['cmd'] }, 'test')).toThrow(ConfigError);
+  });
+
   it('rejects unknown rule ids in severity', () => {
     expect(() => parseConfig({ severity: { PS999: 'warn' } }, 'test')).toThrow(ConfigError);
   });
@@ -77,7 +85,7 @@ describe('isIgnored', () => {
       ignore: [
         { packages: ['examples/**'], rules: ['PS030'] },
         { scripts: ['docs:unix'], rules: ['PS010', 'PS011'] },
-        { packages: ['packages/legacy/package.json'] },
+        { packages: ['packages/legacy/package.json'], rules: ['PS001'] },
       ],
     },
     'test',
@@ -94,14 +102,27 @@ describe('isIgnored', () => {
     expect(isIgnored(config, 'package.json', 'docs:win', 'PS011')).toBe(false);
   });
 
-  it('package-only entries suppress every rule for that package', () => {
+  it('package + rule entries suppress only the named rule', () => {
     expect(isIgnored(config, 'packages/legacy/package.json', 'anything', 'PS001')).toBe(true);
+    expect(isIgnored(config, 'packages/legacy/package.json', 'anything', 'PS010')).toBe(false);
   });
 });
 
 describe('ignore-all protection (spec §9)', () => {
   it('rejects entries with no keys', () => {
     expect(() => parseConfig({ ignore: [{}] }, 'test')).toThrow(ConfigError);
+  });
+
+  it('requires every ignore entry to name at least one rule', () => {
+    expect(() => parseConfig({ ignore: [{ packages: ['packages/legacy/**'] }] }, 'test')).toThrow(
+      ConfigError,
+    );
+  });
+
+  it('rejects unknown ignore-entry keys instead of ignoring a typo', () => {
+    expect(() =>
+      parseConfig({ ignore: [{ rules: ['PS010'], scirpts: ['build'] }] }, 'test'),
+    ).toThrow(ConfigError);
   });
 
   it('rejects empty key arrays', () => {
@@ -113,6 +134,37 @@ describe('ignore-all protection (spec §9)', () => {
 });
 
 describe('loadConfig discovery', () => {
+  it('resolves an explicit relative config from the analysis root', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+      mkdirSync(join(dir, 'config'));
+      writeFileSync(join(dir, 'config', 'scriptspect.json'), JSON.stringify({ targets: ['cmd'] }));
+
+      const { config, source } = loadConfig(dir, 'config/scriptspect.json');
+
+      expect(config.targets).toEqual(['cmd']);
+      expect(source).toBe(join(dir, 'config', 'scriptspect.json'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an explicit config outside the canonical analysis root', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
+    const outside = mkdtempSync(join(tmpdir(), 'ss-cfg-outside-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+      const file = join(outside, 'scriptspect.json');
+      writeFileSync(file, JSON.stringify({ targets: ['cmd'] }));
+
+      expect(() => loadConfig(dir, file)).toThrow(/outside the analysis root/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it('reads the package.json field first', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
     writeFileSync(
