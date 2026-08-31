@@ -23,3 +23,15 @@ Built milestone by milestone; each merges behind a PR with CI green on all three
 | Competitive edge | finds real issues scripts-doctor misses on the same corpus, without more false positives | no clear edge: do not publish; improve parser/CI/monorepo |
 | External interest | at least 5 independent developers try the alpha, or 3+ non-acquaintance issues | none: pause features, re-validate demand |
 | Onboarding | first scan in under 10 minutes from the README (ideal: under 2) | fix the experience first |
+
+### Gate status — first corpus run, 2026-08-31
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| Precision | ✅ pass | 62/62 verified true positives in a stratified 14-rule sample; P0 error rules 100% |
+| Real-problem density | ✅ pass | 534 findings across 68 repos and 14 rule categories; verified sample spans 35 repos |
+| Competitive edge | ✅ pass (corpus evidence) | verified findings in categories beyond scripts-doctor's documented scope, zero false positives |
+| External interest | ⏳ not yet met | 0 external issues as of 2026-08-31 (pre-release) |
+| Onboarding | ⏳ pending | requires the v0.1 npm publish |
+
+Full report: [docs/validation/corpus-2026-08.md](validation/corpus-2026-08.md).
