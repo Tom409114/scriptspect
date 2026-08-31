@@ -223,7 +223,7 @@ jobs:
           grep -Fx 'exit-code=0' "$RUNNER_TEMP/action-summary-output.txt"
       - name: Upload hosted Action summary evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: action-consumer-evidence-${{ github.run_id }}
           path: |
@@ -276,7 +276,7 @@ jobs:
             --arg summarySha256 "$(sha256sum "$SUMMARY_FILE" | cut -d' ' -f1)" \
             '{workflowRunId: $workflowRunId, jobId: $jobId, checkRunId: $checkRunId, annotationCount: $annotationCount, summarySha256: $summarySha256}' \
             > "$RUNNER_TEMP/action-runner-evidence.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: action-runner-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/action-runner-evidence.json
@@ -315,7 +315,7 @@ jobs:
           SCRIPTSPECT_SOURCE_COMMIT: ${{ github.sha }}
         run: pnpm exec tsx tools/benchmark-workspace.ts "$RUNNER_TEMP/workspace-benchmark.json" 100 2000
       - name: Upload hosted benchmark evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: workspace-benchmark-${{ github.sha }}
           path: ${{ runner.temp }}/workspace-benchmark.json
