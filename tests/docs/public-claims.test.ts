@@ -40,6 +40,7 @@ describe('public project claims', () => {
 
     expect(security).toContain('No npm release has been published yet');
     expect(maintainers).toContain('After the first release');
-    expect(changelog).toContain('## 0.1.0 (Unreleased)');
+    expect(changelog).toContain('## Unreleased');
+    expect(changelog).not.toMatch(/^## 0\.1\.0 \(Unreleased\)$/mu);
   });
 });
