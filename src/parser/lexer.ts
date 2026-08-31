@@ -58,7 +58,19 @@ export interface Token {
 }
 
 /** Operators that act as redirections rather than control flow. */
-export const REDIRECT_OPS = new Set(['>', '>>', '<', '2>', '2>>', '1>', '1>>', '&>', '>&', '2>&1', '1>&2']);
+export const REDIRECT_OPS = new Set([
+  '>',
+  '>>',
+  '<',
+  '2>',
+  '2>>',
+  '1>',
+  '1>>',
+  '&>',
+  '>&',
+  '2>&1',
+  '1>&2',
+]);
 
 /** Operators that split a script into separate commands. */
 export const SEQ_OPS = new Set([';', '&', '\n']);
@@ -115,12 +127,26 @@ export function tokenize(src: string): Token[] {
       continue;
     }
     if (ch === '(') {
-      tokens.push({ kind: 'lparen', raw: '(', value: '(', span: [i, i + 1], quote: null, expansions: [] });
+      tokens.push({
+        kind: 'lparen',
+        raw: '(',
+        value: '(',
+        span: [i, i + 1],
+        quote: null,
+        expansions: [],
+      });
       i += 1;
       continue;
     }
     if (ch === ')') {
-      tokens.push({ kind: 'rparen', raw: ')', value: ')', span: [i, i + 1], quote: null, expansions: [] });
+      tokens.push({
+        kind: 'rparen',
+        raw: ')',
+        value: ')',
+        span: [i, i + 1],
+        quote: null,
+        expansions: [],
+      });
       i += 1;
       continue;
     }
@@ -261,7 +287,11 @@ export function tokenize(src: string): Token[] {
 }
 
 /** Scan a double-quoted segment starting at the opening quote; returns value + end index. */
-function scanDoubleQuoted(src: string, open: number, expansions: Expansion[]): { value: string; end: number } {
+function scanDoubleQuoted(
+  src: string,
+  open: number,
+  expansions: Expansion[],
+): { value: string; end: number } {
   let i = open + 1;
   let value = '';
   const n = src.length;

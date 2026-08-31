@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { tokenize } from '../../src/parser/lexer';
 import type { Token } from '../../src/parser/lexer';
+import { tokenize } from '../../src/parser/lexer';
 
 function words(src: string): string[] {
   return tokenize(src).map((t) => t.value);

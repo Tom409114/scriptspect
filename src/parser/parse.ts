@@ -14,10 +14,18 @@
  * suppressed by design and replaced by explicit-dependency findings at rule
  * level (see docs/architecture.md).
  */
-import type { ScriptIr, ScriptNode, CommandNode, EnvAssignment, Redirection, WrapperInfo, WrapperShell } from './ir';
-import { REDIRECT_OPS, isEnvAssignmentWord, tokenize } from './lexer';
-import type { Token } from './lexer';
+import type {
+  CommandNode,
+  EnvAssignment,
+  Redirection,
+  ScriptIr,
+  ScriptNode,
+  WrapperInfo,
+  WrapperShell,
+} from './ir';
 import { walkCommands } from './ir';
+import type { Token } from './lexer';
+import { isEnvAssignmentWord, REDIRECT_OPS, tokenize } from './lexer';
 
 const SH_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'ash']);
 const CMD_SHELLS = new Set(['cmd', 'cmd.exe']);
@@ -47,7 +55,11 @@ function parseSequence(tokens: Token[], start: number, end: number): [ScriptNode
     i = next;
     const tok = tokens[i];
     if (i >= end) break;
-    if (tok.kind === 'operator' && (tok.op === ';' || tok.op === '&' || tok.op === '\n') && i < end) {
+    if (
+      tok.kind === 'operator' &&
+      (tok.op === ';' || tok.op === '&' || tok.op === '\n') &&
+      i < end
+    ) {
       ops.push(tok.op as ';' | '&' | '\n');
       opSpans.push(tok.span);
       i += 1;
@@ -121,8 +133,14 @@ function parseUnary(tokens: Token[], start: number, end: number): [ScriptNode, n
     const closeIdx = i; // index of matching rparen (or end)
     const [body] = parseSequence(tokens, start + 1, closeIdx);
     const close = tokens[closeIdx];
-    const spanEnd = close !== undefined && close.kind === 'rparen' ? close.span[1] : (tokens[closeIdx - 1] ?? tok).span[1];
-    return [{ kind: 'group', body, span: [tok.span[0], spanEnd] }, closeIdx + 1 <= end ? closeIdx + 1 : end];
+    const spanEnd =
+      close !== undefined && close.kind === 'rparen'
+        ? close.span[1]
+        : (tokens[closeIdx - 1] ?? tok).span[1];
+    return [
+      { kind: 'group', body, span: [tok.span[0], spanEnd] },
+      closeIdx + 1 <= end ? closeIdx + 1 : end,
+    ];
   }
   if (tok.kind === 'rparen') {
     // stray `)` — treat as empty and let the caller continue
@@ -184,7 +202,10 @@ function parseCommand(tokens: Token[], start: number, end: number): [ScriptNode,
     return [emptyCommand(), i];
   }
 
-  const span: [number, number] = [rawStart === -1 ? (tokens[start] as Token).span[0] : rawStart, rawEnd];
+  const span: [number, number] = [
+    rawStart === -1 ? (tokens[start] as Token).span[0] : rawStart,
+    rawEnd,
+  ];
   const cmd: CommandNode = {
     kind: 'command',
     raw: '', // filled by caller wrapper check below

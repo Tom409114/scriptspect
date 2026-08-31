@@ -3,9 +3,9 @@
  * A parser change that breaks any of these cannot merge (spec §5.3).
  */
 import { describe, expect, it } from 'vitest';
-import { parseScript } from '../../src/parser/parse';
-import { commandName, walkCommands } from '../../src/parser/ir';
 import type { CommandNode } from '../../src/parser/ir';
+import { commandName, walkCommands } from '../../src/parser/ir';
+import { parseScript } from '../../src/parser/parse';
 
 function names(src: string): string[] {
   return [...walkCommands(parseScript(src).root)]
@@ -19,7 +19,7 @@ describe('parser contract (docs/architecture.md negative cases)', () => {
   });
 
   it('node -e "console.log(\'cp -r\')" — never scans inside string arguments', () => {
-    expect(names("node -e \"console.log('cp -r')\"")).toEqual(['node']);
+    expect(names('node -e "console.log(\'cp -r\')"')).toEqual(['node']);
   });
 
   it('cross-env NODE_ENV=production vite build — no env assignment at command head', () => {

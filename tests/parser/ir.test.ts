@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { parseScript } from '../../src/parser/parse';
+import type {
+  BooleanNode,
+  CommandNode,
+  GroupNode,
+  PipelineNode,
+  SequenceNode,
+} from '../../src/parser/ir';
 import { commandName, walkCommands } from '../../src/parser/ir';
-import type { CommandNode, SequenceNode, BooleanNode, PipelineNode, GroupNode } from '../../src/parser/ir';
+import { parseScript } from '../../src/parser/parse';
 
 function cmds(src: string): CommandNode[] {
   return [...walkCommands(parseScript(src).root)];
@@ -39,7 +45,12 @@ describe('ir: commands', () => {
   it('does not extract assignments after the command name', () => {
     const [cmd] = cmds('cross-env NODE_ENV=production vite build');
     expect(cmd?.leadingEnv).toEqual([]);
-    expect(cmd?.argv.map((t) => t.value)).toEqual(['cross-env', 'NODE_ENV=production', 'vite', 'build']);
+    expect(cmd?.argv.map((t) => t.value)).toEqual([
+      'cross-env',
+      'NODE_ENV=production',
+      'vite',
+      'build',
+    ]);
   });
 
   it('parses the empty script into one empty command', () => {
@@ -107,7 +118,10 @@ describe('ir: sequences, booleans, pipelines', () => {
 describe('ir: redirections', () => {
   it('attaches stdout redirection with target', () => {
     const [cmd] = cmds('node x > out.txt');
-    expect(cmd?.redirects[0]).toMatchObject({ op: '>', target: expect.objectContaining({ value: 'out.txt' }) });
+    expect(cmd?.redirects[0]).toMatchObject({
+      op: '>',
+      target: expect.objectContaining({ value: 'out.txt' }),
+    });
   });
 
   it('attaches stderr redirection', () => {
