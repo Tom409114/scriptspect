@@ -147,7 +147,7 @@ describe('workspace discovery', () => {
 
 describe('workspace bins and dependencies', () => {
   it('unions bin names across packages for PS040', () => {
-    const units = [
+    const units: PackageUnit[] = [
       {
         relPath: 'package.json',
         absDir: '/r',
@@ -163,7 +163,7 @@ describe('workspace bins and dependencies', () => {
   });
 
   it('unitDependencyNames merges all dependency blocks', () => {
-    const unit = {
+    const unit: PackageUnit = {
       relPath: 'package.json',
       absDir: '/r',
       manifest: {
