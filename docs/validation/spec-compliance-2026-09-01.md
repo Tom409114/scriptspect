@@ -372,7 +372,7 @@
 ## 后续状态（追加，不改写基线）：v0.1 hardening 实现后
 
 - 追加日期：2026-09-01
-- 报告落盘前的分支 HEAD：`feat/v0.1-hardening` at `82f4a0952093cc4716e6e9d0509c54c3c8800dc6`
+- 本次后续审计所验证的实现 HEAD：`feat/v0.1-hardening` at `8034e1f48062172c0d42b05121f46a87a674c109`
 - README/status 固定的已审阅 runtime/release source：`069a9a7ffec7c844eebf89777456fb6723253fe5`
 - 逐门核签：[v0.1 Definition of Done 核签账本](v0.1-dod-2026-09-01.md)
 
@@ -386,7 +386,7 @@
 | Fixer 原子性、安全与恢复 | `LOCAL PASS` | 根 `scripts` 定位、dependency gate、事务 journal、race/hardlink/inode 防护、fault recovery、rollback、manual recovery 与幂等测试已实现。 |
 | CLI、package 与 bundled Action | `LOCAL PASS` | no-color/exit semantics、包内容、Node 24 Action bundle、严格 inputs、numeric outputs、annotations/summary 与只读行为已有本地消费测试。 |
 | 双语首页与公开 claims | `LOCAL PASS` | 中英双向切换、单 fixture 生成 before/output/patch/after、FAQ/docs 入口与 pre-release 状态机已实现；不展示不存在的 npm/Action 命令。 |
-| CI/release workflow 源码契约 | `LOCAL PASS` | frozen installs、full-SHA Actions、read-only PR policy、真实 `uses: ./` job、single candidate、draft assets、exact-tag publisher、provenance 与 alias recovery 均有 policy/state-machine tests。 |
+| CI/release workflow 源码契约 | `LOCAL PASS` | frozen installs、full-SHA Actions、read-only PR policy、真实 `uses: ./` job、无环境权限的 intent discovery、single candidate、四资产 draft、durable-state 后的 exact-tag dispatch、OIDC provenance、source-bound comparator、registry backoff、双 write-ahead state 与 alias/final evidence recovery 均有 policy/state-machine tests。普通 main commit 不再申请发布环境。 |
 | 最终 GitHub-hosted 验收 | `HOSTED PENDING` | 修复分支尚无候选 SHA 对应的完整三 OS × Node 22/24、CodeQL、dependency review、hosted Action/benchmark 证据；本地结果不替代它。 |
 | Branch/tag/environment 配置 | `ADMIN OPEN` | main/tag rulesets、required checks、`npm-bootstrap`/`release` environments、审批与 coordinator actor 需管理员操作。 |
 | npm 与 GitHub 正式发布 | `PUBLICATION OPEN` | bootstrap ownership/integrity contract、OIDC、`v0.1.0`、Release assets、checksum、registry provenance、`v0.1`/`v0` aliases 尚未用公开产物验证。 |
@@ -399,13 +399,13 @@
 3. fixer 误改 nested `scripts`、未验证依赖、固定临时文件、TOCTOU 与多文件 partial write，已改为 root-aware 且可恢复的两阶段 transaction。
 4. 原 Action 依赖 `npx @latest` 且从未执行，已改为同 revision 的 self-contained Node 24 bundle，并在 CI 源码中加入真实 `uses: ./` consumer。
 5. 原 schema 不随包发布、runtime/schema 漂移，已改为唯一生成式 `schema/config.schema.json` 与 `schema/output.schema.json` 契约。
-6. 原 release 流程在 publish 后才做脆弱 checksum 比较、失败会跳过资产且 alias 不存在，已拆为候选 coordinator 与 exact-tag publisher，并加入 durable state、recovery、checksum-before-publish、provenance 与 CAS aliases。
+6. 原 release 流程在 publish 后才做脆弱 checksum 比较、失败会跳过资产且 alias 不存在，已拆为候选 coordinator 与 exact-tag publisher。新流程在 durable staged state 后显式 dispatch，发布前锚定四个资产，按评审的 exact/canonical 模式验证 registry，并用 comparator executable-source digest、`alias-planned`/`final-planned`、全局 publisher/per-SHA state locks、Latest 单调决策与精确 asset/tag CAS rollback 支撑安全恢复。
 7. 原首页只有英文、手写 demo 和不存在的 `@v0.1`，已改为中英 parity、可复现生成式演示与明确 pre-release source evaluation。
 
 ### 保持未完成的门禁
 
 - 旧 PR #62 不应直接合并；应由包含本次修复的新 PR 取代，并在准确候选 SHA 上完成 hosted checks 与审阅。
-- `main` 与 version/floating tags 的 rulesets、required checks、no-force/no-delete、environment approvals 和 tag permission drill 仍需管理员配置并记录 ID。
+- `main` 与 version/floating tags 的 rulesets、required checks、environment approvals 和 tag permission drill 仍需管理员配置并记录 ID。不可变版本 tag 必须 no-force/no-delete；floating aliases 只为 coordinator 开放单调 CAS 更新，以及首次创建后失败时恢复到“不存在”的窄 CAS 删除路径。
 - npm 首次认领必须先通过 `npm-bootstrap.yml` 发布独立 `0.0.0-bootstrap.N`、验证 `latest` 未移动并提交完整性契约；随后撤销 granular token。
 - npm Trusted Publisher 的准确绑定已改为：`Tom409114/scriptspect`、workflow `npm-publish.yml`、environment `release`、allowed action `npm publish`。旧的 `release.yml` 绑定建议已经过时，因为 steady-state OIDC 必须绑定实际执行 publish 的 exact-tag workflow。
 - 在 npm provenance、Release assets/checksum、immutable `v0.1.0` 和 tagged Action consumer 全部通过前，不更新 `v0.1`/`v0`，也不创建 `v1`。
