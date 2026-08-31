@@ -30,6 +30,9 @@ import { PS026 } from './PS026';
 import { PS030 } from './PS030';
 import { PS031 } from './PS031';
 import { PS032 } from './PS032';
+import { PS040 } from './PS040';
+import { PS041 } from './PS041';
+import { PS050 } from './PS050';
 import type { Finding, RuleContext, RuleModule, Severity } from './types';
 
 export const RULES: readonly RuleModule[] = [
@@ -56,6 +59,9 @@ export const RULES: readonly RuleModule[] = [
   PS030,
   PS031,
   PS032,
+  PS040,
+  PS041,
+  PS050,
 ];
 
 export function getRule(id: string): RuleModule | undefined {
