@@ -50,6 +50,8 @@ jobs:
           corepack prepare pnpm@11.24.0 --activate
           pnpm install --frozen-lockfile
       - name: Regenerate schemas, rule docs, and bilingual demo assets
+        env:
+          SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           pnpm exec tsx tools/generate-schemas.ts
           pnpm docs:rules
@@ -59,8 +61,15 @@ jobs:
           git cat-file -e "$STATUS_COMMIT^{commit}"
           git merge-base --is-ancestor "$STATUS_COMMIT" HEAD
           test "$STATUS_COMMIT" != "$(git rev-parse HEAD)"
-          git diff --quiet "$STATUS_COMMIT" HEAD -- \
-            src dist schema package.json pnpm-lock.yaml pnpm-workspace.yaml action.yml tsconfig.json tsup.config.ts
+          git cat-file -e "$SOURCE_BASE^{commit}"
+          if ! git diff --quiet "$SOURCE_BASE" HEAD -- \
+            docs/readme-status.json \
+            docs/validation/readme-action-evidence.json \
+            README.md \
+            README.zh-CN.md; then
+            git diff --quiet "$STATUS_COMMIT" HEAD -- \
+              src dist schema package.json pnpm-lock.yaml pnpm-workspace.yaml action.yml tsconfig.json tsup.config.ts
+          fi
           git diff --exit-code -- \
             schema \
             docs/rules \
