@@ -28,10 +28,15 @@ describe('PS015 POSIX_CHMOD', () => {
     expect(only(run('node app.js'), 'PS015')).toEqual([]);
   });
 
-  it('affects cmd and powershell', () => {
+  it('intersects affected targets with the active set (metadata lists both)', () => {
     const [f] = only(run('chmod +x x'), 'PS015');
-    expect(f?.affectedTargets).toEqual(['cmd', 'powershell']);
+    expect(f?.affectedTargets).toEqual(['cmd']); // default targets: posix-sh + cmd
     expect(f?.severity).toBe('warn');
+  });
+
+  it('reports powershell too when it is an active target', () => {
+    const [f] = only(run('chmod +x x', { targets: ['cmd', 'powershell'] }), 'PS015');
+    expect(f?.affectedTargets).toEqual(['cmd', 'powershell']);
   });
 });
 
