@@ -2,10 +2,11 @@
  * action.yml contract tests (spec §12): the Action is a thin wrapper over
  * the same CLI core; inputs map 1:1 to flags; it never commits fixes.
  */
-import { describe, expect, it } from 'vitest';
+
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const action = readFileSync(join(root, 'action.yml'), 'utf8');
