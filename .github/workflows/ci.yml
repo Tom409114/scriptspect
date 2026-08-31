@@ -53,6 +53,7 @@ jobs:
         env:
           SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          set -o pipefail
           pnpm exec tsx tools/generate-schemas.ts
           pnpm docs:rules
           pnpm exec tsx tools/generate-readme-demo.ts
@@ -62,14 +63,44 @@ jobs:
           git merge-base --is-ancestor "$STATUS_COMMIT" HEAD
           test "$STATUS_COMMIT" != "$(git rev-parse HEAD)"
           git cat-file -e "$SOURCE_BASE^{commit}"
-          if ! git diff --quiet "$SOURCE_BASE" HEAD -- \
+          set +e
+          git diff --quiet "$SOURCE_BASE" HEAD -- \
             docs/readme-status.json \
             docs/validation/readme-action-evidence.json \
             README.md \
-            README.zh-CN.md; then
-            git diff --quiet "$STATUS_COMMIT" HEAD -- \
-              src dist schema package.json pnpm-lock.yaml pnpm-workspace.yaml action.yml tsconfig.json tsup.config.ts
-          fi
+            README.zh-CN.md
+          SOURCE_DIFF=$?
+          set -e
+          case "$SOURCE_DIFF" in
+            0)
+              PINNED_SOURCE_DIR="$RUNNER_TEMP/readme-pinned-source"
+              mkdir -p "$PINNED_SOURCE_DIR"
+              git archive "$STATUS_COMMIT" | tar -x -C "$PINNED_SOURCE_DIR"
+              (
+                cd "$PINNED_SOURCE_DIR"
+                corepack pnpm install --frozen-lockfile
+                corepack pnpm exec tsx tools/generate-readme-demo.ts
+              )
+              for PINNED_ASSET in \
+                package.before.json \
+                terminal.txt \
+                fix.patch \
+                package.after.json \
+                terminal.svg; do
+                git diff --no-index --exit-code -- \
+                  "$PINNED_SOURCE_DIR/docs/assets/demo/$PINNED_ASSET" \
+                  "docs/assets/demo/$PINNED_ASSET"
+              done
+              ;;
+            1)
+              git diff --quiet "$STATUS_COMMIT" HEAD -- \
+                src dist schema package.json pnpm-lock.yaml pnpm-workspace.yaml action.yml tsconfig.json tsup.config.ts
+              ;;
+            *)
+              echo "::error::unable to compare README source metadata with the event base"
+              exit "$SOURCE_DIFF"
+              ;;
+          esac
           git diff --exit-code -- \
             schema \
             docs/rules \
