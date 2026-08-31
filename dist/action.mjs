@@ -15971,6 +15971,14 @@ var import_fast_glob = __toESM(require_out4(), 1);
 import { existsSync as existsSync2 } from "fs";
 import { join as join2, relative as relative3, resolve as resolve3 } from "path";
 
+// src/core/errors.ts
+var AnalyzeError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AnalyzeError";
+  }
+};
+
 // src/workspaces/npm.ts
 function npmWorkspaceGlobs(workspaces) {
   if (workspaces === void 0 || workspaces === null) return [];
@@ -15993,19 +16001,31 @@ function pnpmWorkspaceGlobs(file) {
   let text;
   try {
     text = readFileSync2(file, "utf8");
-  } catch {
-    return [];
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return [];
+    throw new AnalyzeError(`${file}: cannot be read (${errorMessage(error)})`);
   }
   let doc;
   try {
     doc = (0, import_yaml.parse)(text);
-  } catch {
-    return [];
+  } catch (error) {
+    throw new AnalyzeError(`${file}: invalid YAML (${errorMessage(error)})`);
   }
-  if (typeof doc !== "object" || doc === null) return [];
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
+    throw new AnalyzeError(`${file}: workspace manifest root must be an object`);
+  }
   const packages = doc.packages;
-  if (!Array.isArray(packages)) return [];
-  return packages.filter((w) => typeof w === "string" && w.trim() !== "");
+  if (packages === void 0) return [];
+  if (!Array.isArray(packages) || packages.some((workspace) => typeof workspace !== "string" || workspace.trim() === "")) {
+    throw new AnalyzeError(`${file}: "packages" must be an array of non-empty strings`);
+  }
+  return packages;
+}
+function isErrno(error, code) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 // src/workspaces/discover.ts
@@ -16227,12 +16247,6 @@ function assertUnambiguousRootScripts(text) {
 }
 
 // src/core/analyze.ts
-var AnalyzeError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "AnalyzeError";
-  }
-};
 function dependencyNames(manifest) {
   const names = /* @__PURE__ */ new Set();
   for (const block of [manifest.dependencies, manifest.devDependencies]) {
