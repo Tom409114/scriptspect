@@ -1,7 +1,7 @@
 /**
  * PS018 — POSIX_SED: `sed` does not exist under cmd.exe.
  */
-
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 
@@ -29,5 +29,6 @@ export const PS018: RuleModule = availabilityRule(
     names: new Set(['sed']),
     message: () => '`sed` is not available in native Windows npm scripts',
     fixSummary: 'move the transformation into a Node script or use shx sed',
+    fix: (cmd, ctx) => shxPrefixFix('PS018', cmd, ctx),
   },
 );

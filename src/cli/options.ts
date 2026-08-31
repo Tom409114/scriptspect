@@ -21,6 +21,8 @@ export interface CliOptions {
   color: boolean;
   maxWarnings: number;
   configPath?: string;
+  fix: boolean;
+  fixDryRun: boolean;
 }
 
 export class CliOptionError extends Error {
@@ -93,5 +95,7 @@ export function normalizeOptions(raw: Record<string, unknown>): CliOptions {
     color: raw.noColor !== true,
     maxWarnings,
     configPath: typeof raw.config === 'string' ? raw.config : undefined,
+    fix: raw.fix === true,
+    fixDryRun: raw.fixDryRun === true,
   };
 }

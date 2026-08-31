@@ -2,7 +2,7 @@
  * PS010 — POSIX_RM: `rm` (and `rm -rf`) does not exist in native Windows
  * npm scripts (cmd.exe).
  */
-
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 
@@ -40,5 +40,6 @@ export const PS010: RuleModule = availabilityRule(
     message: (cmd) =>
       `\`${cmd.raw.split(' ').slice(0, 2).join(' ')}\` is not available in native Windows npm scripts`,
     fixSummary: 'use rimraf (devDependency), shx rm, or Node fs.rm',
+    fix: (cmd, ctx) => rimrafFix(cmd, ctx),
   },
 );

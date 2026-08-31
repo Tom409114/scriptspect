@@ -1,7 +1,7 @@
 /**
  * PS019 — POSIX_CAT: `cat` does not exist under cmd.exe (type differs).
  */
-
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 
@@ -33,5 +33,6 @@ export const PS019: RuleModule = availabilityRule(
     names: new Set(['cat']),
     message: () => '`cat` is not available in native Windows npm scripts',
     fixSummary: 'use shx cat or Node fs',
+    fix: (cmd, ctx) => shxPrefixFix('PS019', cmd, ctx),
   },
 );

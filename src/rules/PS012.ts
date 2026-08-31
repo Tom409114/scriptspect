@@ -1,7 +1,7 @@
 /**
  * PS012 — POSIX_MV: `mv` does not exist under cmd.exe.
  */
-
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 
@@ -29,5 +29,6 @@ export const PS012: RuleModule = availabilityRule(
     names: new Set(['mv']),
     message: () => '`mv` is not available in native Windows npm scripts',
     fixSummary: 'use shx mv or Node fs.rename',
+    fix: (cmd, ctx) => shxPrefixFix('PS012', cmd, ctx),
   },
 );

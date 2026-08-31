@@ -1,7 +1,7 @@
 /**
  * PS017 — POSIX_GREP: `grep` does not exist under cmd.exe.
  */
-
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 
@@ -29,5 +29,6 @@ export const PS017: RuleModule = availabilityRule(
     names: new Set(['grep']),
     message: () => '`grep` is not available in native Windows npm scripts (findstr differs)',
     fixSummary: 'use shx grep or a Node implementation',
+    fix: (cmd, ctx) => shxPrefixFix('PS017', cmd, ctx),
   },
 );

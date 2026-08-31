@@ -1,7 +1,7 @@
 /**
  * PS011 — POSIX_CP: `cp` / `cp -r` does not exist under cmd.exe.
  */
-
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule } from './util';
 
@@ -33,5 +33,6 @@ export const PS011: RuleModule = availabilityRule(
     message: (cmd) =>
       `\`${cmd.argv[0]?.raw ?? 'cp'}\` is not available in native Windows npm scripts`,
     fixSummary: 'use shx cp or Node fs.cp',
+    fix: (cmd, ctx) => shxPrefixFix('PS011', cmd, ctx),
   },
 );

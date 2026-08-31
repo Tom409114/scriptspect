@@ -4,6 +4,7 @@
  */
 
 import type { CommandNode } from '../parser/ir';
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import type { RuleModule } from './types';
 import { availabilityRule, flagsOf } from './util';
 
@@ -47,5 +48,6 @@ export const PS013: RuleModule = availabilityRule(
     message: (cmd) =>
       `\`${cmd.argv[0]?.raw ?? 'mkdir'} ${flagsOf(cmd).join(' ')}\` is not portable to cmd.exe`,
     fixSummary: 'use shx mkdir -p or Node fs.mkdir recursive',
+    fix: (cmd, ctx) => shxPrefixFix('PS013', cmd, ctx),
   },
 );
