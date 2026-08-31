@@ -695,3 +695,60 @@ jobs:
 
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
           echo "release-id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+  dispatch-publisher:
+    name: Dispatch the exact immutable-tag publisher
+    needs: [authorize, stage-release]
+    if: needs.stage-release.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+    steps:
+      - name: Dispatch exact publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          INTENT_ID: ${{ needs.authorize.outputs.intent-id }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+          TAG: ${{ needs.authorize.outputs.tag }}
+          RELEASE_ID: ${{ needs.stage-release.outputs.release-id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$INTENT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]]
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" \
+            > "$RUNNER_TEMP/release-state.json"
+          jq -e --arg intentId "$INTENT_ID" --arg sha "$SHA" --arg tag "$TAG" \
+            --argjson releaseId "$RELEASE_ID" '
+            (.state | IN("staged-draft","npm-published","npm-verified","aliases-verified","consumed")) and
+            .intent.intentId == $intentId and
+            .intent.mergeCommitSha == $sha and
+            .intent.tag == $tag and
+            .stagedDraft.releaseId == $releaseId and
+            (.stagedDraft.assets | length == 3) and
+            (.stagedDraft.releaseManifestDigest | test("^[0-9a-f]{64}$"))
+          ' "$RUNNER_TEMP/release-state.json" >/dev/null
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/tag-ref.json"
+          jq -e --arg ref "refs/tags/$TAG" --arg sha "$SHA" \
+            '.ref == $ref and .object.type == "commit" and .object.sha == $sha' \
+            "$RUNNER_TEMP/tag-ref.json" >/dev/null
+
+          jq -n --arg ref "$TAG" --arg intentId "$INTENT_ID" --arg tag "$TAG" --arg sha "$SHA" \
+            '{ref:$ref,inputs:{"intent-id":$intentId,tag:$tag,sha:$sha}}' \
+            > "$RUNNER_TEMP/npm-publish-dispatch.json"
+          gh api -X POST -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$REPOSITORY/actions/workflows/npm-publish.yml/dispatches" \
+            --input "$RUNNER_TEMP/npm-publish-dispatch.json" >/dev/null
