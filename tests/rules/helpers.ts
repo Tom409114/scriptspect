@@ -1,7 +1,8 @@
 /** Shared helpers for rule tests: minimal context + result shaping. */
+
+import { DEFAULT_TARGETS } from '../../src/core/targets';
 import { analyzeScript } from '../../src/rules/index';
 import type { Finding, RuleContext } from '../../src/rules/types';
-import { DEFAULT_TARGETS } from '../../src/core/targets';
 
 export function makeCtx(partial: Partial<RuleContext> = {}): RuleContext {
   return {

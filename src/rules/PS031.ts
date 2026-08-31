@@ -1,8 +1,9 @@
 /**
  * PS031 — EXPLICIT_CMD: `cmd /c …` makes the script unusable on macOS/Linux.
  */
-import { availabilityRule } from './util';
+
 import type { RuleModule } from './types';
+import { availabilityRule } from './util';
 
 const CMD_NAMES = new Set(['cmd', 'cmd.exe']);
 
@@ -21,7 +22,8 @@ export const PS031: RuleModule = availabilityRule(
     fixSafety: 'manual',
     provenance: [
       {
-        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd',
+        source:
+          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd',
         claim: 'cmd.exe is the Windows command interpreter; it does not exist on macOS/Linux.',
       },
     ],
@@ -29,6 +31,7 @@ export const PS031: RuleModule = availabilityRule(
   {
     names: CMD_NAMES,
     message: (cmd) => `\`${cmd.argv[0]?.raw ?? ''}\` is Windows-only and fails on macOS/Linux`,
-    fixSummary: 'replace with cross-platform logic or move the Windows-specific part to a platform-scoped script',
+    fixSummary:
+      'replace with cross-platform logic or move the Windows-specific part to a platform-scoped script',
   },
 );

@@ -2,7 +2,14 @@
  * Finding construction helpers shared by all rules.
  */
 import type { ShellTarget } from '../parser/ir';
-import type { Confidence, Finding, FixCandidate, RuleContext, RuleMetadata, Severity } from '../rules/types';
+import type {
+  Confidence,
+  Finding,
+  FixCandidate,
+  RuleContext,
+  RuleMetadata,
+  Severity,
+} from '../rules/types';
 import { intersectTargets } from './targets';
 
 export interface FindingOpts {

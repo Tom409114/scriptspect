@@ -3,15 +3,16 @@
  * no-op assignment in POSIX sh (`set` only manages shell options there).
  */
 import { makeFinding } from '../core/finding';
-import { commandsOf, isCommand } from './util';
 import type { Finding, RuleContext, RuleModule } from './types';
+import { commandsOf, isCommand } from './util';
 
 const CMD_SET_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 export const PS002: RuleModule = {
   id: 'PS002',
   title: 'CMD_SET_ENV',
-  summary: '`set FOO=bar&& …` sets the variable only for cmd.exe; POSIX sh ignores it as an assignment.',
+  summary:
+    '`set FOO=bar&& …` sets the variable only for cmd.exe; POSIX sh ignores it as an assignment.',
   severity: 'warn',
   confidence: 'high',
   affectedTargets: ['posix-sh'],
@@ -22,12 +23,15 @@ export const PS002: RuleModule = {
   fixSafety: 'conditional',
   provenance: [
     {
-      source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
-      claim: 'cmd.exe `set VAR=value` defines the variable in the session; `&&` then runs the next command with it set.',
+      source:
+        'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
+      claim:
+        'cmd.exe `set VAR=value` defines the variable in the session; `&&` then runs the next command with it set.',
     },
     {
       source: 'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#set',
-      claim: 'POSIX `set` changes shell options / positional parameters — `set FOO=bar` never exports an environment variable.',
+      claim:
+        'POSIX `set` changes shell options / positional parameters — `set FOO=bar` never exports an environment variable.',
     },
   ],
   check(ir, ctx: RuleContext): Finding[] {
@@ -42,7 +46,8 @@ export const PS002: RuleModule = {
         fix: {
           ruleId: this.id,
           safety: 'conditional',
-          description: 'use cross-env for per-command env vars, or restructure to avoid session state',
+          description:
+            'use cross-env for per-command env vars, or restructure to avoid session state',
           requiresDependency: 'cross-env',
         },
       });

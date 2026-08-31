@@ -19,9 +19,13 @@ describe('rule engine', () => {
   });
 
   it('severity overrides from config are applied', () => {
-    const findings = analyzeScript('NODE_ENV=x vite build', makeCtx({ script: 'NODE_ENV=x vite build' }), {
-      severityOverrides: new Map([['PS001', 'advisory']]),
-    });
+    const findings = analyzeScript(
+      'NODE_ENV=x vite build',
+      makeCtx({ script: 'NODE_ENV=x vite build' }),
+      {
+        severityOverrides: new Map([['PS001', 'advisory']]),
+      },
+    );
     expect(findings[0]?.severity).toBe('advisory');
   });
 
@@ -46,7 +50,11 @@ describe('rule engine', () => {
   it('findings carry script and package identity', () => {
     const findings = analyzeScript(
       'NODE_ENV=x vite build',
-      makeCtx({ script: 'NODE_ENV=x vite build', scriptName: 'build', packagePath: 'packages/web/package.json' }),
+      makeCtx({
+        script: 'NODE_ENV=x vite build',
+        scriptName: 'build',
+        packagePath: 'packages/web/package.json',
+      }),
     );
     expect(findings[0]?.scriptName).toBe('build');
     expect(findings[0]?.packagePath).toBe('packages/web/package.json');

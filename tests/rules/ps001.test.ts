@@ -35,7 +35,10 @@ describe('PS001 POSIX_INLINE_ENV', () => {
   });
 
   it('fix: safe when cross-env is already a dependency', () => {
-    const [f] = only(run('NODE_ENV=production vite build', { dependencies: new Set(['cross-env']) }), 'PS001');
+    const [f] = only(
+      run('NODE_ENV=production vite build', { dependencies: new Set(['cross-env']) }),
+      'PS001',
+    );
     expect(f?.fix?.safety).toBe('safe');
     expect(f?.fix?.replacement?.text).toBe('cross-env ');
   });

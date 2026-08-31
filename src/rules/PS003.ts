@@ -2,26 +2,30 @@
  * PS003 — POWERSHELL_ENV: `$env:FOO='bar'` is PowerShell-specific syntax.
  */
 import { makeFinding } from '../core/finding';
-import { commandsOf } from './util';
 import type { Finding, RuleContext, RuleModule } from './types';
+import { commandsOf } from './util';
 
 const PS_ENV_RE = /^\$env:[A-Za-z_][A-Za-z0-9_]*\s*=/;
 
 export const PS003: RuleModule = {
   id: 'PS003',
   title: 'POWERSHELL_ENV',
-  summary: "`$env:NAME=…` assignment syntax exists only in PowerShell.",
+  summary: '`$env:NAME=…` assignment syntax exists only in PowerShell.',
   severity: 'warn',
   confidence: 'high',
   affectedTargets: ['posix-sh', 'cmd'],
   badExamples: ["$env:NODE_ENV='production'; node app.js", "$env:PATH='…'; npm test"],
-  goodExamples: ['cross-env NODE_ENV=production node app.js', 'powershell -Command "$env:X=1; node app.js"'],
+  goodExamples: [
+    'cross-env NODE_ENV=production node app.js',
+    'powershell -Command "$env:X=1; node app.js"',
+  ],
   falsePositiveNotes:
     'Not reported inside explicit powershell/pwsh wrappers (the dependency itself is reported by PS032 instead).',
   fixSafety: 'conditional',
   provenance: [
     {
-      source: 'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_Environment_Variables',
+      source:
+        'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_Environment_Variables',
       claim: '$env:NAME is the PowerShell provider syntax for environment variables.',
     },
     {

@@ -2,8 +2,9 @@
  * PS030 — EXPLICIT_BASH: scripts invoking bash/sh/zsh depend on a shell that
  * default Windows environments do not have.
  */
-import { availabilityRule } from './util';
+
 import type { RuleModule } from './types';
+import { availabilityRule } from './util';
 
 const SH_FAMILY = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'ash']);
 
@@ -23,7 +24,8 @@ export const PS030: RuleModule = availabilityRule(
     provenance: [
       {
         source: 'https://learn.microsoft.com/en-us/windows/nodejs/beginners-tutorial-to-nodejs',
-        claim: 'A stock Windows Node.js install provides cmd.exe/PowerShell; bash requires WSL, Git Bash, or a manual install.',
+        claim:
+          'A stock Windows Node.js install provides cmd.exe/PowerShell; bash requires WSL, Git Bash, or a manual install.',
       },
       {
         source: 'https://docs.npmjs.com/cli/v10/using-npm/scripts',
@@ -35,6 +37,7 @@ export const PS030: RuleModule = availabilityRule(
     names: SH_FAMILY,
     message: (cmd) =>
       `\`${cmd.argv[0]?.raw ?? ''}\` requires a POSIX shell; default Windows environments have none`,
-    fixSummary: 'document the shell dependency, rewrite in Node, or declare it in a platform-specific script',
+    fixSummary:
+      'document the shell dependency, rewrite in Node, or declare it in a platform-specific script',
   },
 );
