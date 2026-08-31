@@ -1,12 +1,13 @@
 /**
  * CLI entry point (spec §4). Commands: default check, `check [path]`,
  * `explain <ruleId>`. Exit codes: 0 = below failure threshold, 1 = findings
- * above threshold (high-confidence errors, or warnings over --max-warnings),
+ * above threshold (any configured error, or warnings over --max-warnings),
  * 2 = tool errors (config, I/O, invalid options).
  *
  * `runCli` returns the exit code and writes through the injected sinks so
  * integration tests never need to spawn a process.
  */
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import cac from 'cac';
 import { ConfigError, loadConfig } from '../config/load';
@@ -15,7 +16,16 @@ import { analyze, resolveRoot } from '../core/analyze';
 import { version } from '../core/version';
 import { renderPatch } from '../fixers/diff';
 import { planFixes, rewritesByPackage } from '../fixers/fix-plan';
-import { applyRewritesToFile } from '../fixers/package-json';
+import type { ScriptRewrite } from '../fixers/package-json';
+import { planRewritesForFile } from '../fixers/package-json';
+import {
+  finalizeWriteTransaction,
+  installWriteTransaction,
+  prepareWriteTransaction,
+  recoverTransaction,
+  rollbackWriteTransaction,
+  TransactionError,
+} from '../fixers/transaction';
 import { renderAnnotations, writeJobSummary } from '../reporters/github';
 import { renderJson } from '../reporters/json';
 import { renderStylish } from '../reporters/stylish';
@@ -41,7 +51,7 @@ function applySeverityFilter(findings: Finding[], min: CliOptions['severity']): 
 }
 
 function exitCodeFor(result: AnalysisResult, options: CliOptions): number {
-  const failing = result.findings.some((f) => f.severity === 'error' && f.confidence === 'high');
+  const failing = result.findings.some((f) => f.severity === 'error');
   if (failing) return 1;
   if (result.summary.warnings > options.maxWarnings) return 1;
   return 0;
@@ -76,20 +86,73 @@ async function runCheck(
         if (plans.length === 0) io.err('scriptspect: no safe fixes available (nothing to dry-run)');
       } else {
         const rewrites = rewritesByPackage(plans);
+        const writes = [];
+        const writtenRewrites = new Map<string, ScriptRewrite[]>();
         for (const [packagePath, list] of rewrites) {
           const file = join(root, packagePath);
-          const next = applyRewritesToFile(file, list, true);
-          if (next !== null) {
+          const planned = planRewritesForFile(root, file, list);
+          if (planned !== null) {
+            writes.push({ path: file, ...planned });
+            writtenRewrites.set(packagePath, list);
+          }
+        }
+        let transactionPath: string | undefined;
+        let rerun: AnalysisResult;
+        try {
+          if (writes.length > 0) {
+            const prepared = prepareWriteTransaction(root, writes);
+            transactionPath = prepared.journalPath;
+            installWriteTransaction(transactionPath);
+          } else {
+            io.err('scriptspect: no safe fixes available (nothing changed)');
+          }
+          rerun = analyze(root, { config: effectiveConfig, onlyRules: options.rules });
+          const remainingPlans = planFixes(rerun);
+          for (const plan of plans.filter((candidate) =>
+            writtenRewrites.has(candidate.packagePath),
+          )) {
+            const script = rerun.packages.find((unit) => unit.relPath === plan.packagePath)
+              ?.manifest.scripts?.[plan.scriptName];
+            const appliedRuleIds = new Set(plan.applied.map((applied) => applied.ruleId));
+            const unresolved = remainingPlans.some(
+              (candidate) =>
+                candidate.packagePath === plan.packagePath &&
+                candidate.scriptName === plan.scriptName &&
+                candidate.applied.some((applied) => appliedRuleIds.has(applied.ruleId)),
+            );
+            if (script !== plan.after || unresolved) {
+              throw new Error(
+                `post-fix verification failed for ${plan.packagePath} scripts.${plan.scriptName}`,
+              );
+            }
+          }
+          if (transactionPath !== undefined) finalizeWriteTransaction(transactionPath);
+          transactionPath = undefined;
+        } catch (error) {
+          if (transactionPath !== undefined && existsSync(transactionPath)) {
+            const rollback = rollbackWriteTransaction(transactionPath);
+            if (rollback.state !== 'rollback-success') {
+              throw new TransactionError(
+                `${error instanceof Error ? error.message : String(error)}\nwrite transaction ended in ${rollback.state}\njournal: ${rollback.journalPath}\n${rollback.backupPaths.map((path) => `backup: ${path}`).join('\n')}`,
+                rollback,
+              );
+            }
+          }
+          throw error;
+        }
+        if (writes.length > 0) {
+          for (const [packagePath, list] of writtenRewrites) {
             io.err(`scriptspect: fixed ${list.length} script(s) in ${packagePath}`);
           }
         }
-        if (rewrites.size === 0) io.err('scriptspect: no safe fixes available (nothing changed)');
-        const rerun = analyze(root, { config: effectiveConfig, onlyRules: options.rules });
         result.findings = rerun.findings;
         result.summary = rerun.summary;
       }
     }
 
+    // Failure is decided after config/ignores and post-fix analysis, but before
+    // presentation filtering. Hidden warnings still consume the warning budget.
+    const exitCode = exitCodeFor(result, options);
     const visible = applySeverityFilter(result.findings, options.severity);
     // Recount so the summary reflects what was actually reported.
     const finalResult: AnalysisResult = {
@@ -120,7 +183,7 @@ async function runCheck(
       default:
         io.out(renderStylish(finalResult, { color: options.color, quiet: options.quiet }));
     }
-    return exitCodeFor(finalResult, options);
+    return exitCode;
   } catch (err) {
     if (err instanceof ConfigError || err instanceof Error) {
       io.err(`scriptspect: ${err.message}`);
@@ -138,6 +201,34 @@ async function runExplain(ruleId: string, io: CliIo): Promise<number> {
   }
   io.out(renderExplain(rule));
   return 0;
+}
+
+async function runRecover(raw: Record<string, unknown>, io: CliIo): Promise<number> {
+  if (typeof raw.transaction !== 'string' || raw.transaction.trim() === '') {
+    io.err('scriptspect: recover requires --transaction <journal>');
+    return 2;
+  }
+  if (raw.acknowledgeManual === true && raw.apply !== true) {
+    io.err('scriptspect: --acknowledge-manual requires --apply');
+    return 2;
+  }
+  try {
+    const result = recoverTransaction(raw.transaction, {
+      apply: raw.apply === true,
+      acknowledgeManual: raw.acknowledgeManual === true,
+    });
+    for (const action of result.actions) io.out(action);
+    if (result.state !== 'success') {
+      io.err(`scriptspect: recovery state ${result.state}`);
+      io.err(`scriptspect: journal ${result.journalPath}`);
+      for (const backup of result.backupPaths) io.err(`scriptspect: backup ${backup}`);
+      return 2;
+    }
+    return 0;
+  } catch (error) {
+    io.err(`scriptspect: ${error instanceof Error ? error.message : String(error)}`);
+    return 2;
+  }
 }
 
 export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<number> {
@@ -175,6 +266,18 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
 
   cli.command('explain <ruleId>', 'show rule documentation offline').action((ruleId: string) => {
     outcome = runExplain(ruleId, io);
+    return outcome;
+  });
+
+  const recover = cli.command('recover', 'preview or complete a recorded fixer rollback');
+  recover.option('--transaction <journal>', 'transaction journal to recover');
+  recover.option('--apply', 'apply the previewed rollback');
+  recover.option(
+    '--acknowledge-manual',
+    'archive a manual-recovery journal after maintainer acknowledgement',
+  );
+  recover.action((raw) => {
+    outcome = runRecover(raw, io);
     return outcome;
   });
 
