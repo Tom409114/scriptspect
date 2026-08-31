@@ -238,13 +238,22 @@ describe('reproducible CI', () => {
 
   it('collects hosted Action annotations and summary as dependent evidence', () => {
     const ci = workflow('ci.yml');
+    const consumer = ci.jobs?.['action-consumer'];
     const evidence = ci.jobs?.['action-evidence'];
     expect(evidence?.needs).toContain('action-consumer');
     expect(evidence?.permissions).toEqual({ contents: 'read', actions: 'read', checks: 'read' });
+    const consumerRun = (consumer?.steps ?? []).map((step) => step.run ?? '').join('\n');
+    expect(consumerRun).toContain('GITHUB_STEP_SUMMARY=');
+    expect(consumerRun).toContain('action-summary.md');
+    expect(consumer?.steps?.some((step) => step.uses?.startsWith('actions/upload-artifact@'))).toBe(
+      true,
+    );
     const run = (evidence?.steps ?? []).map((step) => step.run ?? '').join('\n');
     expect(run).toContain('/annotations');
     expect(run).toContain('any(.[];');
-    expect(run).toContain('.output.summary');
+    expect(run).toContain('gh run download');
+    expect(run).toContain('action-summary.md');
+    expect(run).not.toContain('.output.summary');
     expect(run).toContain('action-runner-evidence.json');
     expect(evidence?.steps?.some((step) => step.uses?.startsWith('actions/upload-artifact@'))).toBe(
       true,

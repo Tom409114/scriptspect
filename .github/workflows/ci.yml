@@ -213,6 +213,24 @@ jobs:
           test "$CLEAN_OUTCOME" = success
           test "$CLEAN_EXIT" = 0
           sha256sum --check "$RUNNER_TEMP/action-fixtures.sha256"
+          GITHUB_WORKSPACE="$GITHUB_WORKSPACE/.ci/action-clean" \
+            GITHUB_STEP_SUMMARY="$RUNNER_TEMP/action-summary.md" \
+            GITHUB_OUTPUT="$RUNNER_TEMP/action-summary-output.txt" \
+            INPUT_PATH=. \
+            node dist/action.mjs
+          grep -Fx '## scriptspect' "$RUNNER_TEMP/action-summary.md"
+          grep -F 'Scanned **1 script** in **1 package**.' "$RUNNER_TEMP/action-summary.md"
+          grep -Fx 'exit-code=0' "$RUNNER_TEMP/action-summary-output.txt"
+      - name: Upload hosted Action summary evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: action-consumer-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/action-summary.md
+            ${{ runner.temp }}/action-summary-output.txt
+          retention-days: 30
+          if-no-files-found: error
 
   action-evidence:
     name: Hosted Action annotations and summary evidence
@@ -231,23 +249,31 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/action-consumer-evidence"
+          gh run download "$RUN_ID" \
+            --repo "$REPOSITORY" \
+            --name "action-consumer-evidence-$RUN_ID" \
+            --dir "$RUNNER_TEMP/action-consumer-evidence"
+          SUMMARY_FILE="$RUNNER_TEMP/action-consumer-evidence/action-summary.md"
+          OUTPUT_FILE="$RUNNER_TEMP/action-consumer-evidence/action-summary-output.txt"
+          grep -Fx '## scriptspect' "$SUMMARY_FILE"
+          grep -F 'Scanned **1 script** in **1 package**.' "$SUMMARY_FILE"
+          grep -Fx 'exit-code=0' "$OUTPUT_FILE"
           gh api --paginate "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/jobs-pages.json"
           jq -s '{jobs: map(.jobs[]) }' "$RUNNER_TEMP/jobs-pages.json" > "$RUNNER_TEMP/jobs.json"
           JOB_ID=$(jq -er '[.jobs[] | select(.name == "Bundled Action consumer")] | if length == 1 then .[0].id else error("job cardinality") end' "$RUNNER_TEMP/jobs.json")
           CHECK_RUN_URL=$(jq -er --argjson job "$JOB_ID" '.jobs[] | select(.id == $job) | .check_run_url' "$RUNNER_TEMP/jobs.json")
           CHECK_RUN_ID=${CHECK_RUN_URL##*/}
           [[ "$CHECK_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          gh api "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" > "$RUNNER_TEMP/action-check.json"
           gh api --paginate "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID/annotations?per_page=100" > "$RUNNER_TEMP/annotation-pages.json"
           jq -s 'add' "$RUNNER_TEMP/annotation-pages.json" > "$RUNNER_TEMP/annotations.json"
           jq -e 'length > 0 and any(.[]; ((.title // "") + " " + (.message // "")) | test("PS[0-9]{3}|scriptspect"))' "$RUNNER_TEMP/annotations.json" >/dev/null
-          jq -er '.output.summary | select(test("scriptspect"; "i"))' "$RUNNER_TEMP/action-check.json" >/dev/null
           jq -n \
             --argjson workflowRunId "$RUN_ID" \
             --argjson jobId "$JOB_ID" \
             --argjson checkRunId "$CHECK_RUN_ID" \
             --argjson annotationCount "$(jq 'length' "$RUNNER_TEMP/annotations.json")" \
-            --arg summarySha256 "$(jq -r '.output.summary' "$RUNNER_TEMP/action-check.json" | sha256sum | cut -d' ' -f1)" \
+            --arg summarySha256 "$(sha256sum "$SUMMARY_FILE" | cut -d' ' -f1)" \
             '{workflowRunId: $workflowRunId, jobId: $jobId, checkRunId: $checkRunId, annotationCount: $annotationCount, summarySha256: $summarySha256}' \
             > "$RUNNER_TEMP/action-runner-evidence.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
