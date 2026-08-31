@@ -13,11 +13,19 @@ function lcsTable(a: readonly string[], b: readonly string[]): number[][] {
     new Array<number>(b.length + 1).fill(0),
   );
   for (let i = a.length - 1; i >= 0; i -= 1) {
+    const currentRow = table[i];
+    const nextRow = table[i + 1];
+    const currentLine = a[i];
+    if (currentRow === undefined || nextRow === undefined || currentLine === undefined) {
+      throw new Error('invalid LCS table state');
+    }
     for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i]![j] =
-        a[i]! === b[j]!
-          ? (table[i + 1]?.[j + 1] ?? 0) + 1
-          : Math.max(table[i + 1]?.[j] ?? 0, table[i]?.[j + 1] ?? 0);
+      const candidateLine = b[j];
+      if (candidateLine === undefined) throw new Error('invalid LCS input state');
+      currentRow[j] =
+        currentLine === candidateLine
+          ? (nextRow[j + 1] ?? 0) + 1
+          : Math.max(nextRow[j] ?? 0, currentRow[j + 1] ?? 0);
     }
   }
   return table;

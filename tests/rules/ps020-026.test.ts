@@ -50,7 +50,7 @@ describe('PS022 POSIX_SOURCE', () => {
 describe('PS023 POSIX_VAR_EXPANSION', () => {
   it('positive: $VAR forms', () => {
     expect(only(run('echo $npm_package_version'), 'PS023')).toHaveLength(1);
-    expect(only(run('node build.js --out ${OUT_DIR:-dist}'), 'PS023')).toHaveLength(1);
+    expect(only(run('node build.js --out $' + '{OUT_DIR:-dist}'), 'PS023')).toHaveLength(1);
     expect(only(run('ls $HOME'), 'PS023')).toHaveLength(1);
   });
 

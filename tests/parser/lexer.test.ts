@@ -175,9 +175,10 @@ describe('lexer: expansions', () => {
     expect(toks[1]?.expansions[0]).toMatchObject({ kind: 'var', raw: '$HOME' });
   });
 
-  it('detects ${VAR} with defaults', () => {
-    const toks = wordTokens('echo ${HOME:-/tmp}');
-    expect(toks[1]?.expansions[0]).toMatchObject({ kind: 'braced', raw: '${HOME:-/tmp}' });
+  it('detects braced variables with defaults', () => {
+    const expansion = '$' + '{HOME:-/tmp}';
+    const toks = wordTokens(`echo ${expansion}`);
+    expect(toks[1]?.expansions[0]).toMatchObject({ kind: 'braced', raw: expansion });
   });
 
   it('detects $(command) substitution', () => {

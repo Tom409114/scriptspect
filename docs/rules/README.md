@@ -29,5 +29,5 @@ Every rule is a stable public API. Each page is generated from rule metadata —
 | [PS032](PS032.md) | EXPLICIT_POWERSHELL | warn | high | posix-sh |
 | [PS040](PS040.md) | MISSING_LOCAL_BIN | warn | high | posix-sh, cmd, powershell |
 | [PS041](PS041.md) | PLATFORM_EXE_SUFFIX | warn | high | posix-sh |
-| [PS050](PS050.md) | SHELL_SPECIFIC_SEPARATOR | advisory | medium | cmd, posix-sh |
+| [PS050](PS050.md) | SHELL_SPECIFIC_SEPARATOR | advisory | medium | posix-sh, cmd |
 | [PS051](PS051.md) | TARGET_SHELL_PARSE_ERROR | advisory | medium | posix-sh, cmd, powershell |
