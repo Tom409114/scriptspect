@@ -33,6 +33,9 @@ importers:
       ajv:
         specifier: 8.17.1
         version: 8.17.1
+      scripts-doctor:
+        specifier: 1.0.0
+        version: 1.0.0
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.12)(typescript@7.0.2)(yaml@2.9.0)
@@ -927,6 +930,10 @@ packages:
     resolution: {integrity: sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA==}
     engines: {node: '>= 14.16.0'}
 
+  commander@12.1.0:
+    resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
+    engines: {node: '>=18'}
+
   commander@4.1.1:
     resolution: {integrity: sha512-NOKm8xhkzAjzFx8B2v5OAHT+u5pRQc2UCa2Vq9jYL/31o2wi9mxBA7LIFs3sV5VSC49z6pEhfbMULvShKj26WA==}
     engines: {node: '>= 6'}
@@ -1252,6 +1259,11 @@ packages:
 
   run-parallel@1.2.0:
     resolution: {integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==}
+
+  scripts-doctor@1.0.0:
+    resolution: {integrity: sha512-3eEtXD/UUrCeD6Gu2LPIkHDLIPHmPNNZUA5OFU1RWwP27PRyHlI5+rANi7rILbs4+3elZdwD0rcvA7+8O24feg==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
@@ -1978,6 +1990,8 @@ snapshots:
     dependencies:
       readdirp: 4.1.2
 
+  commander@12.1.0: {}
+
   commander@4.1.1: {}
 
   confbox@0.1.8: {}
@@ -2321,6 +2335,11 @@ snapshots:
   run-parallel@1.2.0:
     dependencies:
       queue-microtask: 1.2.3
+
+  scripts-doctor@1.0.0:
+    dependencies:
+      commander: 12.1.0
+      picocolors: 1.1.1
 
   semver@7.8.5: {}
 

@@ -1,10 +1,14 @@
 # Comparison: scriptspect vs scripts-doctor
 
-[scripts-doctor](https://github.com/Ashwani2529/scripts-doctor) (MIT) lints and auto-fixes package.json scripts for cross-platform reliability. It proved real demand for this problem space. scriptspect exists to go substantially further on accuracy and CI ergonomics — not to rebrand the same tool. This page is a factual comparison; if it drifts from reality, please open an issue.
+[scripts-doctor](https://github.com/Ashwani2529/scripts-doctor) (MIT) lints and auto-fixes package.json scripts for cross-platform reliability. ScriptSpect addresses the same problem with a different parser, evidence model, and CI contract. This page compares documented surfaces; it does not claim that either tool is more accurate.
 
-## Feature parity baseline (must-have; verified against the scripts-doctor README as of 2026-08-30)
+## Documented surface baseline
 
-| scripts-doctor capability | scriptspect | How we do it better |
+Checked against the scripts-doctor `1.0.0` README and package metadata on
+2026-09-01. The exact competitor package and integrity used by this repository
+are pinned in [`comparison/toolchain.json`](../comparison/toolchain.json).
+
+| scripts-doctor capability | ScriptSpect implementation | Distinct contract (not a quality claim) |
 | --- | --- | --- |
 | Scan package.json scripts | ✅ | + workspace/monorepo auto-discovery (npm/pnpm/Yarn/Bun) |
 | `rm -rf` → rimraf advice | ✅ (PS010) | fix safety classes; auto-apply only when provably safe |
@@ -17,18 +21,18 @@
 | `--quiet` / `--no-color` / `--help` / `--version` | ✅ (M3) | full CLI parity |
 | Exit codes 0/1/2 | ✅ (M3) | documented contract |
 | Explicit project path | ✅ (M3) | root/path + workspace selection in CI |
-| Runs in CI | ✅ (M3/M6) | from a manual `npx` step to a first-class Action with annotations + job summary |
+| Runs in CI | source preview implemented; released consumer pending | bundled Action, annotations, numeric outputs, and job summary; no public tag yet |
 
 ## Differentiation contract — where scriptspect must be clearly better
 
 | Dimension | Commitment |
 | --- | --- |
-| Shell-aware parsing | quote/escape/operator-aware lexer → token stream → command IR. Strings like `echo "rm -rf dist"` or `node -e "console.log('cp -r')"` never false-positive; quoted `&&` never splits |
+| Shell-aware parsing | quote/escape/operator-aware target parses → token stream → command IR. Regression fixtures require quoted command text and quoted operators to remain data |
 | Target shell matrix | every finding lists affected shells (posix-sh / cmd / powershell); default matrix = npm defaults (sh + cmd) |
-| Confidence + severity | every rule has confidence (high/medium) and severity (error/warn/advisory); CI fails only on high-confidence errors by default |
+| Confidence + severity | every rule has confidence (high/medium) and severity (error/warn/advisory); any configured `error` is in the failure universe, and the warning budget is evaluated before display filtering |
 | Rule provenance | each rule documents shell-behavior evidence and real failure classes with good/bad examples |
-| Monorepo first-class | npm/pnpm/Yarn/Bun workspace discovery, per-package reporting, 100-package repo in under 2 seconds |
-| Safe fix engine | safe / conditional / manual; `--fix` applies only provably-safe fixes; idempotent; preserves formatting |
+| Monorepo first-class | npm/pnpm/Yarn/Bun workspace discovery and per-package reporting; the hosted 100-package/2-second benchmark remains a release gate, not a completed claim |
+| Safe fix engine | safe / conditional / manual; `--fix` applies only replacements whose structural and dependency preconditions are proved; idempotency and formatting are regression-tested |
 | No execution | static only — safe to run on untrusted PRs |
 | GitHub-native | first-class Action, PR annotations, job summary; SARIF planned |
 | Package-manager neutral | npm / pnpm / Yarn / Bun |
@@ -36,7 +40,15 @@
 
 ## Release gate
 
-v0.1 is not published if, next to scripts-doctor's README, the honest conclusion is "same features, different name". The bar: on a shared fixture corpus, scriptspect must find real issues scripts-doctor misses — without trading in more false positives.
+The executable [shared-corpus harness](../comparison/README.md) now captures both
+tools' commands and outputs under a pinned toolchain. Its adjudication rows are
+still pending human review. Therefore the competitive gate remains **OPEN** and
+no “finds more,” “fewer false positives,” or winner claim is published.
+
+The v0.1 bar remains: reviewed shared-corpus evidence must identify useful
+problems ScriptSpect catches without purchasing that coverage with more false
+positives. If that result is not established, the project improves or narrows
+scope rather than publishing a marketing conclusion.
 
 ## Relationship to cross-env / shx / rimraf
 

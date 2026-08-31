@@ -1,0 +1,11 @@
+{
+  "name": "comparison-inline-environment",
+  "private": true,
+  "scripts": {
+    "build": "NODE_ENV=production vite build"
+  },
+  "devDependencies": {
+    "cross-env": "7.0.3",
+    "vite": "7.0.0"
+  }
+}

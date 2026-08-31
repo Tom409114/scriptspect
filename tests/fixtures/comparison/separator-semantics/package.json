@@ -1,0 +1,7 @@
+{
+  "name": "comparison-separator-semantics",
+  "private": true,
+  "scripts": {
+    "sequence": "echo one; echo two"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Tom409114/scriptspect/main/comparison/adjudication.schema.json",
+  "title": "scriptspect shared-corpus comparison adjudication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "fixtureId",
+    "fixtureSha256",
+    "tool",
+    "observationFiles",
+    "outcome",
+    "rationale",
+    "reviewer",
+    "reviewedAt",
+    "secondaryReview"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "fixtureId": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "fixtureSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "tool": { "enum": ["scriptspect", "scriptsDoctor"] },
+    "observationFiles": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "outcome": {
+      "enum": [
+        "pending",
+        "correct",
+        "false_positive",
+        "false_negative",
+        "partially_correct",
+        "unclear",
+        "disputed"
+      ]
+    },
+    "rationale": { "type": ["string", "null"] },
+    "reviewer": { "type": ["string", "null"] },
+    "reviewedAt": { "type": ["string", "null"], "format": "date-time" },
+    "secondaryReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "rationale", "reviewer", "reviewedAt"],
+      "properties": {
+        "outcome": { "enum": [null, "agree", "disagree", "unclear"] },
+        "rationale": { "type": ["string", "null"] },
+        "reviewer": { "type": ["string", "null"] },
+        "reviewedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    }
+  }
+}

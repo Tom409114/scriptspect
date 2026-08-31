@@ -1,0 +1,7 @@
+{
+  "name": "comparison-quoted-rm",
+  "private": true,
+  "scripts": {
+    "explain": "echo \"rm -rf dist\""
+  }
+}
