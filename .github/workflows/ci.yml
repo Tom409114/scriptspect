@@ -173,8 +173,17 @@ jobs:
       - name: Create controlled clean and broken consumers
         run: |
           mkdir -p .ci/action-clean .ci/action-broken
-          node -e "require('node:fs').writeFileSync('.ci/action-clean/package.json', JSON.stringify({name:'clean',scripts:{build:'node -e \\"process.exit(0)\\"'}}, null, 2))"
-          node -e "require('node:fs').writeFileSync('.ci/action-broken/package.json', JSON.stringify({name:'broken',scripts:{clean:'rm -rf dist'}}, null, 2))"
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+
+          const fixtures = [
+            ['.ci/action-clean/package.json', { name: 'clean', scripts: { build: 'node -e "process.exit(0)"' } }],
+            ['.ci/action-broken/package.json', { name: 'broken', scripts: { clean: 'rm -rf dist' } }],
+          ];
+          for (const [path, manifest] of fixtures) {
+            writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+          }
+          NODE
           sha256sum .ci/action-clean/package.json .ci/action-broken/package.json > "$RUNNER_TEMP/action-fixtures.sha256"
       - name: Analyze the broken fixture
         id: broken

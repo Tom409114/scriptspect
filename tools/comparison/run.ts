@@ -63,7 +63,7 @@ export interface ComparisonManifest {
   fixtures: FixtureObservation[];
   normalization: string[];
   artifactSha256: Record<string, string>;
-  promotable: boolean;
+  promotable: false;
   reviewStatus: 'pending-human-adjudication';
   reproduction: string;
 }
@@ -328,7 +328,9 @@ export function runComparison(options: ComparisonOptions): ComparisonManifest {
       'NO_COLOR=1 and FORCE_COLOR=0 are set for both tools',
     ],
     artifactSha256,
-    promotable: matchedPinnedNode && checkoutClean,
+    // Environment parity is necessary evidence, but pending human adjudication
+    // can never become promotable through an automated run alone.
+    promotable: false,
     reviewStatus: 'pending-human-adjudication',
     reproduction: `SCRIPTSPECT_SOURCE_COMMIT=${sourceCommit} pnpm exec tsx tools/comparison/run.ts comparison-output`,
   };

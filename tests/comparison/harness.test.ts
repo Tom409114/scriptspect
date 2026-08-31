@@ -39,7 +39,10 @@ describe('pinned shared-corpus comparison harness', () => {
     expect(manifest.fixtures).toHaveLength(7);
     expect(manifest.tools.scriptsDoctor).toMatchObject({ version: '1.0.0' });
     expect(manifest.tools.scriptspect.sourceCommit).toBe(sourceCommit);
-    expect(manifest.environment.matchedPinnedNode).toBe(false);
+    expect(manifest.environment.matchedPinnedNode).toBe(
+      manifest.environment.actualNode === manifest.environment.expectedNode,
+    );
+    expect(manifest.reviewStatus).toBe('pending-human-adjudication');
     expect(manifest.promotable).toBe(false);
     expect(Object.keys(manifest.artifactSha256).length).toBeGreaterThan(14);
     expect(readFileSync('tests/fixtures/comparison/raw-rm/package.json', 'utf8')).toBe(before);

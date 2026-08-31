@@ -282,6 +282,11 @@ describe('reproducible CI', () => {
     expect(assertions).toContain('CLEAN_EXIT');
     expect(assertions).toContain('sha256sum --check');
     expect(assertions).toContain('git diff --exit-code -- dist/action.mjs');
+    const fixtureStep = steps.find(
+      (step) => step.name === 'Create controlled clean and broken consumers',
+    );
+    expect(fixtureStep?.run).toContain("node --input-type=module <<'NODE'");
+    expect(fixtureStep?.run).not.toMatch(/(?:^|\n)node -e "/u);
     expect(
       execFileSync('git', ['ls-files', '-s', '--', 'dist/action.mjs'], {
         cwd: root,
