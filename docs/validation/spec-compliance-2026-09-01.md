@@ -372,8 +372,8 @@
 ## 后续状态（追加，不改写基线）：v0.1 hardening 实现后
 
 - 追加日期：2026-09-01
-- 本次后续审计所验证的实现 HEAD：`feat/v0.1-hardening` at `eb3e06ea6685e93abd3558d647857f0199bafbdb`
-- README/status 固定的已审阅 runtime/release source：`069a9a7ffec7c844eebf89777456fb6723253fe5`
+- 本次后续审计所验证的实现 HEAD：`feat/v0.1-hardening` at `13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5`
+- README/status 固定的已审阅 runtime/release source：`13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5`
 - 逐门核签：[v0.1 Definition of Done 核签账本](v0.1-dod-2026-09-01.md)
 
 本节是 append-only 的后续审计。上文的 212 项基线、`73 FAIL / 90 PARTIAL / 36 PASS / 12 UNVERIFIABLE / 1 TIME-BOUND` 和当时远程状态都保留为修复前历史，不被回填或伪装成当时已经通过。本节只说明当前 hardening 分支关闭了哪些仓库内缺陷，以及哪些 hosted、管理员、公开发布与外部门禁仍然未完成。
@@ -387,7 +387,7 @@
 | CLI、package 与 bundled Action | `LOCAL PASS` | no-color/exit semantics、包内容、Node 24 Action bundle、严格 inputs、numeric outputs、annotations/summary 与只读行为已有本地消费测试。 |
 | 双语首页与公开 claims | `LOCAL PASS` | 中英双向切换、单 fixture 生成 before/output/patch/after、FAQ/docs 入口与 pre-release 状态机已实现；不展示不存在的 npm/Action 命令。 |
 | CI/release workflow 源码契约 | `LOCAL PASS` | frozen installs、full-SHA Actions、read-only PR policy、真实 `uses: ./` job、无环境权限的 intent discovery、single candidate、四资产 draft、durable-state 后的 exact-tag dispatch、OIDC provenance、source-bound comparator、registry backoff、双 write-ahead state 与 alias/final evidence recovery 均有 policy/state-machine tests。普通 main commit 不再申请发布环境。 |
-| 最终 GitHub-hosted 验收 | `HOSTED PENDING` | 修复分支尚无候选 SHA 对应的完整三 OS × Node 22/24、CodeQL、dependency review、hosted Action/benchmark 证据；本地结果不替代它。 |
+| 最终 GitHub-hosted 验收 | `HOSTED PENDING` | [PR #65](https://github.com/Tom409114/scriptspect/pull/65) 首轮 run `33442316575` 已产生部分 hosted 证据并暴露新鲜 runner 缺陷；当前实现 source 已修复，仍需更新候选对应的完整三 OS × Node 22/24、CodeQL、dependency review、hosted Action/benchmark 全绿证据。 |
 | Branch/tag/environment 配置 | `ADMIN OPEN` | main/tag rulesets、required checks、`npm-bootstrap`/`release` environments、审批与 coordinator actor 需管理员操作。 |
 | npm 与 GitHub 正式发布 | `PUBLICATION OPEN` | bootstrap ownership/integrity contract、OIDC、`v0.1.0`、Release assets、checksum、registry provenance、`v0.1`/`v0` aliases 尚未用公开产物验证。 |
 | Corpus precision、competition、onboarding、adoption、KPI | `EXTERNAL OPEN` | 自动化工具和 draft schema 已具备；≥100 人工裁决、独立反馈/下游、计时和时间型指标不能由代码生成，也没有被声明为完成。 |
@@ -404,7 +404,7 @@
 
 ### 保持未完成的门禁
 
-- 旧 PR #62 不应直接合并；应由包含本次修复的新 PR 取代，并在准确候选 SHA 上完成 hosted checks 与审阅。
+- 旧 PR #62 不应直接合并；已由 [PR #65](https://github.com/Tom409114/scriptspect/pull/65) 取代，后者仍须在准确候选 SHA 上完成 hosted checks 与审阅。
 - `main` 与 version/floating tags 的 rulesets、required checks、environment approvals 和 tag permission drill 仍需管理员配置并记录 ID。不可变版本 tag 必须 no-force/no-delete；floating aliases 只为 coordinator 开放单调 CAS 更新，以及首次创建后失败时恢复到“不存在”的窄 CAS 删除路径。
 - npm 首次认领必须先通过 `npm-bootstrap.yml` 发布独立 `0.0.0-bootstrap.N`、验证 `latest` 未移动并提交完整性契约；随后撤销 granular token。
 - npm Trusted Publisher 的准确绑定已改为：`Tom409114/scriptspect`、workflow `npm-publish.yml`、environment `release`、allowed action `npm publish`。旧的 `release.yml` 绑定建议已经过时，因为 steady-state OIDC 必须绑定实际执行 publish 的 exact-tag workflow。

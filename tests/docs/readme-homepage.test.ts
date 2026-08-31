@@ -36,7 +36,10 @@ describe('bilingual pre-release homepage', () => {
   it('does not present an unpublished package or Action release as usable', () => {
     const english = read('README.md');
     const chinese = read('README.zh-CN.md');
-    const status = JSON.parse(read('docs/readme-status.json')) as { releaseState: string };
+    const status = JSON.parse(read('docs/readme-status.json')) as {
+      releaseState: string;
+      sourceCommit: string;
+    };
 
     expect(status.releaseState).toBe('pre-release');
     for (const homepage of [english, chinese]) {
@@ -49,6 +52,8 @@ describe('bilingual pre-release homepage', () => {
       ).toBe(false);
       expect(homepage).not.toMatch(/All milestones.*merged/i);
       expect(homepage).not.toMatch(/production[- ]ready/i);
+      expect(homepage).toContain(`git checkout ${status.sourceCommit}`);
+      expect(homepage).toContain(`ref: ${status.sourceCommit}`);
     }
   });
 
