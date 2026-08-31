@@ -2,7 +2,8 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "initial-version": "0.1.0"
+      "initial-version": "0.1.0",
+      "include-component-in-tag": false
     }
   }
 }
