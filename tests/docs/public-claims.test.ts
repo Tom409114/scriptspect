@@ -23,6 +23,16 @@ describe('public project claims', () => {
     expect(report).toContain('Not a scripts-doctor head-to-head');
   });
 
+  it('does not promote superseded corpus density evidence to a passed release gate', () => {
+    const roadmap = read('docs/roadmap.md');
+    const report = read('docs/validation/corpus-2026-08.md');
+
+    expect(report).toContain('Superseded as release-gate evidence');
+    expect(report).toMatch(/Real-problem density[^\n]+HISTORICAL SIGNAL/iu);
+    expect(roadmap).not.toMatch(/Real-problem density[^\n]+✅ pass/iu);
+    expect(roadmap).toMatch(/Real-problem density[^\n]+historical signal/iu);
+  });
+
   it('documents the configured failure universe instead of a confidence shortcut', () => {
     const english = read('README.md');
     const chinese = read('README.zh-CN.md');

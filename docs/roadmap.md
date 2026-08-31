@@ -38,7 +38,7 @@ publication, tag-actor, and external-evidence gates.
 | Gate | Status | Evidence |
 | --- | --- | --- |
 | Precision | ⚠️ promising, sample incomplete | 62/62 verified true positives in a stratified 14-rule sample; the ≥100 review gate is not met |
-| Real-problem density | ✅ pass | 534 findings across 68 repos and 14 rule categories; verified sample spans 35 repos |
+| Real-problem density | ⚠️ historical signal | Superseded root-only run found 534 findings across 68 repos; the workspace-full rerun and review are still pending |
 | Competitive edge | ⏳ pending | category coverage is promising, but no shared-fixture head-to-head has been run |
 | External interest | ⏳ not yet met | 0 external issues as of 2026-08-31 (pre-release) |
 | Onboarding | ⏳ pending | requires the v0.1 npm publish |

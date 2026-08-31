@@ -199,7 +199,41 @@ describe('reproducible CI', () => {
     expect(generatedRun).toContain('docs/readme-status.json');
     expect(generatedRun).toContain('git cat-file -e');
     expect(generatedRun).toContain('git merge-base --is-ancestor');
+    expect(generatedRun).toContain('SOURCE_BASE');
+    expect(generatedRun).toContain('set -o pipefail');
+    expect(generatedRun).toContain('SOURCE_DIFF=$?');
+    expect(generatedRun).toContain('case "$SOURCE_DIFF" in');
+    expect(generatedRun).not.toContain('if ! git diff --quiet "$SOURCE_BASE" HEAD --');
+    expect(generatedRun).toContain('git archive "$STATUS_COMMIT"');
+    for (const pinnedAsset of [
+      'package.before.json',
+      'terminal.txt',
+      'fix.patch',
+      'package.after.json',
+      'terminal.svg',
+    ]) {
+      expect(generatedRun).toContain(pinnedAsset);
+    }
+    expect(generatedRun).toContain('docs/validation/readme-action-evidence.json');
+    expect(generatedRun).toContain('git diff --quiet "$STATUS_COMMIT" HEAD --');
+    expect(generatedRun).not.toContain('git diff-tree');
     expect(generatedRun).toContain('git diff --exit-code');
+
+    const statusGenerator = readFileSync(join(root, 'tools/generate-readme-status.ts'), 'utf8');
+    for (const sourceInput of [
+      'src',
+      'dist',
+      'schema',
+      'package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      'action.yml',
+      'tsconfig.json',
+      'tsup.config.ts',
+    ]) {
+      expect(generatedRun).toContain(sourceInput);
+      expect(statusGenerator).toContain(`'${sourceInput}'`);
+    }
 
     const generatedCheckout = (ci.jobs?.generated?.steps ?? []).find((step) =>
       step.uses?.startsWith('actions/checkout@'),

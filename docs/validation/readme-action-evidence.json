@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-31T23:17:14Z",
+  "sourceCommit": "0898538abef5b054db6a20dc0ffe7fb9bb67e96b",
+  "workflowRun": {
+    "id": 33449906358,
+    "name": "CI",
+    "url": "https://github.com/Tom409114/scriptspect/actions/runs/33449906358",
+    "conclusion": "success"
+  },
+  "checkRun": {
+    "id": 99677215357,
+    "name": "Bundled Action consumer",
+    "url": "https://github.com/Tom409114/scriptspect/actions/runs/33449906358/job/99677215357",
+    "annotationCount": 2,
+    "summarySha256": "6f404488da1babb4ba885e873c5187e4e1c5179a2c868bc5324a2e3b8c71c404"
+  },
+  "cleanConsumer": {
+    "exitCode": 0,
+    "packages": 1,
+    "scripts": 1,
+    "errors": 0,
+    "warnings": 0,
+    "advisories": 0
+  },
+  "annotations": [
+    {
+      "level": "failure",
+      "path": ".github",
+      "line": 6,
+      "title": "",
+      "displayTitle": "Action failure contract",
+      "message": "scriptspect action failed"
+    },
+    {
+      "level": "failure",
+      "path": "package.json",
+      "line": 0,
+      "title": "PS010: scripts.clean",
+      "message": "`rm -rf` is not available in native Windows npm scripts · affected%3A cmd · scripts.clean"
+    }
+  ]
+}
