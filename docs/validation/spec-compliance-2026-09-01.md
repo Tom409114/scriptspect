@@ -372,7 +372,7 @@
 ## 后续状态（追加，不改写基线）：v0.1 hardening 实现后
 
 - 追加日期：2026-09-01
-- 本次后续审计所验证的实现 HEAD：`feat/v0.1-hardening` at `9b3ec77dcd1c4ce12a60d3bbbb86e0cdc182a070`
+- 本次后续审计所验证的实现 HEAD：`feat/v0.1-hardening` at `dde44ea0e3459a2fe770a1701eb3bbc6146321a7`
 - README/status 固定的已审阅 runtime/release source：`13dfcfcec3f50c3dd786a1f9b2a4225391ded0e5`
 - 逐门核签：[v0.1 Definition of Done 核签账本](v0.1-dod-2026-09-01.md)
 
@@ -387,7 +387,7 @@
 | CLI、package 与 bundled Action | `LOCAL PASS` | no-color/exit semantics、包内容、Node 24 Action bundle、严格 inputs、numeric outputs、annotations/summary 与只读行为已有本地消费测试。 |
 | 双语首页与公开 claims | `LOCAL PASS` | 中英双向切换、单 fixture 生成 before/output/patch/after、FAQ/docs 入口与 pre-release 状态机已实现；不展示不存在的 npm/Action 命令。 |
 | CI/release workflow 源码契约 | `LOCAL PASS` | frozen installs、full-SHA Actions、read-only PR policy、真实 `uses: ./` job、无环境权限的 intent discovery、single candidate、四资产 draft、durable-state 后的 exact-tag dispatch、OIDC provenance、source-bound comparator、registry backoff、双 write-ahead state 与 alias/final evidence recovery 均有 policy/state-machine tests。普通 main commit 不再申请发布环境。 |
-| 最终 GitHub-hosted 验收 | `HOSTED PENDING` | [PR #65](https://github.com/Tom409114/scriptspect/pull/65) 的 run `33444993042` 已通过三系统 Node 22/24、coverage、dependency review、CodeQL、生成物、锁文件、打包消费、真实 Action consumer 与 benchmark；唯一失败是 GitHub Checks API 不公开 `$GITHUB_STEP_SUMMARY`，其 `.output.summary` 固定为 `null`。实现 HEAD 已改为在同一 hosted runner 写出、上传、下载并校验精确 summary artifact，仍需准确新候选的完整全绿证据。 |
+| 最终 GitHub-hosted 验收 | `HOSTED PENDING` | [PR #65](https://github.com/Tom409114/scriptspect/pull/65) 的 run `33445555803` 已通过三系统 Node 22/24、coverage、dependency review、CodeQL、生成物、锁文件、打包消费与 benchmark，并实际生成及上传 summary artifact；Action consumer 唯一失败是证据脚本写成 `in`，而 reporter 的确定文案是 `across`。实现 HEAD 已修正并用 workflow regression 固定精确文案，仍需准确新候选的完整全绿证据。 |
 | Branch/tag/environment 配置 | `ADMIN OPEN` | main/tag rulesets、required checks、`npm-bootstrap`/`release` environments、审批与 coordinator actor 需管理员操作。 |
 | npm 与 GitHub 正式发布 | `PUBLICATION OPEN` | bootstrap ownership/integrity contract、OIDC、`v0.1.0`、Release assets、checksum、registry provenance、`v0.1`/`v0` aliases 尚未用公开产物验证。 |
 | Corpus precision、competition、onboarding、adoption、KPI | `EXTERNAL OPEN` | 自动化工具和 draft schema 已具备；≥100 人工裁决、独立反馈/下游、计时和时间型指标不能由代码生成，也没有被声明为完成。 |
