@@ -31,6 +31,7 @@ try {
       'schema',
       'package.json',
       'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
       'action.yml',
       'tsconfig.json',
       'tsup.config.ts',

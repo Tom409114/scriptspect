@@ -60,7 +60,7 @@ jobs:
           git merge-base --is-ancestor "$STATUS_COMMIT" HEAD
           test "$STATUS_COMMIT" != "$(git rev-parse HEAD)"
           git diff --quiet "$STATUS_COMMIT" HEAD -- \
-            src dist schema package.json pnpm-lock.yaml action.yml tsconfig.json tsup.config.ts
+            src dist schema package.json pnpm-lock.yaml pnpm-workspace.yaml action.yml tsconfig.json tsup.config.ts
           git diff --exit-code -- \
             schema \
             docs/rules \

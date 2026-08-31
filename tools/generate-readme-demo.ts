@@ -31,6 +31,7 @@ type ActionEvidence = {
     path: string;
     line: number;
     title: string;
+    displayTitle?: string;
     message: string;
   }>;
 };
@@ -120,7 +121,7 @@ ${rows}
 function actionEvidenceText(evidence: ActionEvidence): string {
   const annotations = evidence.annotations.map(
     (annotation) =>
-      `- ${annotation.title} — ${annotation.path}: ${annotation.message.replaceAll('%3A', ':')}`,
+      `- ${annotation.title || annotation.displayTitle || 'Action annotation'} — ${annotation.path}: ${annotation.message.replaceAll('%3A', ':')}`,
   );
   return [
     'ScriptSpect hosted Action evidence',

@@ -73,7 +73,7 @@ describe('bilingual pre-release homepage', () => {
       workflowRun: { id: number; url: string; conclusion: string };
       checkRun: { id: number; annotationCount: number };
       cleanConsumer: { exitCode: number; packages: number; scripts: number; errors: number };
-      annotations: Array<{ title: string; message: string }>;
+      annotations: Array<{ title: string; displayTitle?: string; message: string }>;
     };
 
     expect(evidence.sourceCommit).toBe('0898538abef5b054db6a20dc0ffe7fb9bb67e96b');
@@ -95,6 +95,13 @@ describe('bilingual pre-release homepage', () => {
         title: 'PS010: scripts.clean',
         message:
           '`rm -rf` is not available in native Windows npm scripts · affected%3A cmd · scripts.clean',
+      }),
+    );
+    expect(evidence.annotations).toContainEqual(
+      expect.objectContaining({
+        title: '',
+        displayTitle: 'Action failure contract',
+        message: 'scriptspect action failed',
       }),
     );
 

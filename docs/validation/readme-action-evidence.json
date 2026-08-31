@@ -28,7 +28,8 @@
       "level": "failure",
       "path": ".github",
       "line": 6,
-      "title": "Action failure contract",
+      "title": "",
+      "displayTitle": "Action failure contract",
       "message": "scriptspect action failed"
     },
     {

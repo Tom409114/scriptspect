@@ -203,6 +203,22 @@ describe('reproducible CI', () => {
     expect(generatedRun).not.toContain('git diff-tree');
     expect(generatedRun).toContain('git diff --exit-code');
 
+    const statusGenerator = readFileSync(join(root, 'tools/generate-readme-status.ts'), 'utf8');
+    for (const sourceInput of [
+      'src',
+      'dist',
+      'schema',
+      'package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      'action.yml',
+      'tsconfig.json',
+      'tsup.config.ts',
+    ]) {
+      expect(generatedRun).toContain(sourceInput);
+      expect(statusGenerator).toContain(`'${sourceInput}'`);
+    }
+
     const generatedCheckout = (ci.jobs?.generated?.steps ?? []).find((step) =>
       step.uses?.startsWith('actions/checkout@'),
     );
