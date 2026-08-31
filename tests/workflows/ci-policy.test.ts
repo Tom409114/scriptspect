@@ -132,6 +132,30 @@ describe('pull-request trust boundary', () => {
       }
     }
   });
+
+  it('pins artifact actions to reviewed Node 24 releases', () => {
+    const approved: Record<string, string> = {
+      'actions/upload-artifact': '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', // v7.0.1
+      'actions/download-artifact': '3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c', // v8.0.1
+    };
+    const usages: Array<{ action: string; workflow: string; uses: string }> = [];
+
+    for (const name of workflowNames()) {
+      for (const step of allSteps(workflow(name))) {
+        const action = Object.keys(approved).find((candidate) =>
+          step.uses?.startsWith(`${candidate}@`),
+        );
+        if (action && step.uses) {
+          usages.push({ action, workflow: name, uses: step.uses });
+        }
+      }
+    }
+
+    expect(usages.length).toBeGreaterThan(0);
+    for (const usage of usages) {
+      expect(usage.uses, usage.workflow).toBe(`${usage.action}@${approved[usage.action]}`);
+    }
+  });
 });
 
 describe('reproducible CI', () => {
