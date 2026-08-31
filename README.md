@@ -46,7 +46,7 @@ configuration, or I/O exits `2`.
 ```bash
 git clone https://github.com/Tom409114/scriptspect.git
 cd scriptspect
-git checkout 56c53c9ef055820c4096de3c0a56b4640be458e2
+git checkout 069a9a7ffec7c844eebf89777456fb6723253fe5
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
@@ -143,7 +143,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Tom409114/scriptspect
-          ref: 56c53c9ef055820c4096de3c0a56b4640be458e2
+          ref: 069a9a7ffec7c844eebf89777456fb6723253fe5
           path: .scriptspect
           persist-credentials: false
       - uses: ./.scriptspect

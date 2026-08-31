@@ -8,10 +8,34 @@ const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
   name: string;
   version: string;
 };
-const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+const requestedCommit = process.argv[2] ?? process.env.SCRIPTSPECT_SOURCE_COMMIT;
+if (requestedCommit === undefined || requestedCommit.trim() === '') {
+  throw new Error('pass an explicit reviewed source commit');
+}
+const sourceCommit = execFileSync('git', ['rev-parse', `${requestedCommit}^{commit}`], {
   cwd: root,
   encoding: 'utf8',
 }).trim();
+execFileSync('git', ['merge-base', '--is-ancestor', sourceCommit, 'HEAD'], { cwd: root });
+const sourceFiles = execFileSync(
+  'git',
+  [
+    'diff-tree',
+    '--root',
+    '--no-commit-id',
+    '--name-only',
+    '-r',
+    sourceCommit,
+    '--',
+    'src',
+    'package.json',
+    'action.yml',
+  ],
+  { cwd: root, encoding: 'utf8' },
+);
+if (!/^(src\/|package\.json$|action\.yml$)/m.test(sourceFiles)) {
+  throw new Error('source commit must contain a runtime, package, or Action change');
+}
 const releaseState = pkg.version === '0.0.0' ? 'pre-release' : 'published';
 
 const manifest = {
