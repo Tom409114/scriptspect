@@ -40,6 +40,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "pretest": "pnpm build",
     "test": "vitest run",
     "watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -59,7 +60,7 @@
     "@biomejs/biome": "^2.5.11",
     "@types/node": "^26.4.0",
     "@vitest/coverage-v8": "4.1.11",
-    "ajv": "8.17.1",
+    "ajv": "8.20.0",
     "scripts-doctor": "1.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.20.0",

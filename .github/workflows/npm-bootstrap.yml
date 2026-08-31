@@ -117,8 +117,8 @@ jobs:
           corepack prepare pnpm@11.24.0 --activate
           pnpm install --frozen-lockfile
           npm version "$VERSION" --no-git-tag-version --allow-same-version
-          pnpm test
           pnpm build
+          pnpm exec vitest run
           mkdir -p "$RUNNER_TEMP/bootstrap"
           npm pack --pack-destination "$RUNNER_TEMP/bootstrap"
           TARBALL=$(find "$RUNNER_TEMP/bootstrap" -maxdepth 1 -name 'scriptspect-*.tgz' -print -quit)

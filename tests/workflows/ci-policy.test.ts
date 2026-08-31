@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -159,7 +159,8 @@ describe('reproducible CI', () => {
 
   it('enforces 90 percent coverage and generated-file parity', () => {
     const ci = workflow('ci.yml');
-    const qualityRun = (ci.jobs?.quality?.steps ?? []).map((step) => step.run ?? '').join('\n');
+    const qualitySteps = ci.jobs?.quality?.steps ?? [];
+    const qualityRun = qualitySteps.map((step) => step.run ?? '').join('\n');
     expect(qualityRun).toContain('--coverage');
     expect(qualityRun).toContain("--coverage.include='src/parser/**'");
     expect(qualityRun).toContain("--coverage.include='src/rules/**'");
@@ -175,6 +176,28 @@ describe('reproducible CI', () => {
     expect(generatedRun).toContain('git cat-file -e');
     expect(generatedRun).toContain('git merge-base --is-ancestor');
     expect(generatedRun).toContain('git diff --exit-code');
+
+    const generatedCheckout = (ci.jobs?.generated?.steps ?? []).find((step) =>
+      step.uses?.startsWith('actions/checkout@'),
+    );
+    expect(generatedCheckout?.with?.['fetch-depth']).toBe(0);
+
+    const qualityBuildIndex = qualitySteps.findIndex((step) => step.run === 'pnpm build');
+    const qualityCoverageIndex = qualitySteps.findIndex((step) => step.run?.includes('--coverage'));
+    expect(qualityBuildIndex).toBeGreaterThanOrEqual(0);
+    expect(qualityBuildIndex).toBeLessThan(qualityCoverageIndex);
+
+    const packageManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    expect(packageManifest.scripts?.pretest).toBe('pnpm build');
+
+    const integrationSteps = ci.jobs?.integration?.steps ?? [];
+    const integrationTestIndex = integrationSteps.findIndex((step) => step.run === 'pnpm test');
+    expect(integrationTestIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      integrationSteps.slice(integrationTestIndex + 1).some((step) => step.run === 'pnpm build'),
+    ).toBe(false);
   });
 
   it('separates CodeQL and dependency review at minimum permissions', () => {
@@ -259,6 +282,12 @@ describe('reproducible CI', () => {
     expect(assertions).toContain('CLEAN_EXIT');
     expect(assertions).toContain('sha256sum --check');
     expect(assertions).toContain('git diff --exit-code -- dist/action.mjs');
+    expect(
+      execFileSync('git', ['ls-files', '-s', '--', 'dist/action.mjs'], {
+        cwd: root,
+        encoding: 'utf8',
+      }),
+    ).toMatch(/^100755 /u);
   });
 });
 

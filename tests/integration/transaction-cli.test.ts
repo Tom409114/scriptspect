@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -20,7 +21,7 @@ let output: string[];
 let errors: string[];
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'scriptspect-transaction-cli-'));
+  root = realpathSync(mkdtempSync(join(tmpdir(), 'scriptspect-transaction-cli-')));
   output = [];
   errors = [];
   writeFileSync(

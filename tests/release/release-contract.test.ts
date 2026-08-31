@@ -451,6 +451,15 @@ describe('release coordinator trust and recovery', () => {
     expect(publish).not.toContain('[[ "$REGISTRY_SRI" == "$CANDIDATE_SRI" ]]');
   });
 
+  it('builds the candidate before tests that consume generated CLI and Action bundles', () => {
+    const candidate = jobSource('release.yml', 'build-candidate');
+    const build = candidate.indexOf('pnpm build');
+    const test = candidate.indexOf('pnpm exec vitest run');
+
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(test).toBeGreaterThan(build);
+  });
+
   it('serializes every state mutation under one per-SHA mutex and every publisher under one alias mutex', () => {
     expect(workflow('release-intent.yml').jobs?.['record-intent']?.concurrency).toEqual({
       group: `release-state-\${{ github.repository }}-\${{ github.sha }}`,
@@ -733,7 +742,9 @@ describe('one-time npm bootstrap', () => {
     expect(source('npm-bootstrap.yml')).toContain('registry-url: https://registry.npmjs.org');
     expect(run).toContain('npm version "$VERSION"');
     expect(run).toContain('pnpm build');
+    expect(run).toContain('pnpm exec vitest run');
     expect(run.indexOf('npm version "$VERSION"')).toBeLessThan(run.indexOf('pnpm build'));
+    expect(run.indexOf('pnpm build')).toBeLessThan(run.indexOf('pnpm exec vitest run'));
     expect(run).toContain('already-published');
     expect(run).toContain('node_modules/scriptspect/dist/cli.mjs');
     expect(run).toContain('node_modules/scriptspect/schema/config.schema.json');

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -78,7 +79,7 @@ function request(path: string, content: string) {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'scriptspect-transaction-race-'));
+  root = realpathSync(mkdtempSync(join(tmpdir(), 'scriptspect-transaction-race-')));
   injected.raceArmed = false;
   injected.raceTarget = '';
   injected.raceContent = '';

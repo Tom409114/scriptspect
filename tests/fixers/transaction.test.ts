@@ -5,6 +5,7 @@ import {
   linkSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -27,7 +28,7 @@ import {
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'scriptspect-transaction-'));
+  root = realpathSync(mkdtempSync(join(tmpdir(), 'scriptspect-transaction-')));
 });
 
 afterEach(() => {
@@ -89,7 +90,7 @@ describe('recoverable write transactions', () => {
 
   it('rejects an escaped target before creating a journal or changing any file', () => {
     const inside = createTarget('inside.json', 'inside-before');
-    const outsideRoot = mkdtempSync(join(tmpdir(), 'scriptspect-outside-'));
+    const outsideRoot = realpathSync(mkdtempSync(join(tmpdir(), 'scriptspect-outside-')));
     const outside = join(outsideRoot, 'outside.json');
     writeFileSync(outside, 'outside-before');
     try {

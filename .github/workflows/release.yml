@@ -401,8 +401,8 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.24.0 --activate
           pnpm install --frozen-lockfile
-          pnpm test
           pnpm build
+          pnpm exec vitest run
       - name: Pack once and create the versioned candidate manifest
         if: steps.recover.outputs.needs-build == 'true'
         env:

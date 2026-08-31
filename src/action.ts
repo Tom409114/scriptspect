@@ -1,5 +1,6 @@
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ActionInputError, isWithinWorkspace, parseActionInputs } from './action-inputs';
 import type { ActionIo } from './action-output';
 import { ACTION_OUTPUT_NAMES, createActionIo } from './action-output';
@@ -11,6 +12,15 @@ import type { Finding } from './rules/types';
 
 export interface ActionRunResult {
   exitCode: 0 | 1 | 2;
+}
+
+export function isMainModule(importMetaUrl: string, entry = process.argv[1]): boolean {
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(resolve(entry)) === realpathSync(fileURLToPath(importMetaUrl));
+  } catch {
+    return pathToFileURL(resolve(entry)).href === importMetaUrl;
+  }
 }
 
 const HIDDEN_WARNING_SUMMARY_NOTE = '> Hidden warnings still count toward the failure budget.';
@@ -105,9 +115,6 @@ export function runAction(
   return { exitCode };
 }
 
-if (
-  process.argv[1] !== undefined &&
-  pathToFileURL(resolve(process.argv[1])).href === import.meta.url
-) {
+if (isMainModule(import.meta.url)) {
   runAction();
 }

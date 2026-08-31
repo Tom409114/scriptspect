@@ -1,9 +1,17 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ReleaseIntent } from '../../tools/release/release-state.mjs';
@@ -20,7 +28,7 @@ async function loadModule<T>(relativePath: string): Promise<T> {
 }
 
 function temporaryDirectory(name: string): string {
-  const directory = mkdtempSync(join(tmpdir(), `scriptspect-${name}-`));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), `scriptspect-${name}-`)));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -142,6 +150,31 @@ type ProvenanceModule = {
     statementDigest: string;
   };
 };
+
+type SharedModule = {
+  isMain(importMetaUrl: string): boolean;
+};
+
+describe('release helper entrypoint detection', () => {
+  it('recognizes the same module reached through a filesystem alias', async () => {
+    const tools = await loadModule<SharedModule>('../../tools/release/shared.mjs');
+    const directory = temporaryDirectory('entrypoint-alias');
+    const alias = join(directory, 'release-alias');
+    const releaseDirectory = join(root, 'tools', 'release');
+    symlinkSync(releaseDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const originalEntry = process.argv[1];
+    process.argv[1] = join(alias, 'shared.mjs');
+    try {
+      expect(
+        tools.isMain(pathToFileURL(realpathSync(join(releaseDirectory, 'shared.mjs'))).href),
+      ).toBe(true);
+    } finally {
+      if (originalEntry === undefined) process.argv.splice(1, 1);
+      else process.argv[1] = originalEntry;
+    }
+  });
+});
 
 type TarFixtureEntry = {
   name: string;

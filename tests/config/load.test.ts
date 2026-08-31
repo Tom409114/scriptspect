@@ -1,9 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ConfigError, isIgnored, loadConfig, parseConfig } from '../../src/config/load';
 import { globMatch } from '../../src/config/match';
+
+function temporaryDirectory(prefix: string): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+}
 
 describe('glob matcher', () => {
   it('matches exact names', () => {
@@ -137,8 +141,8 @@ describe('loadConfig discovery', () => {
   it.skipIf(process.platform === 'win32')(
     'rejects a root package.json symlink that escapes the analysis root',
     () => {
-      const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
-      const outside = mkdtempSync(join(tmpdir(), 'ss-cfg-outside-'));
+      const dir = temporaryDirectory('ss-cfg-root-');
+      const outside = temporaryDirectory('ss-cfg-outside-');
       try {
         const outsideManifest = join(outside, 'package.json');
         writeFileSync(outsideManifest, JSON.stringify({ name: 'outside' }));
@@ -155,8 +159,8 @@ describe('loadConfig discovery', () => {
   it.skipIf(process.platform === 'win32')(
     'rejects a default config symlink that escapes the analysis root',
     () => {
-      const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
-      const outside = mkdtempSync(join(tmpdir(), 'ss-cfg-outside-'));
+      const dir = temporaryDirectory('ss-cfg-root-');
+      const outside = temporaryDirectory('ss-cfg-outside-');
       try {
         writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
         const outsideConfig = join(outside, 'scriptspect.config.json');
@@ -172,7 +176,7 @@ describe('loadConfig discovery', () => {
   );
 
   it('resolves an explicit relative config from the analysis root', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
+    const dir = temporaryDirectory('ss-cfg-root-');
     try {
       writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
       mkdirSync(join(dir, 'config'));
@@ -188,8 +192,8 @@ describe('loadConfig discovery', () => {
   });
 
   it('rejects an explicit config outside the canonical analysis root', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-root-'));
-    const outside = mkdtempSync(join(tmpdir(), 'ss-cfg-outside-'));
+    const dir = temporaryDirectory('ss-cfg-root-');
+    const outside = temporaryDirectory('ss-cfg-outside-');
     try {
       writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
       const file = join(outside, 'scriptspect.json');
@@ -203,7 +207,7 @@ describe('loadConfig discovery', () => {
   });
 
   it('reads the package.json field first', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
+    const dir = temporaryDirectory('ss-cfg-');
     writeFileSync(
       join(dir, 'package.json'),
       JSON.stringify({ name: 'x', scriptspect: { targets: ['cmd'] } }),
@@ -214,7 +218,7 @@ describe('loadConfig discovery', () => {
   });
 
   it('falls back to scriptspect.config.json', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
+    const dir = temporaryDirectory('ss-cfg-');
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
     writeFileSync(
       join(dir, 'scriptspect.config.json'),
@@ -226,7 +230,7 @@ describe('loadConfig discovery', () => {
   });
 
   it('explicit --config path wins', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
+    const dir = temporaryDirectory('ss-cfg-');
     writeFileSync(
       join(dir, 'package.json'),
       JSON.stringify({ name: 'x', scriptspect: { targets: ['cmd'] } }),
@@ -238,7 +242,7 @@ describe('loadConfig discovery', () => {
   });
 
   it('returns defaults when nothing is configured', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
+    const dir = temporaryDirectory('ss-cfg-');
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
     const { config, source } = loadConfig(dir);
     expect(config.targets).toEqual(['posix-sh', 'cmd']);
@@ -246,7 +250,7 @@ describe('loadConfig discovery', () => {
   });
 
   it('throws ConfigError on broken JSON', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
+    const dir = temporaryDirectory('ss-cfg-');
     writeFileSync(join(dir, 'package.json'), '{ nope');
     expect(() => loadConfig(dir)).toThrow(ConfigError);
   });

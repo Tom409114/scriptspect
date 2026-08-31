@@ -4,12 +4,13 @@ import {
   fsyncSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export class ReleaseToolError extends Error {
   constructor(message) {
@@ -183,7 +184,12 @@ export function parseOutputOption(arguments_) {
 }
 
 export function isMain(importMetaUrl) {
-  return Boolean(process.argv[1]) && pathToFileURL(resolve(process.argv[1])).href === importMetaUrl;
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(importMetaUrl));
+  } catch {
+    return pathToFileURL(resolve(process.argv[1])).href === importMetaUrl;
+  }
 }
 
 export function runCli(main) {

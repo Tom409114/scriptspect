@@ -13111,8 +13111,9 @@ var require_dist = __commonJS({
 });
 
 // src/action.ts
+import { realpathSync as realpathSync3 } from "fs";
 import { resolve as resolve4 } from "path";
-import { pathToFileURL } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 // src/action-inputs.ts
 import { realpathSync, statSync } from "fs";
@@ -16386,6 +16387,14 @@ function renderSummary(result) {
 }
 
 // src/action.ts
+function isMainModule(importMetaUrl, entry = process.argv[1]) {
+  if (entry === void 0) return false;
+  try {
+    return realpathSync3(resolve4(entry)) === realpathSync3(fileURLToPath(importMetaUrl));
+  } catch {
+    return pathToFileURL(resolve4(entry)).href === importMetaUrl;
+  }
+}
 var HIDDEN_WARNING_SUMMARY_NOTE = "> Hidden warnings still count toward the failure budget.";
 function visibleFindings(findings, severity) {
   const rank = { error: 0, warn: 1, advisory: 2 };
@@ -16455,10 +16464,11 @@ function runAction(env = process.env, providedIo) {
   if (exitCode !== 0) io.fail();
   return { exitCode };
 }
-if (process.argv[1] !== void 0 && pathToFileURL(resolve4(process.argv[1])).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   runAction();
 }
 export {
+  isMainModule,
   runAction
 };
 /*! Bundled license information:
