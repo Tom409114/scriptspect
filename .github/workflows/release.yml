@@ -1,130 +1,697 @@
-name: Release
+name: Release coordinator
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      intent-id:
+        description: Check-run ID of the exact release intent
+        required: true
+      pr-number:
+        description: Merged release-please pull request number
+        required: true
+      merge-sha:
+        description: Exact 40-character release merge commit
+        required: true
+      version:
+        description: Exact stable semver recorded by the intent
+        required: true
+      tag:
+        description: Exact immutable tag recorded by the intent
+        required: true
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 jobs:
-  release-please:
+  authorize:
+    name: Authorize exact release intent
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
-    steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        id: release
-        with:
-          # First release is v0.1.0 (docs/roadmap, README support matrix), not
-          # release-please's 1.0.0 default for an untagged 0.0.0 baseline.
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
-  publish-npm:
-    name: Publish to npm (trusted publishing)
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
     permissions:
+      actions: read
       contents: read
-      id-token: write
+      checks: read
+      pull-requests: read
+    outputs:
+      intent-id: ${{ steps.authorize.outputs.intent-id }}
+      pr-number: ${{ steps.authorize.outputs.pr-number }}
+      sha: ${{ steps.authorize.outputs.sha }}
+      version: ${{ steps.authorize.outputs.version }}
+      tag: ${{ steps.authorize.outputs.tag }}
+      package-hash: ${{ steps.authorize.outputs.package-hash }}
+      changelog-hash: ${{ steps.authorize.outputs.changelog-hash }}
+      release-please-hash: ${{ steps.authorize.outputs.release-please-hash }}
+      integrity-mode: ${{ steps.authorize.outputs.integrity-mode }}
+      integrity-contract-hash: ${{ steps.authorize.outputs.integrity-contract-hash }}
+      comparator-algorithm-digest: ${{ steps.authorize.outputs.comparator-algorithm-digest }}
+      ci-run-id: ${{ steps.authorize.outputs.ci-run-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
-      - run: pnpm build
-      - name: Publish with provenance (requires npm trusted publishing configuration)
-        run: npm publish --provenance --access public
-
-  # M7 (spec §13.1 / §23): the GitHub Release carries a reproducible
-  # tarball plus a SHA-256 checksum manifest, and the bytes npm published are
-  # verified byte-for-byte (by content) against the tarball built in CI.
-  checksums:
-    name: Release checksums and assets (SHA-256)
-    needs: [release-please, publish-npm]
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
-      - run: pnpm build
-      - name: Pack the release tarball
-        id: pack
-        run: |
-          TARBALL=$(pnpm pack --pack-destination "$RUNNER_TEMP" | tail -1)
-          # pnpm prints the tarball's absolute path; keep only the filename so
-          # later steps can prefix it with "$RUNNER_TEMP/" exactly once.
-          TARBALL=$(basename "$TARBALL")
-          test -n "$TARBALL" || { echo "::error::pnpm pack produced no tarball name" >&2; exit 1; }
-          test -f "$RUNNER_TEMP/$TARBALL" || { echo "::error::$TARBALL not found in RUNNER_TEMP" >&2; exit 1; }
-          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
-          echo "Packed $TARBALL"
-      - name: Smoke-test the packed artifact
-        run: |
-          mkdir -p "$RUNNER_TEMP/verify"
-          tar -xzf "$RUNNER_TEMP/${{ steps.pack.outputs.tarball }}" -C "$RUNNER_TEMP/verify"
-          node "$RUNNER_TEMP/verify/package/dist/cli.mjs" --version
-          node "$RUNNER_TEMP/verify/package/dist/cli.mjs" --help >/dev/null
-      - name: Generate SHA256SUMS
-        run: |
-          cd "$RUNNER_TEMP"
-          test -f "${{ steps.pack.outputs.tarball }}" || { echo "::error::tarball missing in RUNNER_TEMP" >&2; exit 1; }
-          sha256sum "${{ steps.pack.outputs.tarball }}" | tee SHA256SUMS
-      - name: Verify the published npm tarball matches the local pack
-        run: |
-          cd "$RUNNER_TEMP"
-          # tag_name may carry a component prefix (e.g. scriptspect-v0.1.0);
-          # use the plain semver from release-please for the npm URL.
-          VERSION="${{ needs.release-please.outputs.version }}"
-          test -n "$VERSION" || { echo "::error::release-please version output is empty" >&2; exit 1; }
-          # The registry can lag the publish by a few seconds; retry transient failures.
-          curl -fsSL --retry 5 --retry-delay 5 --retry-connrefused --retry-all-errors -o published.tgz \
-            "https://registry.npmjs.org/scriptspect/-/scriptspect-${VERSION}.tgz"
-          mkdir -p local npm
-          tar -xzf "${{ steps.pack.outputs.tarball }}" -C local
-          tar -xzf published.tgz -C npm
-          # File-set parity (no missing/extra files between CI pack and npm).
-          ( cd local/package && find . -type f | sort ) > local-files.txt
-          ( cd npm/package && find . -type f | sort ) > npm-files.txt
-          if ! diff -u local-files.txt npm-files.txt; then
-            echo "::error::published npm tarball file set differs from the CI-built tarball" >&2
-            exit 1
-          fi
-          # Content digest of every published file except package.json: npm
-          # normalizes the manifest on publish (e.g. repository string -> object),
-          # so it is covered by file-set parity but excluded from the digest.
-          digest() { ( cd "$1" && find . -type f ! -name package.json -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1 ); }
-          LOCAL=$(digest local/package)
-          NPM=$(digest npm/package)
-          echo "local  sha256: $LOCAL"
-          echo "npm    sha256: $NPM"
-          test "$LOCAL" = "$NPM" || { echo "::error::published tarball content differs from CI build" >&2; exit 1; }
-      - name: Upload tarball and checksums to the release
-        run: |
-          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
-            "$RUNNER_TEMP/${{ steps.pack.outputs.tarball }}" \
-            "$RUNNER_TEMP/SHA256SUMS" --clobber
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.merge-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Recompute and authorize the immutable release intent
+        id: authorize
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          INTENT_ID: ${{ inputs.intent-id }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          DISPATCH_SHA: ${{ inputs.merge-sha }}
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          NPM_BOOTSTRAP_ENABLED: ${{ vars.NPM_BOOTSTRAP_ENABLED }}
+          NPM_TRUSTED_PUBLISHING_READY: ${{ vars.NPM_TRUSTED_PUBLISHING_READY }}
+          RELEASE_PR_ACTORS: ${{ vars.RELEASE_PR_ACTORS || 'github-actions[bot]' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$NPM_BOOTSTRAP_ENABLED" != true ]]
+          [[ "$NPM_TRUSTED_PUBLISHING_READY" == true ]]
+          if [[ "$EVENT_NAME" == workflow_run ]]; then
+            CONCLUSION=$(jq -r '.workflow_run.conclusion' "$GITHUB_EVENT_PATH")
+            RUN_EVENT=$(jq -r '.workflow_run.event' "$GITHUB_EVENT_PATH")
+            HEAD_BRANCH=$(jq -r '.workflow_run.head_branch' "$GITHUB_EVENT_PATH")
+            HEAD_REPOSITORY=$(jq -r '.workflow_run.head_repository.full_name' "$GITHUB_EVENT_PATH")
+            SHA=$(jq -r '.workflow_run.head_sha' "$GITHUB_EVENT_PATH")
+            [[ "$CONCLUSION" == success ]]
+            [[ "$RUN_EVENT" == push ]]
+            [[ "$HEAD_BRANCH" == main ]]
+            [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]]
+
+          else
+            SHA="$DISPATCH_SHA"
+            [[ "$INTENT_ID" =~ ^[1-9][0-9]*$ ]]
+          fi
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          # Both automatic and manually approved recovery runs must converge on
+          # the same successful CI run for the exact release merge commit.
+          CI_RUN_ID=''
+          for attempt in {1..30}; do
+            gh api -H 'Accept: application/vnd.github+json' \
+              "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&status=completed&per_page=100" \
+              > "$RUNNER_TEMP/ci-runs.json"
+            if node tools/release/release-state.mjs verify-ci \
+              --runs "$RUNNER_TEMP/ci-runs.json" \
+              --sha "$SHA" \
+              --repository "$REPOSITORY" \
+              --workflow CI \
+              --event push \
+              --branch main \
+              --selection newest \
+              > "$RUNNER_TEMP/verified-ci.json"; then
+              CI_RUN_ID=$(jq -er '.runId // .id' "$RUNNER_TEMP/verified-ci.json")
+              break
+            fi
+            sleep 10
+          done
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+
+          if [[ "$EVENT_NAME" == workflow_run ]]; then
+            [[ "$CI_RUN_ID" == "$(jq -r '.workflow_run.id' "$GITHUB_EVENT_PATH")" ]]
+          fi
+
+          if [[ "$EVENT_NAME" == workflow_run ]]; then
+            for attempt in {1..30}; do
+              gh api -H 'Accept: application/vnd.github+json' \
+                "repos/$REPOSITORY/commits/$SHA/check-runs?check_name=release-intent" \
+                > "$RUNNER_TEMP/check-runs.json"
+              COUNT=$(jq '[.check_runs[] | select(
+                .name == "release-intent" and
+                .conclusion == "success" and
+                .app.slug == "github-actions"
+              )] | length' "$RUNNER_TEMP/check-runs.json")
+              [[ "$COUNT" -le 1 ]]
+              [[ "$COUNT" == 1 ]] && break
+              sleep 10
+            done
+            [[ "$COUNT" == 1 ]]
+            INTENT_ID=$(jq -r '.check_runs[] | select(.name == "release-intent") | .id' "$RUNNER_TEMP/check-runs.json")
+          fi
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -e --arg sha "$SHA" '
+            .name == "release-intent" and
+            .conclusion == "success" and
+            .head_sha == $sha and
+            .app.slug == "github-actions"
+          ' "$RUNNER_TEMP/intent-check.json" >/dev/null
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/release-state.json"
+          jq -e '
+            .schemaVersion == "scriptspect-release-state/v1" and
+            (.state | IN(
+              "intent-recorded",
+              "retained-candidate",
+              "staged-draft",
+              "npm-published",
+              "npm-verified",
+              "aliases-verified",
+              "consumed"
+            ))
+          ' "$RUNNER_TEMP/release-state.json" >/dev/null
+          jq -e --arg externalId "$(jq -er '.external_id' "$RUNNER_TEMP/intent-check.json")" \
+            '.intent.intentId == $externalId' "$RUNNER_TEMP/release-state.json" >/dev/null
+          jq -e '.intent' "$RUNNER_TEMP/release-state.json" > "$RUNNER_TEMP/intent.json"
+
+          INTENT_SHA=$(jq -er '.mergeCommitSha' "$RUNNER_TEMP/intent.json")
+          INTENT_PR=$(jq -er '.prNumber' "$RUNNER_TEMP/intent.json")
+          INTENT_VERSION=$(jq -er '.version' "$RUNNER_TEMP/intent.json")
+          INTENT_TAG=$(jq -er '.tag' "$RUNNER_TEMP/intent.json")
+          [[ "$SHA" == "$INTENT_SHA" ]]
+          [[ "$INTENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$INTENT_TAG" == "v$INTENT_VERSION" ]]
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            [[ "$PR_NUMBER" == "$INTENT_PR" ]]
+            [[ "$DISPATCH_SHA" == "$INTENT_SHA" ]]
+            [[ "$DISPATCH_VERSION" == "$INTENT_VERSION" ]]
+            [[ "$DISPATCH_TAG" == "$INTENT_TAG" ]]
+          fi
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/commits/$SHA/pulls" > "$RUNNER_TEMP/associated-pulls.json"
+          jq -e --argjson pr "$INTENT_PR" --arg sha "$SHA" --arg actors "$RELEASE_PR_ACTORS" \
+            --arg repository "$REPOSITORY" \
+            --arg headRepo "$(jq -er '.releasePrHeadRepo' "$RUNNER_TEMP/intent.json")" \
+            --arg headSha "$(jq -er '.releasePrHeadSha' "$RUNNER_TEMP/intent.json")" '
+            ($actors | split(",") | map(gsub("^\\s+|\\s+$"; ""))) as $allowedActors |
+            [.[] | select(
+              .number == $pr and
+              .merged_at != null and
+              .merge_commit_sha == $sha and
+              .base.ref == "main" and
+              .base.repo.full_name == $repository and
+              .head.repo.full_name == $repository and
+              .head.repo.fork == false and
+              .head.repo.full_name == $headRepo and
+              .head.sha == $headSha and
+              (.user.login as $actor | ($allowedActors | index($actor)) != null) and
+              (.head.ref | startswith("release-please--")) and
+              (.title | test("^chore\\(main\\): release "))
+            )] | length == 1
+          ' "$RUNNER_TEMP/associated-pulls.json" >/dev/null
+
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SHA" origin/main
+          [[ "$(git rev-parse HEAD)" == "$SHA" ]]
+
+          VERSION=$(jq -er '.version' package.json)
+          MANIFEST_VERSION=$(jq -er '.["."]' .release-please-manifest.json)
+          TAG="v$VERSION"
+          [[ "$VERSION" == "$MANIFEST_VERSION" ]]
+          [[ "$VERSION" == "$INTENT_VERSION" ]]
+          [[ "$TAG" == "$INTENT_TAG" ]]
+          grep -Eq "^## \\[$VERSION\\]|^## $VERSION([[:space:](]|$)" CHANGELOG.md
+
+          PACKAGE_HASH=$(sha256sum package.json | cut -d' ' -f1)
+          CHANGELOG_HASH=$(sha256sum CHANGELOG.md | cut -d' ' -f1)
+          RELEASE_PLEASE_HASH=$(sha256sum .release-please-manifest.json | cut -d' ' -f1)
+          [[ "$PACKAGE_HASH" == "$(jq -r '.packageManifestHash' "$RUNNER_TEMP/intent.json")" ]]
+          [[ "$CHANGELOG_HASH" == "$(jq -r '.changelogHash' "$RUNNER_TEMP/intent.json")" ]]
+          [[ "$RELEASE_PLEASE_HASH" == "$(jq -r '.releasePleaseManifestHash' "$RUNNER_TEMP/intent.json")" ]]
+
+          INTEGRITY_CONTRACT=docs/release/npm-integrity-contract.json
+          test -f "$INTEGRITY_CONTRACT"
+          jq -e '
+            .schemaVersion == 1 and
+            .package == "scriptspect" and
+            (.bootstrapVersion | test("^0\\.0\\.0-bootstrap\\.[0-9]+$")) and
+            (.sourceCommit | test("^[0-9a-f]{40}$")) and
+            (.integrityMode == "exact-bytes" or .integrityMode == "canonical-tree-v1") and
+            .comparatorAlgorithm == "scriptspect-canonical-tree/v1" and
+            (.comparatorAlgorithmDigest | test("^[0-9a-f]{64}$")) and
+            .latestUnchanged == true and
+            (.reviewedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T"))
+          ' "$INTEGRITY_CONTRACT" >/dev/null
+          INTEGRITY_MODE=$(jq -er '.integrityMode' "$INTEGRITY_CONTRACT")
+          INTEGRITY_CONTRACT_HASH=$(sha256sum "$INTEGRITY_CONTRACT" | cut -d' ' -f1)
+          COMPARATOR_ALGORITHM_DIGEST=$(jq -er '.comparatorAlgorithmDigest' "$INTEGRITY_CONTRACT")
+          [[ "$COMPARATOR_ALGORITHM_DIGEST" == "$(node tools/release/canonical-tree.mjs algorithm-digest | jq -er '.algorithmDigest')" ]]
+
+          {
+            echo "intent-id=$INTENT_ID"
+            echo "pr-number=$INTENT_PR"
+            echo "sha=$SHA"
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "package-hash=$PACKAGE_HASH"
+            echo "changelog-hash=$CHANGELOG_HASH"
+            echo "release-please-hash=$RELEASE_PLEASE_HASH"
+            echo "integrity-mode=$INTEGRITY_MODE"
+            echo "integrity-contract-hash=$INTEGRITY_CONTRACT_HASH"
+            echo "comparator-algorithm-digest=$COMPARATOR_ALGORITHM_DIGEST"
+            echo "ci-run-id=$CI_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+
+  build-candidate:
+    name: Build or recover the externally anchored candidate
+    needs: [authorize]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: release-state-${{ github.repository }}-${{ needs.authorize.outputs.sha }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.authorize.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Read durable intent state and recover the retained artifact
+        id: recover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          INTENT_ID: ${{ needs.authorize.outputs.intent-id }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/candidate"
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/release-state.json"
+          STATE=$(jq -er '.state' "$RUNNER_TEMP/release-state.json")
+          if [[ "$STATE" == intent-recorded ]]; then
+            echo 'needs-build=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          jq -e --arg sha "$SHA" --arg version "$VERSION" '
+            .intent.mergeCommitSha == $sha and .intent.version == $version and
+            (.retainedCandidate.runId | numbers) and
+            (.retainedCandidate.artifactId | numbers) and
+            (.retainedCandidate.artifactDigest | test("^[0-9a-f]{64}$"))
+          ' "$RUNNER_TEMP/release-state.json" >/dev/null
+          ARTIFACT_RUN_ID=$(jq -er '.retainedCandidate.runId' "$RUNNER_TEMP/release-state.json")
+          ARTIFACT_ID=$(jq -er '.retainedCandidate.artifactId' "$RUNNER_TEMP/release-state.json")
+          ARTIFACT_DIGEST=$(jq -er '.retainedCandidate.artifactDigest' "$RUNNER_TEMP/release-state.json")
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/artifact.json"
+          jq -e --argjson run "$ARTIFACT_RUN_ID" --arg digest "sha256:$ARTIFACT_DIGEST" '
+            .expired == false and .workflow_run.id == $run and .digest == $digest
+          ' "$RUNNER_TEMP/artifact.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/candidate.zip"
+          [[ "$(sha256sum "$RUNNER_TEMP/candidate.zip" | cut -d' ' -f1)" == "$ARTIFACT_DIGEST" ]]
+          unzip -q "$RUNNER_TEMP/candidate.zip" -d "$RUNNER_TEMP/candidate"
+          (cd "$RUNNER_TEMP/candidate" && sha256sum --check SHA256SUMS)
+          node tools/release/release-state.mjs validate-candidate \
+            "$RUNNER_TEMP/candidate/candidate-manifest.json" >/dev/null
+          echo 'needs-build=false' >> "$GITHUB_OUTPUT"
+      - name: Install, test, and build from the frozen lockfile
+        if: steps.recover.outputs.needs-build == 'true'
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm build
+      - name: Pack once and create the versioned candidate manifest
+        if: steps.recover.outputs.needs-build == 'true'
+        env:
+          SHA: ${{ needs.authorize.outputs.sha }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+          TAG: ${{ needs.authorize.outputs.tag }}
+          INTENT_ID: ${{ needs.authorize.outputs.intent-id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/candidate"
+          pnpm pack --pack-destination "$RUNNER_TEMP/candidate"
+          TARBALL=$(find "$RUNNER_TEMP/candidate" -maxdepth 1 -name 'scriptspect-*.tgz' -printf '%f\n')
+          [[ $(printf '%s\n' "$TARBALL" | sed '/^$/d' | wc -l) == 1 ]]
+          SHA256=$(sha256sum "$RUNNER_TEMP/candidate/$TARBALL" | cut -d' ' -f1)
+          SRI="sha512-$(openssl dgst -sha512 -binary "$RUNNER_TEMP/candidate/$TARBALL" | openssl base64 -A)"
+          (cd "$RUNNER_TEMP/candidate" && sha256sum "$TARBALL" > SHA256SUMS)
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -er '.output.text | fromjson | .intent' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/intent.json"
+          jq -n \
+            --slurpfile intent "$RUNNER_TEMP/intent.json" \
+            --arg version "$VERSION" \
+            --arg tag "$TAG" \
+            --arg commit "$SHA" \
+            --arg name "$TARBALL" \
+            --arg sha256 "$SHA256" \
+            --arg npmSRI "$SRI" \
+            --arg nodeVersion "$(node --version)" \
+            --arg npmVersion "$(npm --version)" \
+            --arg pnpmVersion "$(pnpm --version)" \
+            --argjson runId "$GITHUB_RUN_ID" \
+            --argjson runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{
+              schemaVersion: "scriptspect-candidate-manifest/v1",
+              intent: $intent[0],
+              version: $version,
+              tag: $tag,
+              commit: $commit,
+              tarball: {name: $name, sha256: $sha256, npmSRI: $npmSRI},
+              build: {node: $nodeVersion, npm: $npmVersion, pnpm: $pnpmVersion},
+              workflow: {runId: $runId, runAttempt: $runAttempt, runUrl: $runUrl}
+            }' > "$RUNNER_TEMP/candidate/candidate-manifest.json"
+          node tools/release/release-state.mjs canonicalize-json \
+            "$RUNNER_TEMP/candidate/candidate-manifest.json" \
+            --out "$RUNNER_TEMP/candidate/candidate-manifest.json" >/dev/null
+          node tools/release/release-state.mjs validate-candidate \
+            "$RUNNER_TEMP/candidate/candidate-manifest.json" >/dev/null
+          (cd "$RUNNER_TEMP/candidate" && sha256sum --check SHA256SUMS)
+      - name: Retain the candidate before creating tags or releases
+        if: steps.recover.outputs.needs-build == 'true'
+        id: candidate-upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate-${{ needs.authorize.outputs.version }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/candidate
+          retention-days: 90
+          if-no-files-found: error
+      - name: Durably transition to retained-candidate
+        if: steps.recover.outputs.needs-build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          INTENT_ID: ${{ needs.authorize.outputs.intent-id }}
+          ARTIFACT_ID: ${{ steps.candidate-upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.candidate-upload.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          CANDIDATE_DIGEST=$(node tools/release/release-state.mjs json-digest \
+            "$RUNNER_TEMP/candidate/candidate-manifest.json" | jq -er '.digest')
+          NPM_SRI=$(jq -er '.tarball.npmSRI' "$RUNNER_TEMP/candidate/candidate-manifest.json")
+          jq -n \
+            --argjson runId "$GITHUB_RUN_ID" \
+            --argjson artifactId "$ARTIFACT_ID" \
+            --arg artifactDigest "$ARTIFACT_DIGEST" \
+            --arg candidateManifestDigest "$CANDIDATE_DIGEST" \
+            --arg npmSRI "$NPM_SRI" \
+            '{to:"retained-candidate", payload:{
+              runId:$runId,
+              artifactId:$artifactId,
+              artifactDigest:$artifactDigest,
+              candidateManifestDigest:$candidateManifestDigest,
+              npmSRI:$npmSRI
+            }}' > "$RUNNER_TEMP/transition.json"
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/release-state.json"
+          node tools/release/release-state.mjs transition \
+            "$RUNNER_TEMP/release-state.json" "$RUNNER_TEMP/transition.json" \
+            --out "$RUNNER_TEMP/next-state.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/latest-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/latest-check.json" > "$RUNNER_TEMP/latest-state.json"
+          node tools/release/release-state.mjs compare-and-update \
+            "$RUNNER_TEMP/latest-state.json" "$RUNNER_TEMP/next-state.json" \
+            --out "$RUNNER_TEMP/approved-state.json" >/dev/null
+          jq -n --rawfile text "$RUNNER_TEMP/approved-state.json" '{
+            name:"release-intent", status:"completed", conclusion:"success",
+            output:{title:"Retained release candidate", summary:"Externally anchored artifact and manifest digests", text:$text}
+          }' > "$RUNNER_TEMP/update-check.json"
+          gh api -X PATCH -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
+
+  stage-release:
+    name: Recover or stage the protected tag and authoritative draft
+    needs: [authorize, build-candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    concurrency:
+      group: release-state-${{ github.repository }}-${{ needs.authorize.outputs.sha }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      checks: write
+      contents: write
+    outputs:
+      tarball: ${{ steps.stage.outputs.tarball }}
+      release-id: ${{ steps.stage.outputs.release-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.authorize.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download the retained candidate from its durable artifact anchor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          INTENT_ID: ${{ needs.authorize.outputs.intent-id }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/candidate"
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/release-state.json"
+          jq -e --arg sha "$SHA" --arg version "$VERSION" '
+            .intent.mergeCommitSha == $sha and .intent.version == $version and
+            (.retainedCandidate.runId | numbers) and
+            (.retainedCandidate.artifactId | numbers) and
+            (.retainedCandidate.artifactDigest | test("^[0-9a-f]{64}$"))
+          ' "$RUNNER_TEMP/release-state.json" >/dev/null
+          ARTIFACT_RUN_ID=$(jq -er '.retainedCandidate.runId' "$RUNNER_TEMP/release-state.json")
+          ARTIFACT_ID=$(jq -er '.retainedCandidate.artifactId' "$RUNNER_TEMP/release-state.json")
+          ARTIFACT_DIGEST=$(jq -er '.retainedCandidate.artifactDigest' "$RUNNER_TEMP/release-state.json")
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID" > "$RUNNER_TEMP/artifact.json"
+          jq -e --argjson run "$ARTIFACT_RUN_ID" --arg digest "sha256:$ARTIFACT_DIGEST" '
+            .expired == false and .workflow_run.id == $run and .digest == $digest
+          ' "$RUNNER_TEMP/artifact.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > "$RUNNER_TEMP/candidate.zip"
+          [[ "$(sha256sum "$RUNNER_TEMP/candidate.zip" | cut -d' ' -f1)" == "$ARTIFACT_DIGEST" ]]
+          unzip -q "$RUNNER_TEMP/candidate.zip" -d "$RUNNER_TEMP/candidate"
+          (cd "$RUNNER_TEMP/candidate" && sha256sum --check SHA256SUMS)
+          CANDIDATE_DIGEST=$(node tools/release/release-state.mjs json-digest \
+            "$RUNNER_TEMP/candidate/candidate-manifest.json" | jq -er '.digest')
+          [[ "$CANDIDATE_DIGEST" == "$(jq -er '.retainedCandidate.candidateManifestDigest' "$RUNNER_TEMP/release-state.json")" ]]
+      - name: Deterministically recover or stage the draft and durable anchors
+        id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+          TAG: ${{ needs.authorize.outputs.tag }}
+          INTENT_ID: ${{ needs.authorize.outputs.intent-id }}
+        run: |
+          set -euo pipefail
+          TARBALL=$(jq -er '.tarball.name' "$RUNNER_TEMP/candidate/candidate-manifest.json")
+          CANDIDATE_DIGEST=$(node tools/release/release-state.mjs json-digest \
+            "$RUNNER_TEMP/candidate/candidate-manifest.json" | jq -er '.digest')
+          CURRENT_STATE=$(jq -er '.state' "$RUNNER_TEMP/release-state.json")
+          jq -n --arg ref "refs/tags/$TAG" --arg sha "$SHA" '{ref:$ref,sha:$sha}' \
+            > "$RUNNER_TEMP/create-tag.json"
+          HTTP_STATUS=$(curl --silent --show-error --output "$RUNNER_TEMP/create-tag-response.json" \
+            --write-out '%{http_code}' --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --data-binary @"$RUNNER_TEMP/create-tag.json" \
+            "https://api.github.com/repos/$REPOSITORY/git/refs")
+          if [[ "$HTTP_STATUS" == 201 ]]; then
+            [[ "$CURRENT_STATE" == retained-candidate ]]
+          elif [[ "$HTTP_STATUS" != 422 ]]; then
+            cat "$RUNNER_TEMP/create-tag-response.json" >&2
+            exit 1
+          fi
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/tag-ref.json"
+          jq -e --arg ref "refs/tags/$TAG" --arg sha "$SHA" \
+            '.ref == $ref and .object.type == "commit" and .object.sha == $sha' \
+            "$RUNNER_TEMP/tag-ref.json" >/dev/null
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            [[ "$CURRENT_STATE" == retained-candidate ]]
+            awk -v version="$VERSION" '
+              $0 ~ "^## \\[?" version {capture=1; next}
+              capture && /^## / {exit}
+              capture {print}
+            ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+            test -s "$RUNNER_TEMP/release-notes.md" || printf 'ScriptSpect %s\n' "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+          RELEASE_ID=$(jq -er '.id' <<< "$RELEASE_JSON")
+          RELEASE_TAG=$(jq -er '.tag_name' <<< "$RELEASE_JSON")
+          [[ "$RELEASE_TAG" == "$TAG" ]]
+          if [[ "$CURRENT_STATE" == retained-candidate ]]; then
+            jq -e '.draft == true' <<< "$RELEASE_JSON" >/dev/null
+          else
+            [[ "$RELEASE_ID" == "$(jq -er '.stagedDraft.releaseId' "$RUNNER_TEMP/release-state.json")" ]]
+          fi
+
+          jq -n \
+            --arg tag "$TAG" \
+            --arg commit "$SHA" \
+            --arg retainedArtifactDigest "$(jq -er '.retainedCandidate.artifactDigest' "$RUNNER_TEMP/release-state.json")" \
+            --arg candidateManifestDigest "$CANDIDATE_DIGEST" \
+            --argjson releaseId "$RELEASE_ID" \
+            --arg tarball "$TARBALL" \
+            --arg tarballDigest "$(sha256sum "$RUNNER_TEMP/candidate/$TARBALL" | cut -d' ' -f1)" \
+            --arg checksumsDigest "$(sha256sum "$RUNNER_TEMP/candidate/SHA256SUMS" | cut -d' ' -f1)" \
+            --argjson draftAssets "$(jq --arg tarball "$TARBALL" '[
+              .assets[] | select(.name == $tarball or .name == "SHA256SUMS" or .name == "candidate-manifest.json") |
+              {name, assetId:.id, sha256:(.digest // "" | sub("^sha256:"; ""))}
+            ]' <<< "$RELEASE_JSON")" \
+            '{
+              expected:{tag:$tag, commit:$commit, retainedArtifactDigest:$retainedArtifactDigest,
+                candidateManifestDigest:$candidateManifestDigest, assets:[
+                  {name:$tarball,sha256:$tarballDigest},
+                  {name:"SHA256SUMS",sha256:$checksumsDigest},
+                  {name:"candidate-manifest.json",sha256:$candidateManifestDigest}
+                ]},
+              observed:{tag:{commit:$commit}, draft:{releaseId:$releaseId, tag:$tag, commit:$commit, assets:$draftAssets},
+                retainedCandidate:{artifactDigest:$retainedArtifactDigest, candidateManifestDigest:$candidateManifestDigest}}
+            }' > "$RUNNER_TEMP/recovery-input.json"
+          node tools/release/release-state.mjs recovery-decision \
+            "$RUNNER_TEMP/recovery-input.json" > "$RUNNER_TEMP/recovery-decision.json"
+          jq -e '.action == "resume" or .action == "restore-assets"' \
+            "$RUNNER_TEMP/recovery-decision.json" >/dev/null
+          [[ "$(jq '[.assets[] | select(.name == "release-manifest.json")] | length' <<< "$RELEASE_JSON")" -le 1 ]]
+          FINAL_COUNT=$(jq '[.assets[] | select(.name == "final-verification.json")] | length' <<< "$RELEASE_JSON")
+          [[ "$FINAL_COUNT" -le 1 ]]
+          if [[ "$FINAL_COUNT" == 1 ]]; then
+            [[ "$CURRENT_STATE" == consumed ]]
+          fi
+
+          ensure_asset() {
+            local file=$1 name existing_count
+            name=$(basename "$file")
+            existing_count=$(jq --arg name "$name" '[.assets[] | select(.name == $name)] | length' <<< "$RELEASE_JSON")
+            [[ "$existing_count" -le 1 ]]
+            if [[ "$existing_count" == 0 ]]; then
+              [[ "$CURRENT_STATE" == retained-candidate ]]
+              gh release upload "$TAG" "$file"
+              RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+              return
+            fi
+            mkdir -p "$RUNNER_TEMP/existing-$name"
+            gh release download "$TAG" --pattern "$name" --dir "$RUNNER_TEMP/existing-$name"
+            [[ "$(sha256sum "$file" | cut -d' ' -f1)" == "$(sha256sum "$RUNNER_TEMP/existing-$name/$name" | cut -d' ' -f1)" ]]
+          }
+
+          ensure_asset "$RUNNER_TEMP/candidate/$TARBALL"
+          ensure_asset "$RUNNER_TEMP/candidate/SHA256SUMS"
+          ensure_asset "$RUNNER_TEMP/candidate/candidate-manifest.json"
+
+          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+          asset_id() {
+            jq -er --arg name "$1" '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("asset cardinality") end' <<< "$RELEASE_JSON"
+          }
+          jq -n \
+            --arg schemaVersion scriptspect-release-manifest/v1 \
+            --argjson releaseId "$RELEASE_ID" \
+            --arg tag "$TAG" \
+            --arg commit "$SHA" \
+            --arg intentId "$(jq -er '.intent.intentId' "$RUNNER_TEMP/release-state.json")" \
+            --arg candidateManifestDigest "$CANDIDATE_DIGEST" \
+            --argjson tarballAssetId "$(asset_id "$TARBALL")" \
+            --arg tarballDigest "$(sha256sum "$RUNNER_TEMP/candidate/$TARBALL" | cut -d' ' -f1)" \
+            --argjson checksumsAssetId "$(asset_id SHA256SUMS)" \
+            --arg checksumsDigest "$(sha256sum "$RUNNER_TEMP/candidate/SHA256SUMS" | cut -d' ' -f1)" \
+            --argjson candidateAssetId "$(asset_id candidate-manifest.json)" \
+            '{
+              schemaVersion: $schemaVersion,
+              releaseId: $releaseId,
+              tag: $tag,
+              commit: $commit,
+              intentId: $intentId,
+              candidateManifestDigest: $candidateManifestDigest,
+              assets: {
+                tarball: {id: $tarballAssetId, sha256: $tarballDigest},
+                checksums: {id: $checksumsAssetId, sha256: $checksumsDigest},
+                candidateManifest: {id: $candidateAssetId, sha256: $candidateManifestDigest}
+              }
+            }' > "$RUNNER_TEMP/candidate/release-manifest.json"
+          jq '(.assets | to_entries | map({
+            name: (if .key == "tarball" then $tarball elif .key == "checksums" then "SHA256SUMS" else "candidate-manifest.json" end),
+            assetId: .value.id,
+            sha256: .value.sha256
+          })) as $assets | {
+            schemaVersion,
+            intentId,
+            version: $version,
+            tag,
+            commit,
+            releaseId,
+            candidateManifestDigest,
+            assets: $assets
+          }' --arg tarball "$TARBALL" --arg version "$VERSION" \
+            "$RUNNER_TEMP/candidate/release-manifest.json" > "$RUNNER_TEMP/candidate/release-manifest.next.json"
+          mv "$RUNNER_TEMP/candidate/release-manifest.next.json" "$RUNNER_TEMP/candidate/release-manifest.json"
+          node tools/release/release-state.mjs canonicalize-json \
+            "$RUNNER_TEMP/candidate/release-manifest.json" \
+            --out "$RUNNER_TEMP/candidate/release-manifest.json" >/dev/null
+          node tools/release/release-state.mjs validate-release \
+            "$RUNNER_TEMP/candidate/release-manifest.json" \
+            "$RUNNER_TEMP/candidate/candidate-manifest.json" >/dev/null
+          ensure_asset "$RUNNER_TEMP/candidate/release-manifest.json"
+
+          RELEASE_MANIFEST_DIGEST=$(node tools/release/release-state.mjs json-digest \
+            "$RUNNER_TEMP/candidate/release-manifest.json" | jq -er '.digest')
+          for attempt in {1..12}; do
+            RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+            READY_COUNT=$(jq --arg tarball "$TARBALL" '[
+              .assets[] | select(.name == $tarball or .name == "SHA256SUMS" or .name == "candidate-manifest.json") |
+              select(.digest | test("^sha256:[0-9a-f]{64}$"))
+            ] | length' <<< "$RELEASE_JSON")
+            [[ "$READY_COUNT" == 3 ]] && break
+            sleep 5
+          done
+          [[ "$READY_COUNT" == 3 ]]
+          jq --arg tarball "$TARBALL" '[
+            .assets[] | select(.name == $tarball or .name == "SHA256SUMS" or .name == "candidate-manifest.json") |
+            {name, assetId:.id, sha256:(.digest | sub("^sha256:"; ""))}
+          ] | sort_by(.name)' <<< "$RELEASE_JSON" > "$RUNNER_TEMP/staged-assets.json"
+          [[ "$(jq length "$RUNNER_TEMP/staged-assets.json")" == 3 ]]
+          jq -n \
+            --argjson releaseId "$RELEASE_ID" \
+            --slurpfile assets "$RUNNER_TEMP/staged-assets.json" \
+            --arg releaseManifestDigest "$RELEASE_MANIFEST_DIGEST" \
+            '{to:"staged-draft",payload:{releaseId:$releaseId,assets:$assets[0],releaseManifestDigest:$releaseManifestDigest}}' \
+            > "$RUNNER_TEMP/transition.json"
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/release-state.json"
+          node tools/release/release-state.mjs transition \
+            "$RUNNER_TEMP/release-state.json" "$RUNNER_TEMP/transition.json" \
+            --out "$RUNNER_TEMP/next-state.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/latest-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/latest-check.json" > "$RUNNER_TEMP/latest-state.json"
+          node tools/release/release-state.mjs compare-and-update \
+            "$RUNNER_TEMP/latest-state.json" "$RUNNER_TEMP/next-state.json" \
+            --out "$RUNNER_TEMP/approved-state.json" >/dev/null
+          jq -n --rawfile text "$RUNNER_TEMP/approved-state.json" '{
+            name:"release-intent",status:"completed",conclusion:"success",
+            output:{title:"Authoritative draft staged",summary:"Release ID, asset IDs and manifest digests are durable",text:$text}
+          }' > "$RUNNER_TEMP/update-check.json"
+          gh api -X PATCH -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
+
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "release-id=$RELEASE_ID" >> "$GITHUB_OUTPUT"

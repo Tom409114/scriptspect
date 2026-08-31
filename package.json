@@ -4,7 +4,10 @@
   "description": "Static analyzer for package.json scripts - catches shell-specific commands before they break Windows, macOS, or Linux builds.",
   "type": "module",
   "license": "MIT",
-  "repository": "github:Tom409114/scriptspect",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tom409114/scriptspect.git"
+  },
   "bugs": "https://github.com/Tom409114/scriptspect/issues",
   "homepage": "https://github.com/Tom409114/scriptspect#readme",
   "author": "Tom409114",

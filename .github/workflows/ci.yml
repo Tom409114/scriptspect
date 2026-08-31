@@ -6,172 +6,312 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  lockfile:
-    name: Lockfile (bootstrap)
+  lockfile-consistency:
+    name: Lockfile consistency
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - name: Sync lockfile with package.json
+      - name: Activate the packageManager-pinned pnpm
         run: |
-          pnpm install --lockfile-only
-          git config user.name "scriptspect-ci[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- pnpm-lock.yaml; then
-            echo "lockfile up to date"
-            exit 0
-          fi
-          git add pnpm-lock.yaml
-          git commit -m "chore: update pnpm-lock.yaml"
-          git push
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm --version
+      - name: Prove manifest and lockfile coherence without rewriting either
+        run: |
+          pnpm install --frozen-lockfile
+          git diff --exit-code -- package.json pnpm-lock.yaml
 
-  format:
-    name: Canonicalize formatting (biome)
+  generated:
+    name: Generated files are current
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: write
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.head_ref }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
-      - name: Apply biome canonical formatting and push if needed
+      - run: |
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Regenerate schemas, rule docs, and bilingual demo assets
         run: |
-          pnpm exec biome check --write .
-          git checkout -- pnpm-lock.yaml 2>/dev/null || true
-          git config user.name "scriptspect-ci[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet; then
-            echo "already canonically formatted"
-            exit 0
-          fi
-          git add -u
-          git commit -m "style: canonical biome formatting"
-          git push
-
-  docs:
-    name: Rule docs (generated)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.head_ref }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
-      - name: Regenerate rule docs and push if needed
-        run: |
+          pnpm exec tsx tools/generate-schemas.ts
           pnpm docs:rules
-          git checkout -- pnpm-lock.yaml 2>/dev/null || true
-          git config user.name "scriptspect-ci[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- docs/rules; then
-            echo "rule docs up to date"
-            exit 0
-          fi
-          git add docs/rules
-          git commit -m "docs: regenerate rule docs from metadata"
-          git push
+          pnpm exec tsx tools/generate-readme-demo.ts
+          pnpm exec tsx tools/check-readme-parity.ts
+          STATUS_COMMIT=$(node -e "const fs=require('node:fs'); const status=JSON.parse(fs.readFileSync('docs/readme-status.json')); if(!/^[0-9a-f]{40}$/.test(status.sourceCommit)) process.exit(1); process.stdout.write(status.sourceCommit)")
+          git cat-file -e "$STATUS_COMMIT^{commit}"
+          git merge-base --is-ancestor "$STATUS_COMMIT" HEAD
+          test "$STATUS_COMMIT" != "$(git rev-parse HEAD)"
+          git diff-tree --root --no-commit-id --name-only -r "$STATUS_COMMIT" -- src package.json action.yml \
+            | grep -Eq '^(src/|package\.json$|action\.yml$)'
+          git diff --exit-code -- \
+            schema \
+            docs/rules \
+            docs/assets/demo \
+            docs/readme-status.json \
+            README.md \
+            README.zh-CN.md
 
   quality:
-    name: Quality (typecheck, lint, unit tests)
+    name: Quality and coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
+      - run: |
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
+      - run: pnpm exec biome check --error-on-warnings .
+      - name: Unit and integration tests with the v0.1 coverage floor
+        run: >-
+          pnpm exec vitest run --coverage
+          --coverage.include='src/parser/**'
+          --coverage.include='src/rules/**'
+          --coverage.thresholds.lines=90
+          --coverage.thresholds.statements=90
+          --coverage.thresholds.functions=90
+          --coverage.thresholds.branches=90
 
   integration:
-    name: Integration (${{ matrix.os }}, node ${{ matrix.node }})
+    name: Integration (${{ matrix.os }}, Node ${{ matrix.node }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node: [22, 24]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
+      - name: Install from the committed lockfile
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
       - name: CLI smoke test
         run: node dist/cli.mjs --version
 
   package:
-    name: Package smoke test
+    name: Packed consumer
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           package-manager-cache: false
-      - run: npm install -g pnpm@11.24.0
-      - run: pnpm install --no-frozen-lockfile
-      - run: pnpm build
-      - run: pnpm pack
-      - name: Install packed tarball and run CLI
+      - run: |
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Pack once and inspect the public file set
         run: |
-          mkdir -p /tmp/pkg-smoke
-          cd /tmp/pkg-smoke
+          mkdir -p "$RUNNER_TEMP/pack"
+          pnpm pack --pack-destination "$RUNNER_TEMP/pack"
+          TARBALL=$(find "$RUNNER_TEMP/pack" -maxdepth 1 -name 'scriptspect-*.tgz' -print -quit)
+          test -f "$TARBALL"
+          tar -tzf "$TARBALL" | sort > "$RUNNER_TEMP/pack-files.txt"
+          grep -Fx 'package/schema/config.schema.json' "$RUNNER_TEMP/pack-files.txt"
+          grep -Fx 'package/schema/output.schema.json' "$RUNNER_TEMP/pack-files.txt"
+          grep -Fx 'package/dist/action.mjs' "$RUNNER_TEMP/pack-files.txt"
+      - name: Install the tarball into a fresh consumer
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
           npm init -y >/dev/null
-          npm install "$GITHUB_WORKSPACE"/scriptspect-*.tgz
-          npx scriptspect --version
+          npm install "$RUNNER_TEMP"/pack/scriptspect-*.tgz --ignore-scripts
+          ./node_modules/.bin/scriptspect --version
 
-  security:
-    name: Security (CodeQL, dependency review)
+  action-consumer:
+    name: Bundled Action consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Rebuild and prove the committed Action bundle is current
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm build
+          git diff --exit-code -- dist/action.mjs dist/action.mjs.map
+      - name: Create controlled clean and broken consumers
+        run: |
+          mkdir -p .ci/action-clean .ci/action-broken
+          node -e "require('node:fs').writeFileSync('.ci/action-clean/package.json', JSON.stringify({name:'clean',scripts:{build:'node -e \\"process.exit(0)\\"'}}, null, 2))"
+          node -e "require('node:fs').writeFileSync('.ci/action-broken/package.json', JSON.stringify({name:'broken',scripts:{clean:'rm -rf dist'}}, null, 2))"
+          sha256sum .ci/action-clean/package.json .ci/action-broken/package.json > "$RUNNER_TEMP/action-fixtures.sha256"
+      - name: Analyze the broken fixture
+        id: broken
+        uses: ./
+        continue-on-error: true
+        with:
+          path: .ci/action-broken
+      - name: Analyze the clean fixture
+        id: clean
+        uses: ./
+        with:
+          path: .ci/action-clean
+      - name: Assert outcomes, numeric outputs, and read-only behavior
+        if: always()
+        env:
+          BROKEN_OUTCOME: ${{ steps.broken.outcome }}
+          BROKEN_EXIT: ${{ steps.broken.outputs.exit-code }}
+          BROKEN_ERRORS: ${{ steps.broken.outputs.errors }}
+          BROKEN_WARNINGS: ${{ steps.broken.outputs.warnings }}
+          CLEAN_OUTCOME: ${{ steps.clean.outcome }}
+          CLEAN_EXIT: ${{ steps.clean.outputs.exit-code }}
+        run: |
+          test "$BROKEN_OUTCOME" = failure
+          test "$BROKEN_EXIT" = 1
+          [[ "$BROKEN_ERRORS" =~ ^[0-9]+$ ]]
+          [[ "$BROKEN_WARNINGS" =~ ^[0-9]+$ ]]
+          test "$CLEAN_OUTCOME" = success
+          test "$CLEAN_EXIT" = 0
+          sha256sum --check "$RUNNER_TEMP/action-fixtures.sha256"
+
+  action-evidence:
+    name: Hosted Action annotations and summary evidence
+    needs: [action-consumer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      - name: Query the completed hosted check and annotations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/jobs-pages.json"
+          jq -s '{jobs: map(.jobs[]) }' "$RUNNER_TEMP/jobs-pages.json" > "$RUNNER_TEMP/jobs.json"
+          JOB_ID=$(jq -er '[.jobs[] | select(.name == "Bundled Action consumer")] | if length == 1 then .[0].id else error("job cardinality") end' "$RUNNER_TEMP/jobs.json")
+          CHECK_RUN_URL=$(jq -er --argjson job "$JOB_ID" '.jobs[] | select(.id == $job) | .check_run_url' "$RUNNER_TEMP/jobs.json")
+          CHECK_RUN_ID=${CHECK_RUN_URL##*/}
+          [[ "$CHECK_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" > "$RUNNER_TEMP/action-check.json"
+          gh api --paginate "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID/annotations?per_page=100" > "$RUNNER_TEMP/annotation-pages.json"
+          jq -s 'add' "$RUNNER_TEMP/annotation-pages.json" > "$RUNNER_TEMP/annotations.json"
+          jq -e 'length > 0 and any((.title // "") + " " + (.message // ""); test("PS[0-9]{3}|scriptspect"))' "$RUNNER_TEMP/annotations.json" >/dev/null
+          jq -er '.output.summary | select(test("scriptspect"; "i"))' "$RUNNER_TEMP/action-check.json" >/dev/null
+          jq -n \
+            --argjson workflowRunId "$RUN_ID" \
+            --argjson jobId "$JOB_ID" \
+            --argjson checkRunId "$CHECK_RUN_ID" \
+            --argjson annotationCount "$(jq 'length' "$RUNNER_TEMP/annotations.json")" \
+            --arg summarySha256 "$(jq -r '.output.summary' "$RUNNER_TEMP/action-check.json" | sha256sum | cut -d' ' -f1)" \
+            '{workflowRunId: $workflowRunId, jobId: $jobId, checkRunId: $checkRunId, annotationCount: $annotationCount, summarySha256: $summarySha256}' \
+            > "$RUNNER_TEMP/action-runner-evidence.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: action-runner-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/action-runner-evidence.json
+          retention-days: 30
+          if-no-files-found: error
+
+  dependency-policy:
+    name: Runtime dependency budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Keep runtime direct dependencies below 10
+        run: node -e "const p=require('./package.json'); const count=Object.keys(p.dependencies||{}).length; if(!(count < 10)) throw new Error('runtime dependencies must remain < 10')"
+
+  workspace-benchmark:
+    name: Hosted 100-package workspace benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: |
+          corepack enable
+          corepack prepare pnpm@11.24.0 --activate
+          pnpm install --frozen-lockfile
+      - name: Record the exact hosted benchmark evidence
+        env:
+          SCRIPTSPECT_SOURCE_COMMIT: ${{ github.sha }}
+        run: pnpm exec tsx tools/benchmark-workspace.ts "$RUNNER_TEMP/workspace-benchmark.json" 100 2000
+      - name: Upload hosted benchmark evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workspace-benchmark-${{ github.sha }}
+          path: ${{ runner.temp }}/workspace-benchmark.json
+          retention-days: 30
+          if-no-files-found: error
+
+  codeql:
+    name: CodeQL
     permissions:
       contents: read
       security-events: write
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Initialize CodeQL
         uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: javascript-typescript
-      - name: Perform CodeQL Analysis
+      - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
-          category: "/language:javascript-typescript"
-      - name: Dependency review
-        if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+          category: /language:javascript-typescript
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

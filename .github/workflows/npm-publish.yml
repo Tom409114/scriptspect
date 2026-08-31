@@ -1,0 +1,551 @@
+name: npm publish from immutable tag
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      intent-id:
+        description: Durable release-intent check-run ID
+        required: true
+      tag:
+        description: Exact immutable stable tag selected as this dispatch ref
+        required: true
+      sha:
+        description: Exact 40-character commit resolved by the selected tag
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-action-tag:
+    name: Consume the immutable Action tag checkout
+    if: >-
+      github.event_name == 'push' ||
+      (github.ref == format('refs/tags/{0}', inputs.tag) && github.sha == inputs.sha)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare immutable-tag fixtures
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          mkdir -p .ci/release-clean .ci/release-broken
+          node -e "require('node:fs').writeFileSync('.ci/release-clean/package.json', JSON.stringify({name:'clean',scripts:{build:'node -e \\"process.exit(0)\\"'}}, null, 2))"
+          node -e "require('node:fs').writeFileSync('.ci/release-broken/package.json', JSON.stringify({name:'broken',scripts:{clean:'rm -rf dist'}}, null, 2))"
+      - name: Analyze broken fixture from the immutable tag
+        id: broken
+        uses: ./
+        continue-on-error: true
+        with:
+          path: .ci/release-broken
+      - name: Analyze clean fixture from the immutable tag
+        id: clean
+        uses: ./
+        with:
+          path: .ci/release-clean
+      - name: Verify immutable-tag evidence
+        if: always()
+        env:
+          BROKEN_OUTCOME: ${{ steps.broken.outcome }}
+          BROKEN_EXIT: ${{ steps.broken.outputs.exit-code }}
+          CLEAN_OUTCOME: ${{ steps.clean.outcome }}
+          CLEAN_EXIT: ${{ steps.clean.outputs.exit-code }}
+        run: |
+          test "$BROKEN_OUTCOME" = failure
+          test "$BROKEN_EXIT" = 1
+          test "$CLEAN_OUTCOME" = success
+          test "$CLEAN_EXIT" = 0
+
+  publish:
+    name: Verify staged anchors and publish through tag-bound npm OIDC
+    needs: [verify-action-tag]
+    if: needs.verify-action-tag.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    concurrency:
+      group: release-state-${{ github.repository }}-${{ github.sha }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      id-token: write
+      pull-requests: read
+    outputs:
+      intent-id: ${{ steps.publish.outputs.intent-id }}
+      version: ${{ steps.publish.outputs.version }}
+      tag: ${{ steps.publish.outputs.tag }}
+      sha: ${{ steps.publish.outputs.sha }}
+      release-id: ${{ steps.publish.outputs.release-id }}
+      registry-sri: ${{ steps.publish.outputs.registry-sri }}
+      provenance-digest: ${{ steps.publish.outputs.provenance-digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify exact tag event, CI, intent, fork boundary, draft, and assets before npm
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_INTENT_ID: ${{ inputs.intent-id }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+          DISPATCH_SHA: ${{ inputs.sha }}
+          RELEASE_PR_ACTORS: ${{ vars.RELEASE_PR_ACTORS || 'github-actions[bot]' }}
+          NPM_CONFIG_PROVENANCE: true
+          NPM_CONFIG_USERCONFIG: /dev/null
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=${GITHUB_REF#refs/tags/}
+          SHA=$GITHUB_SHA
+          [[ "$GITHUB_REF" == "refs/tags/$TAG" ]]
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          VERSION=${TAG#v}
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            [[ "$DISPATCH_TAG" == "$TAG" ]]
+            [[ "$DISPATCH_SHA" == "$SHA" ]]
+            [[ "$DISPATCH_INTENT_ID" =~ ^[1-9][0-9]*$ ]]
+          fi
+          [[ "$(git rev-parse HEAD)" == "$SHA" ]]
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/tag-ref.json"
+          jq -e --arg ref "refs/tags/$TAG" --arg sha "$SHA" \
+            '.ref == $ref and .object.type == "commit" and .object.sha == $sha' \
+            "$RUNNER_TEMP/tag-ref.json" >/dev/null
+
+          INTENT_ID=$DISPATCH_INTENT_ID
+          for attempt in {1..60}; do
+            if [[ -z "$INTENT_ID" ]]; then
+              gh api -H 'Accept: application/vnd.github+json' \
+                "repos/$REPOSITORY/commits/$SHA/check-runs?check_name=release-intent" \
+                > "$RUNNER_TEMP/check-runs.json"
+              COUNT=$(jq '[.check_runs[] | select(.name == "release-intent" and .conclusion == "success" and .app.slug == "github-actions")] | length' "$RUNNER_TEMP/check-runs.json")
+              [[ "$COUNT" -le 1 ]]
+              [[ "$COUNT" == 1 ]] && INTENT_ID=$(jq -er '.check_runs[0].id' "$RUNNER_TEMP/check-runs.json")
+            fi
+            if [[ -n "$INTENT_ID" ]]; then
+              gh api -H 'Accept: application/vnd.github+json' \
+                "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+              jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/release-state.json"
+              STATE=$(jq -er '.state' "$RUNNER_TEMP/release-state.json")
+              if [[ "$STATE" =~ ^(staged-draft|npm-published|npm-verified|aliases-verified|consumed)$ ]]; then
+                break
+              fi
+            fi
+            sleep 10
+          done
+          [[ -n "$INTENT_ID" ]]
+          [[ "$STATE" =~ ^(staged-draft|npm-published|npm-verified|aliases-verified|consumed)$ ]]
+          jq -e --arg sha "$SHA" --arg tag "$TAG" --arg version "$VERSION" '
+            .intent.mergeCommitSha == $sha and .intent.tag == $tag and .intent.version == $version and
+            .intent.releasePrHeadRepo == "Tom409114/scriptspect" and
+            (.intent.releasePrHeadSha | test("^[0-9a-f]{40}$"))
+          ' "$RUNNER_TEMP/release-state.json" >/dev/null
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&status=completed&per_page=100" \
+            > "$RUNNER_TEMP/ci-runs.json"
+          node tools/release/release-state.mjs verify-ci \
+            --runs "$RUNNER_TEMP/ci-runs.json" --sha "$SHA" --repository "$REPOSITORY" \
+            --workflow CI --event push --branch main --selection newest \
+            > "$RUNNER_TEMP/verified-ci.json"
+
+          INTENT_PR=$(jq -er '.intent.prNumber' "$RUNNER_TEMP/release-state.json")
+          HEAD_REPO=$(jq -er '.intent.releasePrHeadRepo' "$RUNNER_TEMP/release-state.json")
+          HEAD_SHA=$(jq -er '.intent.releasePrHeadSha' "$RUNNER_TEMP/release-state.json")
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/commits/$SHA/pulls" > "$RUNNER_TEMP/associated-pulls.json"
+          jq -e --argjson pr "$INTENT_PR" --arg sha "$SHA" --arg repository "$REPOSITORY" \
+            --arg headRepo "$HEAD_REPO" --arg headSha "$HEAD_SHA" --arg actors "$RELEASE_PR_ACTORS" '
+            ($actors | split(",") | map(gsub("^\\s+|\\s+$"; ""))) as $allowedActors |
+            [.[] | select(
+              .number == $pr and .merged_at != null and .merge_commit_sha == $sha and
+              .base.ref == "main" and .base.repo.full_name == $repository and
+              .head.repo.full_name == $repository and .head.repo.fork == false and
+              .head.repo.full_name == $headRepo and .head.sha == $headSha and
+              (.user.login as $actor | ($allowedActors | index($actor)) != null) and
+              (.head.ref | startswith("release-please--")) and
+              (.title | test("^chore\\(main\\): release "))
+            )] | length == 1
+          ' "$RUNNER_TEMP/associated-pulls.json" >/dev/null
+
+          mkdir -p "$RUNNER_TEMP/release"
+          for pattern in "scriptspect-$VERSION.tgz" SHA256SUMS candidate-manifest.json release-manifest.json; do
+            gh release download "$TAG" --repo "$REPOSITORY" \
+              --dir "$RUNNER_TEMP/release" --pattern "$pattern"
+          done
+          (cd "$RUNNER_TEMP/release" && sha256sum --check SHA256SUMS)
+          TARBALL="scriptspect-$VERSION.tgz"
+          tar -xOf "$RUNNER_TEMP/release/$TARBALL" package/package.json | \
+            jq -e '.repository == {type:"git",url:"git+https://github.com/Tom409114/scriptspect.git"}' >/dev/null
+          node tools/release/release-state.mjs validate-candidate \
+            "$RUNNER_TEMP/release/candidate-manifest.json" >/dev/null
+          node tools/release/release-state.mjs validate-release \
+            "$RUNNER_TEMP/release/release-manifest.json" \
+            "$RUNNER_TEMP/release/candidate-manifest.json" >/dev/null
+          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/releases/tags/$TAG")
+          RELEASE_ID=$(jq -er '.id' <<< "$RELEASE_JSON")
+          jq -e '.draft == true or .draft == false' <<< "$RELEASE_JSON" >/dev/null
+          jq --arg tarball "$TARBALL" '[
+            .assets[] | select(.name == $tarball or .name == "SHA256SUMS" or .name == "candidate-manifest.json") |
+            {name,assetId:.id,sha256:(.digest | sub("^sha256:"; ""))}
+          ] | sort_by(.name)' <<< "$RELEASE_JSON" > "$RUNNER_TEMP/observed-assets.json"
+          jq -n --slurpfile state "$RUNNER_TEMP/release-state.json" \
+            --slurpfile candidate "$RUNNER_TEMP/release/candidate-manifest.json" \
+            --slurpfile release "$RUNNER_TEMP/release/release-manifest.json" \
+            --slurpfile assets "$RUNNER_TEMP/observed-assets.json" \
+            --arg tag "$TAG" --arg commit "$SHA" --argjson releaseId "$RELEASE_ID" \
+            '{state:$state[0],candidate:$candidate[0],release:$release[0],observed:{
+              tag:{name:$tag,commit:$commit},
+              release:{releaseId:$releaseId,tag:$tag,commit:$commit,draft:true},assets:$assets[0]}}' \
+            > "$RUNNER_TEMP/publish-anchors.json"
+          if [[ "$STATE" =~ ^(npm-verified|aliases-verified|consumed)$ ]]; then
+            jq '.observed.release.draft = false' "$RUNNER_TEMP/publish-anchors.json" \
+              > "$RUNNER_TEMP/publish-anchors.next.json"
+            mv "$RUNNER_TEMP/publish-anchors.next.json" "$RUNNER_TEMP/publish-anchors.json"
+          fi
+          node tools/release/release-state.mjs verify-publish-anchors \
+            "$RUNNER_TEMP/publish-anchors.json" > "$RUNNER_TEMP/verified-anchors.json"
+          CANDIDATE_SRI=$(jq -er '.npmSRI' "$RUNNER_TEMP/verified-anchors.json")
+
+          npm install --global npm@11.12.1
+          EXISTING_SRI=$(npm view "scriptspect@$VERSION" dist.integrity 2>/dev/null || true)
+          if [[ -z "$EXISTING_SRI" ]]; then
+            npm publish "$RUNNER_TEMP/release/$TARBALL" --provenance --access public
+            EXISTING_SRI=$(npm view "scriptspect@$VERSION" dist.integrity)
+          fi
+          [[ "$EXISTING_SRI" == "$CANDIDATE_SRI" ]]
+
+          if [[ "$STATE" == staged-draft ]]; then
+            jq -n --arg publishedVersion "$VERSION" --arg npmSRI "$CANDIDATE_SRI" \
+              --argjson publishRunId "$GITHUB_RUN_ID" \
+              '{to:"npm-published",payload:{publishedVersion:$publishedVersion,npmSRI:$npmSRI,publishRunId:$publishRunId}}' \
+              > "$RUNNER_TEMP/published-transition.json"
+          else
+            jq '{to:"npm-published",payload:.npmPublished}' "$RUNNER_TEMP/release-state.json" \
+              > "$RUNNER_TEMP/published-transition.json"
+          fi
+          node tools/release/release-state.mjs transition "$RUNNER_TEMP/release-state.json" \
+            "$RUNNER_TEMP/published-transition.json" --out "$RUNNER_TEMP/published-state.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/latest-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/latest-check.json" > "$RUNNER_TEMP/latest-state.json"
+          node tools/release/release-state.mjs compare-and-update \
+            "$RUNNER_TEMP/latest-state.json" "$RUNNER_TEMP/published-state.json" \
+            --out "$RUNNER_TEMP/approved-published-state.json" >/dev/null
+          jq -n --rawfile text "$RUNNER_TEMP/approved-published-state.json" '{
+            name:"release-intent",status:"completed",conclusion:"success",
+            output:{title:"npm package published",summary:"Exact tag-bound publication is durable",text:$text}}
+          ' > "$RUNNER_TEMP/update-check.json"
+          gh api -X PATCH -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
+          mv "$RUNNER_TEMP/approved-published-state.json" "$RUNNER_TEMP/release-state.json"
+
+          mkdir -p "$RUNNER_TEMP/registry/install"
+          npm pack "scriptspect@$VERSION" --pack-destination "$RUNNER_TEMP/registry" --silent
+          mv "$RUNNER_TEMP/registry/$TARBALL" "$RUNNER_TEMP/registry/registry.tgz"
+          REGISTRY_SRI=$(npm view "scriptspect@$VERSION" dist.integrity)
+          [[ "$REGISTRY_SRI" == "$CANDIDATE_SRI" ]]
+          node tools/release/canonical-tree.mjs digest --tarball \
+            "$RUNNER_TEMP/release/$TARBALL" > "$RUNNER_TEMP/candidate-tree.json"
+          node tools/release/canonical-tree.mjs digest --tarball \
+            "$RUNNER_TEMP/registry/registry.tgz" > "$RUNNER_TEMP/registry-tree.json"
+          jq -e --slurpfile right "$RUNNER_TEMP/registry-tree.json" \
+            '.treeDigest == $right[0].treeDigest and .algorithmDigest == $right[0].algorithmDigest' \
+            "$RUNNER_TEMP/candidate-tree.json" >/dev/null
+          REGISTRY_MANIFEST_DIGEST=$(node tools/release/release-state.mjs json-digest \
+            "$RUNNER_TEMP/registry-tree.json" | jq -er '.digest')
+
+          cd "$RUNNER_TEMP/registry/install"
+          npm init --yes >/dev/null
+          npm install --ignore-scripts --no-save "scriptspect@$VERSION" >/dev/null
+          npm audit signatures --json --include-attestations > "$RUNNER_TEMP/registry/audit.json"
+          cd "$GITHUB_WORKSPACE"
+          node tools/release/verify-provenance.mjs \
+            --audit "$RUNNER_TEMP/registry/audit.json" --package scriptspect --version "$VERSION" \
+            --tarball "$RUNNER_TEMP/registry/registry.tgz" --repository "$REPOSITORY" \
+            --workflow .github/workflows/npm-publish.yml --ref "refs/tags/$TAG" --sha "$SHA" \
+            > "$RUNNER_TEMP/provenance.json"
+          PROVENANCE_DIGEST=$(jq -er '.statementDigest' "$RUNNER_TEMP/provenance.json")
+
+          STATE=$(jq -er '.state' "$RUNNER_TEMP/release-state.json")
+          if [[ "$STATE" == npm-published ]]; then
+            jq -n --arg registryNpmSRI "$REGISTRY_SRI" \
+              --arg registryManifestDigest "$REGISTRY_MANIFEST_DIGEST" \
+              --arg provenanceDigest "$PROVENANCE_DIGEST" \
+              '{to:"npm-verified",payload:{registryNpmSRI:$registryNpmSRI,
+                registryManifestDigest:$registryManifestDigest,provenanceDigest:$provenanceDigest}}' \
+              > "$RUNNER_TEMP/verified-transition.json"
+          else
+            jq '{to:"npm-verified",payload:.npmVerified}' "$RUNNER_TEMP/release-state.json" \
+              > "$RUNNER_TEMP/verified-transition.json"
+          fi
+          node tools/release/release-state.mjs transition "$RUNNER_TEMP/release-state.json" \
+            "$RUNNER_TEMP/verified-transition.json" --out "$RUNNER_TEMP/verified-state.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/latest-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/latest-check.json" > "$RUNNER_TEMP/latest-state.json"
+          node tools/release/release-state.mjs compare-and-update \
+            "$RUNNER_TEMP/latest-state.json" "$RUNNER_TEMP/verified-state.json" \
+            --out "$RUNNER_TEMP/approved-verified-state.json" >/dev/null
+          jq -n --rawfile text "$RUNNER_TEMP/approved-verified-state.json" '{
+            name:"release-intent",status:"completed",conclusion:"success",
+            output:{title:"npm artifact and provenance verified",summary:"Registry bytes and tag-bound provenance are exact",text:$text}}
+          ' > "$RUNNER_TEMP/update-check.json"
+          gh api -X PATCH -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
+
+          {
+            echo "intent-id=$INTENT_ID"
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "sha=$SHA"
+            echo "release-id=$RELEASE_ID"
+            echo "registry-sri=$REGISTRY_SRI"
+            echo "provenance-digest=$PROVENANCE_DIGEST"
+          } >> "$GITHUB_OUTPUT"
+
+  advance-aliases:
+    name: Monotonically publish Release and floating aliases
+    needs: [publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    concurrency:
+      group: release-aliases-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    outputs:
+      minor-alias: ${{ steps.aliases.outputs.minor-alias }}
+      major-alias: ${{ steps.aliases.outputs.major-alias }}
+      old-minor: ${{ steps.aliases.outputs.old-minor }}
+      old-major: ${{ steps.aliases.outputs.old-major }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.publish.outputs.sha }}
+          fetch-depth: 0
+      - name: Apply semver and ancestry guards, then update aliases by CAS
+        id: aliases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ needs.publish.outputs.sha }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          TAG: ${{ needs.publish.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MINOR_ALIAS="v$MAJOR.$MINOR"
+          MAJOR_ALIAS="v$MAJOR"
+          old_target() { git ls-remote --tags origin "refs/tags/$1" | awk '{print $1}'; }
+          version_for_target() {
+            local target=$1
+            [[ -n "$target" ]] || return 0
+            git ls-remote --tags origin | awk -v sha="$target" \
+              '$1 == sha && $2 ~ /^refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+$/ {sub("refs/tags/v", "", $2); print $2}' | \
+              sort -V | tail -n 1
+          }
+          ancestor_for_target() {
+            local target=$1
+            [[ -n "$target" ]] || { echo null; return; }
+            [[ "$target" == "$SHA" ]] && { echo true; return; }
+            if git merge-base --is-ancestor "$target" "$SHA"; then echo true; else echo false; fi
+          }
+          OLD_MINOR=$(old_target "$MINOR_ALIAS")
+          OLD_MAJOR=$(old_target "$MAJOR_ALIAS")
+          CURRENT_MINOR_VERSION=$(version_for_target "$OLD_MINOR")
+          CURRENT_MAJOR_VERSION=$(version_for_target "$OLD_MAJOR")
+          MINOR_ANCESTOR=$(ancestor_for_target "$OLD_MINOR")
+          MAJOR_ANCESTOR=$(ancestor_for_target "$OLD_MAJOR")
+          jq -n --arg version "$VERSION" --arg commit "$SHA" \
+            --arg minor "$MINOR_ALIAS" --arg major "$MAJOR_ALIAS" \
+            --arg oldMinor "$OLD_MINOR" --arg oldMajor "$OLD_MAJOR" \
+            --arg minorVersion "$CURRENT_MINOR_VERSION" --arg majorVersion "$CURRENT_MAJOR_VERSION" \
+            --argjson minorAncestor "$MINOR_ANCESTOR" --argjson majorAncestor "$MAJOR_ANCESTOR" '
+            {version:$version,commit:$commit,current:[
+              {name:$minor,target:(if $oldMinor=="" then null else $oldMinor end),
+                version:(if $minorVersion=="" then null else $minorVersion end),ancestor:$minorAncestor},
+              {name:$major,target:(if $oldMajor=="" then null else $oldMajor end),
+                version:(if $majorVersion=="" then null else $majorVersion end),ancestor:$majorAncestor}
+            ]}' > "$RUNNER_TEMP/alias-plan.json"
+          node tools/release/release-state.mjs semver-monotonic \
+            "$RUNNER_TEMP/alias-plan.json" > "$RUNNER_TEMP/verified-alias-plan.json"
+
+          OUTPUT_OLD_MINOR=$OLD_MINOR
+          OUTPUT_OLD_MAJOR=$OLD_MAJOR
+          [[ "$OLD_MINOR" == "$SHA" ]] && OUTPUT_OLD_MINOR=''
+          [[ "$OLD_MAJOR" == "$SHA" ]] && OUTPUT_OLD_MAJOR=''
+          git push origin "$SHA:refs/tags/$MINOR_ALIAS" \
+            --force-with-lease="refs/tags/$MINOR_ALIAS:$OLD_MINOR"
+          if ! git push origin "$SHA:refs/tags/$MAJOR_ALIAS" \
+            --force-with-lease="refs/tags/$MAJOR_ALIAS:$OLD_MAJOR"; then
+            jq -n --arg current "$(old_target "$MINOR_ALIAS")" --arg candidate "$SHA" \
+              --arg previous "$OUTPUT_OLD_MINOR" \
+              '{current:$current,candidate:$candidate,previous:(if $previous=="" then null else $previous end)}' \
+              > "$RUNNER_TEMP/rollback.json"
+            node tools/release/release-state.mjs alias-rollback "$RUNNER_TEMP/rollback.json" \
+              > "$RUNNER_TEMP/rollback-decision.json"
+            if [[ "$(jq -er '.action' "$RUNNER_TEMP/rollback-decision.json")" == restore ]]; then
+              git push origin "$OUTPUT_OLD_MINOR:refs/tags/$MINOR_ALIAS" \
+                --force-with-lease="refs/tags/$MINOR_ALIAS:$SHA" || true
+            fi
+            exit 1
+          fi
+          [[ "$(old_target "$MINOR_ALIAS")" == "$SHA" ]]
+          [[ "$(old_target "$MAJOR_ALIAS")" == "$SHA" ]]
+          gh release edit "$TAG" --repo "$REPOSITORY" --draft=false --latest
+          {
+            echo "minor-alias=$MINOR_ALIAS"
+            echo "major-alias=$MAJOR_ALIAS"
+            echo "old-minor=$OUTPUT_OLD_MINOR"
+            echo "old-major=$OUTPUT_OLD_MAJOR"
+          } >> "$GITHUB_OUTPUT"
+
+  record-verification:
+    name: Durably record aliases and consume the release intent
+    needs: [publish, advance-aliases]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    concurrency:
+      group: release-state-${{ github.repository }}-${{ needs.publish.outputs.sha }}
+      cancel-in-progress: false
+    permissions:
+      checks: write
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.publish.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify aliases and attach idempotent final evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          INTENT_ID: ${{ needs.publish.outputs.intent-id }}
+          SHA: ${{ needs.publish.outputs.sha }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          TAG: ${{ needs.publish.outputs.tag }}
+          RELEASE_ID: ${{ needs.publish.outputs.release-id }}
+          REGISTRY_SRI: ${{ needs.publish.outputs.registry-sri }}
+          PROVENANCE_DIGEST: ${{ needs.publish.outputs.provenance-digest }}
+          MINOR_ALIAS: ${{ needs.advance-aliases.outputs.minor-alias }}
+          MAJOR_ALIAS: ${{ needs.advance-aliases.outputs.major-alias }}
+          OLD_MINOR: ${{ needs.advance-aliases.outputs.old-minor }}
+          OLD_MAJOR: ${{ needs.advance-aliases.outputs.old-major }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          alias_target() { git ls-remote --tags "https://github.com/$REPOSITORY.git" "refs/tags/$1" | awk '{print $1}'; }
+          [[ "$(alias_target "$MINOR_ALIAS")" == "$SHA" ]]
+          [[ "$(alias_target "$MAJOR_ALIAS")" == "$SHA" ]]
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/intent-check.json" > "$RUNNER_TEMP/release-state.json"
+          STATE=$(jq -er '.state' "$RUNNER_TEMP/release-state.json")
+          if [[ "$STATE" == npm-verified ]]; then
+            jq -n --arg minor "$MINOR_ALIAS" --arg major "$MAJOR_ALIAS" --arg target "$SHA" \
+              --arg oldMinor "$OLD_MINOR" --arg oldMajor "$OLD_MAJOR" '
+              {to:"aliases-verified",payload:{aliases:[
+                {name:$minor,previousTarget:(if $oldMinor=="" then null else $oldMinor end),target:$target},
+                {name:$major,previousTarget:(if $oldMajor=="" then null else $oldMajor end),target:$target}
+              ]}}' > "$RUNNER_TEMP/aliases-transition.json"
+          else
+            jq -e '.state | IN("aliases-verified","consumed")' "$RUNNER_TEMP/release-state.json" >/dev/null
+            jq '{to:"aliases-verified",payload:.aliasesVerified}' "$RUNNER_TEMP/release-state.json" \
+              > "$RUNNER_TEMP/aliases-transition.json"
+          fi
+          node tools/release/release-state.mjs transition "$RUNNER_TEMP/release-state.json" \
+            "$RUNNER_TEMP/aliases-transition.json" --out "$RUNNER_TEMP/aliases-state.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/latest-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/latest-check.json" > "$RUNNER_TEMP/latest-state.json"
+          node tools/release/release-state.mjs compare-and-update \
+            "$RUNNER_TEMP/latest-state.json" "$RUNNER_TEMP/aliases-state.json" \
+            --out "$RUNNER_TEMP/approved-aliases-state.json" >/dev/null
+          jq -n --rawfile text "$RUNNER_TEMP/approved-aliases-state.json" '{
+            name:"release-intent",status:"completed",conclusion:"success",
+            output:{title:"Floating aliases verified",summary:"Global-lock semver and ancestry guards passed",text:$text}}
+          ' > "$RUNNER_TEMP/update-check.json"
+          gh api -X PATCH -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
+
+          jq -n --arg intentId "$(jq -er '.intent.intentId' "$RUNNER_TEMP/approved-aliases-state.json")" \
+            --argjson releaseId "$RELEASE_ID" --arg commit "$SHA" --arg version "$VERSION" --arg tag "$TAG" \
+            --arg candidateManifestDigest "$(jq -er '.retainedCandidate.candidateManifestDigest' "$RUNNER_TEMP/approved-aliases-state.json")" \
+            --arg releaseManifestDigest "$(jq -er '.stagedDraft.releaseManifestDigest' "$RUNNER_TEMP/approved-aliases-state.json")" \
+            --arg candidateNpmSRI "$(jq -er '.retainedCandidate.npmSRI' "$RUNNER_TEMP/approved-aliases-state.json")" \
+            --arg registryNpmSRI "$REGISTRY_SRI" --arg provenanceDigest "$PROVENANCE_DIGEST" \
+            --arg minor "$MINOR_ALIAS" --arg major "$MAJOR_ALIAS" '
+            {schemaVersion:"scriptspect-final-verification/v1",intentId:$intentId,releaseId:$releaseId,
+              commit:$commit,version:$version,tag:$tag,candidateManifestDigest:$candidateManifestDigest,
+              releaseManifestDigest:$releaseManifestDigest,candidateNpmSRI:$candidateNpmSRI,
+              registryNpmSRI:$registryNpmSRI,provenanceDigest:$provenanceDigest,
+              aliases:[{name:$minor,target:$commit},{name:$major,target:$commit}]}
+          ' > "$RUNNER_TEMP/final-verification.json"
+          node tools/release/release-state.mjs canonicalize-json "$RUNNER_TEMP/final-verification.json" \
+            --out "$RUNNER_TEMP/final-verification.json" >/dev/null
+          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/releases/tags/$TAG")
+          FINAL_COUNT=$(jq '[.assets[] | select(.name == "final-verification.json")] | length' <<< "$RELEASE_JSON")
+          [[ "$FINAL_COUNT" -le 1 ]]
+          if [[ "$FINAL_COUNT" == 1 ]]; then
+            mkdir -p "$RUNNER_TEMP/existing-final"
+            gh release download "$TAG" --repo "$REPOSITORY" --pattern final-verification.json \
+              --dir "$RUNNER_TEMP/existing-final"
+            jq -n --slurpfile existing "$RUNNER_TEMP/existing-final/final-verification.json" \
+              --slurpfile proposed "$RUNNER_TEMP/final-verification.json" \
+              '{existing:$existing[0],proposed:$proposed[0]}' > "$RUNNER_TEMP/final-idempotency.json"
+          else
+            jq -n --slurpfile proposed "$RUNNER_TEMP/final-verification.json" \
+              '{existing:null,proposed:$proposed[0]}' > "$RUNNER_TEMP/final-idempotency.json"
+          fi
+          node tools/release/release-state.mjs final-idempotency \
+            "$RUNNER_TEMP/final-idempotency.json" > "$RUNNER_TEMP/final-decision.json"
+          if [[ "$(jq -er '.decision' "$RUNNER_TEMP/final-decision.json")" == write ]]; then
+            gh release upload "$TAG" --repo "$REPOSITORY" "$RUNNER_TEMP/final-verification.json"
+          fi
+          FINAL_DIGEST=$(node tools/release/release-state.mjs json-digest \
+            "$RUNNER_TEMP/final-verification.json" | jq -er '.digest')
+          jq -n --arg finalVerificationDigest "$FINAL_DIGEST" \
+            '{to:"consumed",payload:{finalVerificationDigest:$finalVerificationDigest}}' \
+            > "$RUNNER_TEMP/consumed-transition.json"
+          node tools/release/release-state.mjs transition "$RUNNER_TEMP/approved-aliases-state.json" \
+            "$RUNNER_TEMP/consumed-transition.json" --out "$RUNNER_TEMP/consumed-state.json" >/dev/null
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/latest-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/latest-check.json" > "$RUNNER_TEMP/latest-state.json"
+          node tools/release/release-state.mjs compare-and-update \
+            "$RUNNER_TEMP/latest-state.json" "$RUNNER_TEMP/consumed-state.json" \
+            --out "$RUNNER_TEMP/approved-consumed-state.json" >/dev/null
+          jq -n --rawfile text "$RUNNER_TEMP/approved-consumed-state.json" '{
+            name:"release-intent",status:"completed",conclusion:"success",
+            output:{title:"Consumed release intent",summary:"Final verification is exact and idempotent",text:$text}}
+          ' > "$RUNNER_TEMP/update-check.json"
+          gh api -X PATCH -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
