@@ -75,8 +75,8 @@ jobs:
             sleep 2
           done
           if [[ -z "$LATEST_INTENT_RUN" ]]; then
-            echo '::warning::No completed Release intent workflow was observed for the exact main commit; publication remains fail-closed.'
-            exit 0
+            echo '::error::No completed Release intent workflow was observed for the exact main commit; retry after the recorder is healthy.'
+            exit 1
           fi
           [[ "$(jq -r '.conclusion' <<< "$LATEST_INTENT_RUN")" == success ]]
 
@@ -119,6 +119,7 @@ jobs:
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_branch == 'main' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
+        needs.discover-intent.result == 'success' &&
         needs.discover-intent.outputs.has-intent == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 15

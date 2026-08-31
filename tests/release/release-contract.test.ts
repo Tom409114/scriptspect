@@ -258,9 +258,11 @@ describe('release coordinator trust and recovery', () => {
     expect(discoverRun).toContain('actions/workflows/release-intent.yml/runs');
     expect(discoverRun).toContain('has-intent=false');
     expect(discoverRun).toContain('check-runs?check_name=release-intent');
+    expect(discoverRun).toContain('exit 1');
 
     expect(authorize?.needs).toEqual(['discover-intent']);
     expect(authorize?.if).toContain('always()');
+    expect(authorize?.if).toContain("needs.discover-intent.result == 'success'");
     expect(authorize?.if).toContain("needs.discover-intent.outputs.has-intent == 'true'");
     expect(authorize?.environment).toBe('release');
   });
