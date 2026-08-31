@@ -26,14 +26,100 @@ permissions:
   contents: read
 
 jobs:
+  discover-intent:
+    name: Discover exact release intent
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    outputs:
+      has-intent: ${{ steps.discover.outputs.has-intent }}
+      intent-id: ${{ steps.discover.outputs.intent-id }}
+    steps:
+      - name: Wait for the intent recorder and discover an exact check
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'has-intent=false' >> "$GITHUB_OUTPUT"
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          LATEST_INTENT_RUN=''
+          for attempt in {1..60}; do
+            gh api -H 'Accept: application/vnd.github+json' \
+              "repos/$REPOSITORY/actions/workflows/release-intent.yml/runs?head_sha=$SHA&event=push&branch=main&status=completed&per_page=100" \
+              > "$RUNNER_TEMP/intent-runs.json"
+            LATEST_INTENT_RUN=$(jq -c --arg sha "$SHA" --arg repository "$REPOSITORY" '
+              [.workflow_runs[] | select(
+                .name == "Release intent" and
+                .event == "push" and
+                .head_branch == "main" and
+                .head_sha == $sha and
+                .head_repository.full_name == $repository and
+                .status == "completed"
+              )] | sort_by(.created_at, .run_attempt, .id) | last // empty
+            ' "$RUNNER_TEMP/intent-runs.json")
+            [[ -n "$LATEST_INTENT_RUN" ]] && break
+            sleep 2
+          done
+          if [[ -z "$LATEST_INTENT_RUN" ]]; then
+            echo '::warning::No completed Release intent workflow was observed for the exact main commit; publication remains fail-closed.'
+            exit 0
+          fi
+          [[ "$(jq -r '.conclusion' <<< "$LATEST_INTENT_RUN")" == success ]]
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/commits/$SHA/check-runs?check_name=release-intent" \
+            > "$RUNNER_TEMP/check-runs.json"
+          COUNT=$(jq --arg sha "$SHA" '[.check_runs[] | select(
+            .name == "release-intent" and
+            .head_sha == $sha and
+            .status == "completed" and
+            .conclusion == "success" and
+            .app.slug == "github-actions"
+          )] | length' "$RUNNER_TEMP/check-runs.json")
+          [[ "$COUNT" -le 1 ]]
+          if [[ "$COUNT" == 0 ]]; then
+            echo 'No release-please intent is associated with this ordinary main commit.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          INTENT_ID=$(jq -er --arg sha "$SHA" '.check_runs[] | select(
+            .name == "release-intent" and
+            .head_sha == $sha and
+            .status == "completed" and
+            .conclusion == "success" and
+            .app.slug == "github-actions"
+          ) | .id' "$RUNNER_TEMP/check-runs.json")
+          [[ "$INTENT_ID" =~ ^[1-9][0-9]*$ ]]
+          {
+            echo 'has-intent=true'
+            echo "intent-id=$INTENT_ID"
+          } >> "$GITHUB_OUTPUT"
+
   authorize:
     name: Authorize exact release intent
+    needs: [discover-intent]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        needs.discover-intent.outputs.has-intent == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
@@ -68,6 +154,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           INTENT_ID: ${{ inputs.intent-id }}
+          DISCOVERED_INTENT_ID: ${{ needs.discover-intent.outputs.intent-id }}
           PR_NUMBER: ${{ inputs.pr-number }}
           DISPATCH_SHA: ${{ inputs.merge-sha }}
           DISPATCH_VERSION: ${{ inputs.version }}
@@ -86,10 +173,12 @@ jobs:
             HEAD_BRANCH=$(jq -r '.workflow_run.head_branch' "$GITHUB_EVENT_PATH")
             HEAD_REPOSITORY=$(jq -r '.workflow_run.head_repository.full_name' "$GITHUB_EVENT_PATH")
             SHA=$(jq -r '.workflow_run.head_sha' "$GITHUB_EVENT_PATH")
+            INTENT_ID="$DISCOVERED_INTENT_ID"
             [[ "$CONCLUSION" == success ]]
             [[ "$RUN_EVENT" == push ]]
             [[ "$HEAD_BRANCH" == main ]]
             [[ "$HEAD_REPOSITORY" == "$REPOSITORY" ]]
+            [[ "$INTENT_ID" =~ ^[1-9][0-9]*$ ]]
 
           else
             SHA="$DISPATCH_SHA"
@@ -122,24 +211,6 @@ jobs:
 
           if [[ "$EVENT_NAME" == workflow_run ]]; then
             [[ "$CI_RUN_ID" == "$(jq -r '.workflow_run.id' "$GITHUB_EVENT_PATH")" ]]
-          fi
-
-          if [[ "$EVENT_NAME" == workflow_run ]]; then
-            for attempt in {1..30}; do
-              gh api -H 'Accept: application/vnd.github+json' \
-                "repos/$REPOSITORY/commits/$SHA/check-runs?check_name=release-intent" \
-                > "$RUNNER_TEMP/check-runs.json"
-              COUNT=$(jq '[.check_runs[] | select(
-                .name == "release-intent" and
-                .conclusion == "success" and
-                .app.slug == "github-actions"
-              )] | length' "$RUNNER_TEMP/check-runs.json")
-              [[ "$COUNT" -le 1 ]]
-              [[ "$COUNT" == 1 ]] && break
-              sleep 10
-            done
-            [[ "$COUNT" == 1 ]]
-            INTENT_ID=$(jq -r '.check_runs[] | select(.name == "release-intent") | .id' "$RUNNER_TEMP/check-runs.json")
           fi
 
           gh api -H 'Accept: application/vnd.github+json' \

@@ -242,6 +242,29 @@ describe('release pull requests and exact release intent', () => {
 });
 
 describe('release coordinator trust and recovery', () => {
+  it('short-circuits ordinary main CI before requesting the release environment', () => {
+    const release = workflow('release.yml');
+    const discover = release.jobs?.['discover-intent'];
+    const discoverRun = jobSource('release.yml', 'discover-intent');
+    const authorize = release.jobs?.authorize;
+
+    expect(discover).toBeDefined();
+    expect(discover?.environment).toBeUndefined();
+    expect(discover?.permissions).toEqual({
+      actions: 'read',
+      checks: 'read',
+      contents: 'read',
+    });
+    expect(discoverRun).toContain('actions/workflows/release-intent.yml/runs');
+    expect(discoverRun).toContain('has-intent=false');
+    expect(discoverRun).toContain('check-runs?check_name=release-intent');
+
+    expect(authorize?.needs).toEqual(['discover-intent']);
+    expect(authorize?.if).toContain('always()');
+    expect(authorize?.if).toContain("needs.discover-intent.outputs.has-intent == 'true'");
+    expect(authorize?.environment).toBe('release');
+  });
+
   it('accepts only successful main push CI for the exact intent SHA or an approved exact dispatch', () => {
     const release = workflow('release.yml');
     expect(release.on).toMatchObject({
