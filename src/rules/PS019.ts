@@ -1,9 +1,9 @@
 /**
  * PS019 — POSIX_CAT: `cat` does not exist under cmd.exe (type differs).
  */
-
-import type { RuleModule } from './types';
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import { availabilityRule } from './util';
+import type { RuleModule } from './types';
 
 export const PS019: RuleModule = availabilityRule(
   {
@@ -14,17 +14,12 @@ export const PS019: RuleModule = availabilityRule(
     confidence: 'high',
     affectedTargets: ['cmd'],
     badExamples: ['cat config/base.json > config/local.json', 'cat CHANGELOG.md | head -5'],
-    goodExamples: [
-      'shx cat config/base.json',
-      "node -e \"process.stdout.write(require('fs').readFileSync('f'))\"",
-    ],
-    falsePositiveNotes:
-      'PowerShell has a cat alias, but the default Windows npm script shell is cmd.exe (type). Not reported for `shx cat …`.',
+    goodExamples: ['shx cat config/base.json', 'node -e "process.stdout.write(require(\'fs\').readFileSync(\'f\'))"'],
+    falsePositiveNotes: 'PowerShell has a cat alias, but the default Windows npm script shell is cmd.exe (type). Not reported for `shx cat …`.',
     fixSafety: 'conditional',
     provenance: [
       {
-        source:
-          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/type',
+        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/type',
         claim: 'cmd.exe uses type; cat is not recognized.',
       },
     ],
@@ -33,5 +28,6 @@ export const PS019: RuleModule = availabilityRule(
     names: new Set(['cat']),
     message: () => '`cat` is not available in native Windows npm scripts',
     fixSummary: 'use shx cat or Node fs',
+    fix: (cmd, ctx) => shxPrefixFix('PS019', cmd, ctx),
   },
 );

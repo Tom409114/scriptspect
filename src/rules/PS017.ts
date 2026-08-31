@@ -1,9 +1,9 @@
 /**
  * PS017 — POSIX_GREP: `grep` does not exist under cmd.exe.
  */
-
-import type { RuleModule } from './types';
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import { availabilityRule } from './util';
+import type { RuleModule } from './types';
 
 export const PS017: RuleModule = availabilityRule(
   {
@@ -19,8 +19,7 @@ export const PS017: RuleModule = availabilityRule(
     fixSafety: 'conditional',
     provenance: [
       {
-        source:
-          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/findstr',
+        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/findstr',
         claim: 'cmd.exe ships findstr, not grep.',
       },
     ],
@@ -29,5 +28,6 @@ export const PS017: RuleModule = availabilityRule(
     names: new Set(['grep']),
     message: () => '`grep` is not available in native Windows npm scripts (findstr differs)',
     fixSummary: 'use shx grep or a Node implementation',
+    fix: (cmd, ctx) => shxPrefixFix('PS017', cmd, ctx),
   },
 );

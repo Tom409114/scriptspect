@@ -1,9 +1,9 @@
 /**
  * PS018 — POSIX_SED: `sed` does not exist under cmd.exe.
  */
-
-import type { RuleModule } from './types';
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import { availabilityRule } from './util';
+import type { RuleModule } from './types';
 
 export const PS018: RuleModule = availabilityRule(
   {
@@ -19,8 +19,7 @@ export const PS018: RuleModule = availabilityRule(
     fixSafety: 'conditional',
     provenance: [
       {
-        source:
-          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
+        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
         claim: 'cmd.exe ships no sed equivalent.',
       },
     ],
@@ -29,5 +28,6 @@ export const PS018: RuleModule = availabilityRule(
     names: new Set(['sed']),
     message: () => '`sed` is not available in native Windows npm scripts',
     fixSummary: 'move the transformation into a Node script or use shx sed',
+    fix: (cmd, ctx) => shxPrefixFix('PS018', cmd, ctx),
   },
 );

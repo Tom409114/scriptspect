@@ -5,10 +5,9 @@
  * top rules). Annotations degrade to file + script name when a precise
  * JSON position cannot be mapped (spec §12.1).
  */
-
-import { appendFileSync } from 'node:fs';
-import type { AnalysisResult } from '../core/analyze';
 import type { Finding } from '../rules/types';
+import type { AnalysisResult } from '../core/analyze';
+import { appendFileSync } from 'node:fs';
 
 function annotationLevel(severity: Finding['severity']): 'error' | 'warning' | 'notice' {
   if (severity === 'error') return 'error';
@@ -18,19 +17,11 @@ function annotationLevel(severity: Finding['severity']): 'error' | 'warning' | '
 
 /** Percent-encode characters that break the annotation message format. */
 function escapeData(s: string): string {
-  return s
-    .replace(/[\r\n]/g, ' ')
-    .replace(/[%]/g, '%25')
-    .replace(/[:]/g, '%3A')
-    .replace(/[,]/g, '%2C');
+  return s.replace(/[\r\n]/g, ' ').replace(/[%]/g, '%25').replace(/[:]/g, '%3A').replace(/[,]/g, '%2C');
 }
 
 function escapeProperty(s: string): string {
-  return s
-    .replace(/[\r\n]/g, ' ')
-    .replace(/[%]/g, '%25')
-    .replace(/[:]/g, '%3A')
-    .replace(/[,]/g, '%2C');
+  return s.replace(/[\r\n]/g, ' ').replace(/[%]/g, '%25').replace(/[:]/g, '%3A').replace(/[,]/g, '%2C');
 }
 
 export function renderAnnotations(result: AnalysisResult): string {
@@ -52,9 +43,7 @@ export function renderSummary(result: AnalysisResult): string {
   const s = result.summary;
   const byRule = new Map<string, number>();
   for (const f of result.findings) byRule.set(f.ruleId, (byRule.get(f.ruleId) ?? 0) + 1);
-  const topRules = [...byRule.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 5);
+  const topRules = [...byRule.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5);
 
   const lines = [
     '## scriptspect',

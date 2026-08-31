@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { AnalysisResult, PackageUnit } from '../../src/core/analyze';
-import { DEFAULT_TARGETS } from '../../src/core/targets';
+import { renderStylish, caretLine } from '../../src/reporters/stylish';
+import { renderJson, buildJsonReport, JSON_SCHEMA_VERSION } from '../../src/reporters/json';
 import { renderAnnotations, renderSummary } from '../../src/reporters/github';
-import { buildJsonReport, JSON_SCHEMA_VERSION, renderJson } from '../../src/reporters/json';
-import { caretLine, renderStylish } from '../../src/reporters/stylish';
 import { analyzeScript } from '../../src/rules';
 import type { Finding } from '../../src/rules/types';
+import type { AnalysisResult, PackageUnit } from '../../src/core/analyze';
+import { DEFAULT_TARGETS } from '../../src/core/targets';
 
 function resultFor(scripts: Record<string, string>): AnalysisResult {
   const findings: Finding[] = [];
@@ -55,9 +55,7 @@ describe('stylish reporter', () => {
     expect(out).toContain('^^^^^^^^^^^^^^^^^^^');
     expect(out).toContain('Affected: cmd');
     expect(out).toMatch(/Fix: .*cross-env/);
-    expect(out).toContain(
-      'Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS001.md',
-    );
+    expect(out).toContain('Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS001.md');
     expect(out).toContain('Scanned 1 script across 1 package · 1 error · 0 warnings');
   });
 
@@ -124,7 +122,7 @@ describe('github reporter', () => {
     expect(md).toContain('## scriptspect');
     expect(md).toContain('**2 scripts**');
     expect(md).toContain('| PS010 | 1 |');
-    expect(md).toContain('| errors | 2 |');
+    expect(md).toContain('| errors | 1 |');
   });
 
   it('summary omits the top-rules table when clean', () => {

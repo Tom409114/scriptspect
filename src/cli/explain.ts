@@ -2,16 +2,13 @@
  * Offline `explain <ruleId>` renderer (spec §4.3): rule docs summary with
  * good/bad examples, targets, false-positive notes, fix safety, provenance.
  */
-
-import { DOCS_RULE_URL_BASE } from '../reporters/stylish';
 import type { RuleModule } from '../rules/types';
+import { DOCS_RULE_URL_BASE } from '../reporters/stylish';
 
 export function renderExplain(rule: RuleModule): string {
   const lines: string[] = [];
   lines.push(`${rule.id} · ${rule.title}`);
-  lines.push(
-    `${rule.severity} · ${rule.confidence} confidence · affects: ${rule.affectedTargets.join(', ')}`,
-  );
+  lines.push(`${rule.severity} · ${rule.confidence} confidence · affects: ${rule.affectedTargets.join(', ')}`);
   lines.push('');
   lines.push(rule.summary);
   lines.push('');

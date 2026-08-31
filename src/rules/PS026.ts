@@ -3,20 +3,10 @@
  * rarely exist on Windows.
  */
 import { makeFinding } from '../core/finding';
-import type { Finding, RuleContext, RuleModule } from './types';
 import { commandsOf } from './util';
+import type { Finding, RuleContext, RuleModule } from './types';
 
-const UNIX_PATH_PREFIXES = [
-  '/tmp',
-  '/usr',
-  '/var',
-  '/etc',
-  '/opt',
-  '/home',
-  '/bin',
-  '/sbin',
-  '/lib',
-];
+const UNIX_PATH_PREFIXES = ['/tmp', '/usr', '/var', '/etc', '/opt', '/home', '/bin', '/sbin', '/lib'];
 
 export const PS026: RuleModule = {
   id: 'PS026',
@@ -32,8 +22,7 @@ export const PS026: RuleModule = {
   fixSafety: 'manual',
   provenance: [
     {
-      source:
-        'https://learn.microsoft.com/en-us/windows/deployment/usmt/usmt-recognized-environment-variables',
+      source: 'https://learn.microsoft.com/en-us/windows/deployment/usmt/usmt-recognized-environment-variables',
       claim: 'Windows has no /tmp or /usr; equivalents live under %TEMP%, %ProgramFiles%.',
     },
   ],
@@ -42,7 +31,9 @@ export const PS026: RuleModule = {
     for (const cmd of commandsOf(ir)) {
       for (const tok of cmd.argv) {
         const value = tok.value;
-        const hit = UNIX_PATH_PREFIXES.find((p) => value === p || value.startsWith(`${p}/`));
+        const hit = UNIX_PATH_PREFIXES.find(
+          (p) => value === p || value.startsWith(`${p}/`),
+        );
         if (hit === undefined) continue;
         const finding = makeFinding(this, ctx, {
           message: `\`${value}\` assumes a Unix filesystem layout`,

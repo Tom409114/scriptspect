@@ -3,11 +3,10 @@
  * factory used by PS010–PS019. Each rule stays a standalone module with its
  * own metadata; only the mechanical traversal is shared.
  */
-
-import { makeFinding } from '../core/finding';
-import type { CommandNode, ScriptIr, ScriptNode } from '../parser/ir';
 import { commandName, walkCommands } from '../parser/ir';
-import type { Finding, RuleContext, RuleModule } from './types';
+import type { CommandNode, ScriptIr, ScriptNode } from '../parser/ir';
+import type { Finding, FixCandidate, RuleContext, RuleModule } from './types';
+import { makeFinding } from '../core/finding';
 
 /** Tools whose usage already implies the portability problem is handled. */
 export const PORTABILITY_TOOLS = new Set(['cross-env', 'cross-env-shell', 'shx', 'rimraf']);
@@ -48,6 +47,12 @@ export interface AvailabilityOptions {
   fixSummary: string;
   /** Extra guard; return false to skip this command. */
   matches?: (cmd: CommandNode) => boolean;
+  /**
+   * Build the fix candidate for this command. Return a replacement only when
+   * the replacement tool is already a dependency (spec §7.1); otherwise return
+   * a plan with `requiresDependency` so nothing is half-fixed.
+   */
+  fix?: (cmd: CommandNode, ctx: RuleContext) => FixCandidate;
 }
 
 /**
@@ -70,14 +75,14 @@ export function availabilityRule(
         if (options.matches && !options.matches(cmd)) continue;
         const first = cmd.argv[0];
         if (first === undefined) continue;
+        const fix =
+          options.fix !== undefined
+            ? options.fix(cmd, ctx)
+            : ({ ruleId: rule.id, safety: rule.fixSafety, description: options.fixSummary } as FixCandidate);
         const finding = makeFinding(rule, ctx, {
           message: options.message(cmd),
           span: first.span,
-          fix: {
-            ruleId: rule.id,
-            safety: rule.fixSafety,
-            description: options.fixSummary,
-          },
+          fix,
         });
         if (finding !== null) findings.push(finding);
       }
@@ -93,8 +98,5 @@ export function isCommand(cmd: CommandNode, name: string): boolean {
 
 /** Lowercased flag arguments (tokens starting with `-`) of a command. */
 export function flagsOf(cmd: CommandNode): string[] {
-  return cmd.argv
-    .slice(1)
-    .map((t) => t.value)
-    .filter((v) => v.startsWith('-'));
+  return cmd.argv.slice(1).map((t) => t.value).filter((v) => v.startsWith('-'));
 }

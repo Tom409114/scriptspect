@@ -3,8 +3,8 @@
  * cannot execute it.
  */
 import { makeFinding } from '../core/finding';
-import type { Finding, RuleContext, RuleModule } from './types';
 import { commandsOf } from './util';
+import type { Finding, RuleContext, RuleModule } from './types';
 
 export const PS020: RuleModule = {
   id: 'PS020',
@@ -20,23 +20,18 @@ export const PS020: RuleModule = {
   fixSafety: 'manual',
   provenance: [
     {
-      source:
-        'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_06_03',
+      source: 'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_06_03',
       claim: '$( ) command substitution is defined by POSIX shell.',
     },
     {
-      source:
-        'https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc772390(v=ws.11)',
+      source: 'https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc772390(v=ws.11)',
       claim: 'cmd.exe has no command substitution; it uses for /f with delayed expansion at best.',
     },
   ],
   check(ir, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
     for (const cmd of commandsOf(ir)) {
-      const tokens = [
-        ...cmd.argv,
-        ...cmd.redirects.flatMap((r) => (r.target !== null ? [r.target] : [])),
-      ];
+      const tokens = [...cmd.argv, ...cmd.redirects.flatMap((r) => (r.target !== null ? [r.target] : []))];
       for (const tok of tokens) {
         for (const exp of tok.expansions) {
           if (exp.kind !== 'command') continue;
@@ -46,8 +41,7 @@ export const PS020: RuleModule = {
             fix: {
               ruleId: this.id,
               safety: 'manual',
-              description:
-                'compute the value in a Node helper or run the step inside an explicit shell',
+              description: 'compute the value in a Node helper or run the step inside an explicit shell',
             },
           });
           if (finding !== null) findings.push(finding);

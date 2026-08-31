@@ -7,20 +7,23 @@
  * `runCli` returns the exit code and writes through the injected sinks so
  * integration tests never need to spawn a process.
  */
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import cac from 'cac';
-import { ConfigError, loadConfig } from '../config/load';
-import type { AnalysisResult } from '../core/analyze';
-import { analyze, resolveRoot } from '../core/analyze';
 import { version } from '../core/version';
-import { renderAnnotations, writeJobSummary } from '../reporters/github';
-import { renderJson } from '../reporters/json';
+import { analyze, resolveRoot } from '../core/analyze';
+import type { AnalysisResult } from '../core/analyze';
+import { loadConfig, ConfigError } from '../config/load';
+import { normalizeOptions, SEVERITY_ORDER } from './options';
+import type { CliOptions } from './options';
 import { renderStylish } from '../reporters/stylish';
+import { renderJson } from '../reporters/json';
+import { renderAnnotations, writeJobSummary } from '../reporters/github';
+import { renderExplain } from './explain';
 import { getRule } from '../rules';
 import type { Finding } from '../rules/types';
-import { renderExplain } from './explain';
-import type { CliOptions } from './options';
-import { normalizeOptions, SEVERITY_ORDER } from './options';
+import { planFixes, rewritesByPackage } from '../fixers/fix-plan';
+import { renderPatch } from '../fixers/diff';
+import { applyRewritesToFile } from '../fixers/package-json';
 
 export interface CliIo {
   out: (text: string) => void;
@@ -44,11 +47,7 @@ function exitCodeFor(result: AnalysisResult, options: CliOptions): number {
   return 0;
 }
 
-async function runCheck(
-  pathArg: string | undefined,
-  raw: Record<string, unknown>,
-  io: CliIo,
-): Promise<number> {
+async function runCheck(pathArg: string | undefined, raw: Record<string, unknown>, io: CliIo): Promise<number> {
   let options: CliOptions;
   try {
     options = normalizeOptions(raw);
@@ -61,6 +60,32 @@ async function runCheck(
       options.targets !== undefined ? { ...config, targets: options.targets } : config;
 
     const result = analyze(root, { config: effectiveConfig, onlyRules: options.rules });
+
+    // --fix / --fix-dry-run: plan replacements, write (or just print) them,
+    // then re-analyze so the report reflects post-fix reality.
+    if (options.fix || options.fixDryRun) {
+      const plans = planFixes(result);
+      if (options.fixDryRun) {
+        for (const plan of plans) {
+          io.out(renderPatch(plan.packagePath, plan.scriptName, plan.before, plan.after));
+        }
+        if (plans.length === 0) io.err('scriptspect: no safe fixes available (nothing to dry-run)');
+      } else {
+        const rewrites = rewritesByPackage(plans);
+        for (const [packagePath, list] of rewrites) {
+          const file = join(root, packagePath);
+          const next = applyRewritesToFile(file, list, true);
+          if (next !== null) {
+            io.err(`scriptspect: fixed ${list.length} script(s) in ${packagePath}`);
+          }
+        }
+        if (rewrites.size === 0) io.err('scriptspect: no safe fixes available (nothing changed)');
+        const rerun = analyze(root, { config: effectiveConfig, onlyRules: options.rules });
+        result.findings = rerun.findings;
+        result.summary = rerun.summary;
+      }
+    }
+
     const visible = applySeverityFilter(result.findings, options.severity);
     // Recount so the summary reflects what was actually reported.
     const finalResult: AnalysisResult = {
@@ -123,18 +148,20 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
   cli.option('--no-color', 'disable ANSI colors');
   cli.option('--max-warnings <n>', 'exit 1 when warnings exceed this number');
   cli.option('--config <path>', 'explicit config file path');
+  cli.option('--fix', 'apply safe fixes (never installs dependencies or touches lockfiles)');
+  cli.option('--fix-dry-run', 'print the fixes --fix would apply, without writing');
 
   const checkAction = (path: string | undefined, raw: Record<string, unknown>): Promise<number> =>
     runCheck(path, raw, io);
 
   let outcome: Promise<number> | undefined;
 
-  cli
-    .command('[path]', 'analyze package.json scripts for cross-platform portability')
-    .action((path: string | undefined, raw) => {
-      outcome = checkAction(path, raw);
+  cli.command('[path]', 'analyze package.json scripts for cross-platform portability').action(
+    (args: CheckArgs, raw) => {
+      outcome = checkAction(args, raw);
       return outcome;
-    });
+    },
+  );
 
   const check = cli.command('check [path]', 'analyze (explicit form of the default command)');
   check.action((path: string | undefined, raw) => {
@@ -142,8 +169,8 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
     return outcome;
   });
 
-  cli.command('explain <ruleId>', 'show rule documentation offline').action((ruleId: string) => {
-    outcome = runExplain(ruleId, io);
+  cli.command('explain <ruleId>', 'show rule documentation offline').action((args: { ruleId: string }) => {
+    outcome = runExplain(args.ruleId, io);
     return outcome;
   });
 

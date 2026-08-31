@@ -2,9 +2,8 @@
  * PS015 — POSIX_CHMOD: `chmod` has no equivalent permission semantics on
  * Windows (neither cmd.exe nor PowerShell).
  */
-
-import type { RuleModule } from './types';
 import { availabilityRule } from './util';
+import type { RuleModule } from './types';
 
 export const PS015: RuleModule = availabilityRule(
   {
@@ -21,18 +20,14 @@ export const PS015: RuleModule = availabilityRule(
     fixSafety: 'manual',
     provenance: [
       {
-        source:
-          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/icacls',
-        claim:
-          'Windows ACLs (icacls) differ fundamentally from POSIX mode bits; there is no chmod.',
+        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/icacls',
+        claim: 'Windows ACLs (icacls) differ fundamentally from POSIX mode bits; there is no chmod.',
       },
     ],
   },
   {
     names: new Set(['chmod']),
-    message: (cmd) =>
-      `\`${cmd.argv[0]?.raw ?? 'chmod'}\` has no equivalent permission semantics on Windows`,
-    fixSummary:
-      'avoid chmod in lifecycle scripts; set executability in packaging (e.g. npm bin) instead',
+    message: (cmd) => `\`${cmd.argv[0]?.raw ?? 'chmod'}\` has no equivalent permission semantics on Windows`,
+    fixSummary: 'avoid chmod in lifecycle scripts; set executability in packaging (e.g. npm bin) instead',
   },
 );

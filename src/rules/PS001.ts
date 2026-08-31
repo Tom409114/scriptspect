@@ -2,11 +2,10 @@
  * PS001 — POSIX_INLINE_ENV: `FOO=bar command` assignments are POSIX-shell
  * syntax with no equivalent in cmd.exe.
  */
-
-import { makeFinding } from '../core/finding';
 import { commandName } from '../parser/ir';
-import type { Finding, RuleContext, RuleModule } from './types';
+import { makeFinding } from '../core/finding';
 import { commandsOf, PORTABILITY_TOOLS } from './util';
+import type { Finding, RuleContext, RuleModule } from './types';
 
 export const PS001: RuleModule = {
   id: 'PS001',
@@ -15,11 +14,7 @@ export const PS001: RuleModule = {
   severity: 'error',
   confidence: 'high',
   affectedTargets: ['cmd'],
-  badExamples: [
-    'NODE_ENV=production vite build',
-    'A=1 B=2 node app.js',
-    'GIT_AUTHOR_NAME=x npm publish',
-  ],
+  badExamples: ['NODE_ENV=production vite build', 'A=1 B=2 node app.js', 'GIT_AUTHOR_NAME=x npm publish'],
   goodExamples: ['cross-env NODE_ENV=production vite build', 'node app.js', 'vite build'],
   falsePositiveNotes:
     'Not reported when the command is already cross-env/cross-env-shell (the portability layer exists), or inside explicit shell wrappers.',
@@ -30,10 +25,8 @@ export const PS001: RuleModule = {
       claim: 'Assignment prefixes are a POSIX shell feature that applies env vars to one command.',
     },
     {
-      source:
-        'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
-      claim:
-        'cmd.exe has no per-command assignment; `set` persists in the session and `FOO=bar cmd` would try to run a program literally named FOO=bar.',
+      source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
+      claim: 'cmd.exe has no per-command assignment; `set` persists in the session and `FOO=bar cmd` would try to run a program literally named FOO=bar.',
     },
   ],
   check(ir, ctx: RuleContext): Finding[] {

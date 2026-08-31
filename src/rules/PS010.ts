@@ -2,9 +2,9 @@
  * PS010 — POSIX_RM: `rm` (and `rm -rf`) does not exist in native Windows
  * npm scripts (cmd.exe).
  */
-
-import type { RuleModule } from './types';
+import { rimrafFix, shxPrefixFix } from './fix-builders';
 import { availabilityRule } from './util';
+import type { RuleModule } from './types';
 
 export const PS010: RuleModule = availabilityRule(
   {
@@ -15,18 +15,13 @@ export const PS010: RuleModule = availabilityRule(
     confidence: 'high',
     affectedTargets: ['cmd'],
     badExamples: ['rm -rf dist', 'rm -r build', 'rm temp.log'],
-    goodExamples: [
-      'rimraf dist',
-      'shx rm -rf dist',
-      "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    ],
+    goodExamples: ['rimraf dist', 'shx rm -rf dist', 'node -e "require(\'fs\').rmSync(\'dist\',{recursive:true,force:true})"'],
     falsePositiveNotes:
       'Not reported for `rimraf …` or `shx rm …` (command position is the tool), nor for rm inside strings or shell-wrapper payloads.',
     fixSafety: 'conditional',
     provenance: [
       {
-        source:
-          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
+        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
         claim: 'cmd.exe has del/rmdir, not rm; `rm -rf dist` fails with "rm is not recognized".',
       },
       {
@@ -40,5 +35,6 @@ export const PS010: RuleModule = availabilityRule(
     message: (cmd) =>
       `\`${cmd.raw.split(' ').slice(0, 2).join(' ')}\` is not available in native Windows npm scripts`,
     fixSummary: 'use rimraf (devDependency), shx rm, or Node fs.rm',
+    fix: (cmd, ctx) => rimrafFix(cmd, ctx),
   },
 );

@@ -1,9 +1,8 @@
 /**
  * PS014 — POSIX_TOUCH: `touch` does not exist under cmd.exe.
  */
-
-import type { RuleModule } from './types';
 import { availabilityRule } from './util';
+import type { RuleModule } from './types';
 
 export const PS014: RuleModule = availabilityRule(
   {
@@ -19,8 +18,7 @@ export const PS014: RuleModule = availabilityRule(
     fixSafety: 'manual',
     provenance: [
       {
-        source:
-          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
+        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/windows-commands',
         claim: 'cmd.exe has no touch; typical workarounds are `type nul > file` or copy nul.',
       },
     ],
