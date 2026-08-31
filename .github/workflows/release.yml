@@ -20,6 +20,9 @@ jobs:
         id: release
         with:
           release-type: node
+          # First release is v0.1.0 (docs/roadmap, README support matrix), not
+          # release-please's 1.0.0 default for an untagged 0.0.0 baseline.
+          initial-version: 0.1.0
 
   publish-npm:
     name: Publish to npm (trusted publishing)
