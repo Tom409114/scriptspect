@@ -45,8 +45,8 @@ export function discoverPackages(root: string): DiscoveryResult {
   const rootUnit = packageUnit(rootReal, rootReal, 'package.json');
 
   const globs = new Set<string>();
-  globs.add(...npmWorkspaceGlobs(rootUnit.manifest.workspaces));
-  globs.add(...pnpmWorkspaceGlobs(join(rootReal, 'pnpm-workspace.yaml')));
+  for (const g of npmWorkspaceGlobs(rootUnit.manifest.workspaces)) globs.add(g);
+  for (const g of pnpmWorkspaceGlobs(join(rootReal, 'pnpm-workspace.yaml'))) globs.add(g);
 
   const units: PackageUnit[] = [rootUnit];
   const seen = new Set<string>([realpathOrSelf(join(rootReal, 'package.json'))]);
