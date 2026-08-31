@@ -173,12 +173,10 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
     return outcome;
   });
 
-  cli
-    .command('explain <ruleId>', 'show rule documentation offline')
-    .action((ruleId: string) => {
-      outcome = runExplain(ruleId, io);
-      return outcome;
-    });
+  cli.command('explain <ruleId>', 'show rule documentation offline').action((ruleId: string) => {
+    outcome = runExplain(ruleId, io);
+    return outcome;
+  });
 
   try {
     cli.parse(['node', 'scriptspect.mjs', ...argv], { run: true });
