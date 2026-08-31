@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeScript } from '../../src/rules';
-import { applyToScript } from '../../src/fixers/apply';
-import { planFixes } from '../../src/fixers/fix-plan';
 import type { AnalysisResult, PackageUnit } from '../../src/core/analyze';
 import { DEFAULT_TARGETS } from '../../src/core/targets';
+import { applyToScript } from '../../src/fixers/apply';
+import { planFixes } from '../../src/fixers/fix-plan';
+import { analyzeScript } from '../../src/rules';
 
 function fixOnce(script: string, deps: string[]): string {
   const findings = analyzeScript(script, {

@@ -77,7 +77,11 @@ export function locateScriptSpans(text: string): Map<string, ScriptValueSpan> {
     const valueRaw = readString();
     if (valueRaw === null) break;
     if (key !== null) {
-      spans.set(key, { quoteStart: valueStart, quoteEnd: valueStart + valueRaw.length, value: jsonDecode(valueRaw) ?? '' });
+      spans.set(key, {
+        quoteStart: valueStart,
+        quoteEnd: valueStart + valueRaw.length,
+        value: jsonDecode(valueRaw) ?? '',
+      });
     }
     void keyStart;
     skipWs();
@@ -107,7 +111,8 @@ export function rewriteScripts(text: string, rewrites: ScriptRewrite[]): string 
   let out = text;
   // Apply right-to-left so offsets stay valid.
   const ordered = [...rewrites].sort(
-    (a, b) => (spans.get(b.scriptName)?.quoteStart ?? 0) - (spans.get(a.scriptName)?.quoteStart ?? 0),
+    (a, b) =>
+      (spans.get(b.scriptName)?.quoteStart ?? 0) - (spans.get(a.scriptName)?.quoteStart ?? 0),
   );
   for (const rewrite of ordered) {
     const span = spans.get(rewrite.scriptName);
@@ -126,7 +131,11 @@ export function writeFileAtomic(file: string, content: string): void {
 }
 
 /** Read, rewrite, and (optionally) write a package.json. Returns new text or null. */
-export function applyRewritesToFile(file: string, rewrites: ScriptRewrite[], write: boolean): string | null {
+export function applyRewritesToFile(
+  file: string,
+  rewrites: ScriptRewrite[],
+  write: boolean,
+): string | null {
   const text = readFileSync(file, 'utf8');
   const next = rewriteScripts(text, rewrites);
   if (next !== null && write) writeFileAtomic(file, next);

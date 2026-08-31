@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeScript } from '../../src/rules';
-import { applyToScript, applicableFixes } from '../../src/fixers/apply';
-import type { Finding, RuleContext } from '../../src/rules/types';
 import { DEFAULT_TARGETS } from '../../src/core/targets';
+import { applicableFixes, applyToScript } from '../../src/fixers/apply';
+import { analyzeScript } from '../../src/rules';
+import type { Finding, RuleContext } from '../../src/rules/types';
 
 function run(script: string, deps: string[] = []): Finding[] {
   const ctx: RuleContext = {

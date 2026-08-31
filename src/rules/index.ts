@@ -3,10 +3,10 @@
  * each rule, applies config severity overrides, filters by active targets
  * and (optionally) by rule id, and returns deterministic sorted findings.
  */
-import { parseScript } from '../parser/parse';
+
 import { sortFindings } from '../core/finding';
-import type { Finding, RuleContext, RuleModule, Severity } from './types';
 import type { ShellTarget } from '../parser/ir';
+import { parseScript } from '../parser/parse';
 import { PS001 } from './PS001';
 import { PS002 } from './PS002';
 import { PS003 } from './PS003';
@@ -33,6 +33,7 @@ import { PS032 } from './PS032';
 import { PS040 } from './PS040';
 import { PS041 } from './PS041';
 import { PS050 } from './PS050';
+import type { Finding, RuleContext, RuleModule, Severity } from './types';
 
 export const RULES: readonly RuleModule[] = [
   PS001,
@@ -75,7 +76,11 @@ export interface RunOptions {
 }
 
 /** Analyze one script string and return findings for the active targets. */
-export function analyzeScript(script: string, ctx: RuleContext, options: RunOptions = {}): Finding[] {
+export function analyzeScript(
+  script: string,
+  ctx: RuleContext,
+  options: RunOptions = {},
+): Finding[] {
   const ir = parseScript(script);
   const findings: Finding[] = [];
   for (const rule of RULES) {
@@ -88,5 +93,4 @@ export function analyzeScript(script: string, ctx: RuleContext, options: RunOpti
   return sortFindings(findings);
 }
 
-export type { Finding, RuleContext, RuleModule, Severity };
-export type { ShellTarget };
+export type { Finding, RuleContext, RuleModule, Severity, ShellTarget };

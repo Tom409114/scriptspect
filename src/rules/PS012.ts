@@ -2,8 +2,8 @@
  * PS012 — POSIX_MV: `mv` does not exist under cmd.exe.
  */
 import { rimrafFix, shxPrefixFix } from './fix-builders';
-import { availabilityRule } from './util';
 import type { RuleModule } from './types';
+import { availabilityRule } from './util';
 
 export const PS012: RuleModule = availabilityRule(
   {
@@ -14,12 +14,13 @@ export const PS012: RuleModule = availabilityRule(
     confidence: 'high',
     affectedTargets: ['cmd'],
     badExamples: ['mv dist build', 'mv old.json new.json'],
-    goodExamples: ['shx mv dist build', 'node -e "require(\'fs\').renameSync(\'a\',\'b\')"'],
+    goodExamples: ['shx mv dist build', "node -e \"require('fs').renameSync('a','b')\""],
     falsePositiveNotes: 'Not reported for `shx mv …` or mv inside strings/wrapper payloads.',
     fixSafety: 'conditional',
     provenance: [
       {
-        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/move',
+        source:
+          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/move',
         claim: 'cmd.exe uses move; `mv` is not recognized.',
       },
     ],

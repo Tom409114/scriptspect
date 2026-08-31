@@ -3,9 +3,9 @@
  * not declared as a dependency (or exposed by a workspace package).
  */
 import { makeFinding } from '../core/finding';
-import { commandsOf } from './util';
 import { KNOWN_TOOLS, SYSTEM_AND_TOOLCHAIN } from './known-tools';
 import type { Finding, RuleContext, RuleModule } from './types';
+import { commandsOf } from './util';
 
 export const PS040: RuleModule = {
   id: 'PS040',
@@ -22,7 +22,8 @@ export const PS040: RuleModule = {
   provenance: [
     {
       source: 'https://docs.npmjs.com/cli/v10/using-npm/scripts',
-      claim: 'npm adds node_modules/.bin to PATH for script execution; an undeclared tool is not there.',
+      claim:
+        'npm adds node_modules/.bin to PATH for script execution; an undeclared tool is not there.',
     },
     {
       source: 'https://pnpm.io/workspaces',
@@ -39,9 +40,7 @@ export const PS040: RuleModule = {
       if (pkg === undefined) continue;
       if (SYSTEM_AND_TOOLCHAIN.has(name)) continue;
       const hasIt =
-        ctx.dependencies.has(pkg) ||
-        ctx.dependencies.has(name) ||
-        ctx.workspaceBins.has(name);
+        ctx.dependencies.has(pkg) || ctx.dependencies.has(name) || ctx.workspaceBins.has(name);
       if (hasIt) continue;
       const finding = makeFinding(this, ctx, {
         message: `\`${name}\` is not declared as a dependency (provided by \`${pkg}\`)`,

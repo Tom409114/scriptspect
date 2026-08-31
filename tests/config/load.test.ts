@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 import { ConfigError, isIgnored, loadConfig, parseConfig } from '../../src/config/load';
 import { globMatch } from '../../src/config/match';
 
@@ -106,7 +106,9 @@ describe('ignore-all protection (spec §9)', () => {
 
   it('rejects empty key arrays', () => {
     expect(() => parseConfig({ ignore: [{ rules: [] }] }, 'test')).toThrow(ConfigError);
-    expect(() => parseConfig({ ignore: [{ scripts: [], rules: ['PS010'] }] }, 'test')).toThrow(ConfigError);
+    expect(() => parseConfig({ ignore: [{ scripts: [], rules: ['PS010'] }] }, 'test')).toThrow(
+      ConfigError,
+    );
   });
 });
 
@@ -125,7 +127,10 @@ describe('loadConfig discovery', () => {
   it('falls back to scriptspect.config.json', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
-    writeFileSync(join(dir, 'scriptspect.config.json'), JSON.stringify({ targets: ['powershell'] }));
+    writeFileSync(
+      join(dir, 'scriptspect.config.json'),
+      JSON.stringify({ targets: ['powershell'] }),
+    );
     const { config, source } = loadConfig(dir);
     expect(config.targets).toEqual(['powershell']);
     expect(source).toContain('scriptspect.config.json');
@@ -133,7 +138,10 @@ describe('loadConfig discovery', () => {
 
   it('explicit --config path wins', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ss-cfg-'));
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', scriptspect: { targets: ['cmd'] } }));
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'x', scriptspect: { targets: ['cmd'] } }),
+    );
     const file = join(dir, 'custom.json');
     writeFileSync(file, JSON.stringify({ targets: ['posix-sh'] }));
     const { config } = loadConfig(dir, file);

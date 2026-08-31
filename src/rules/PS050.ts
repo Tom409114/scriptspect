@@ -4,8 +4,8 @@
  * fine on both and never reported.
  */
 import { makeFinding } from '../core/finding';
-import { collectSequenceOps } from './util';
 import type { Finding, RuleContext, RuleModule } from './types';
+import { collectSequenceOps } from './util';
 
 export const PS050: RuleModule = {
   id: 'PS050',
@@ -21,12 +21,15 @@ export const PS050: RuleModule = {
   fixSafety: 'manual',
   provenance: [
     {
-      source: 'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_09_05',
+      source:
+        'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_09_05',
       claim: 'POSIX `;` sequences commands and single `&` runs asynchronously.',
     },
     {
-      source: 'https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc772390(v=ws.11)',
-      claim: 'cmd.exe uses `&` to sequence and has no `;` separator (`;` is a token separator in some contexts, not a command separator).',
+      source:
+        'https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2012-r2-and-2012/cc772390(v=ws.11)',
+      claim:
+        'cmd.exe uses `&` to sequence and has no `;` separator (`;` is a token separator in some contexts, not a command separator).',
     },
   ],
   check(ir, ctx: RuleContext): Finding[] {
@@ -34,7 +37,8 @@ export const PS050: RuleModule = {
     for (const { op, span } of collectSequenceOps(ir.root)) {
       if (op === ';') {
         const finding = makeFinding(this, ctx, {
-          message: '`;` separates commands in POSIX sh but not in cmd.exe (use `&&` or a runner like run-s)',
+          message:
+            '`;` separates commands in POSIX sh but not in cmd.exe (use `&&` or a runner like run-s)',
           span,
           affectedTargets: ['cmd'],
           fix: { ruleId: this.id, safety: 'manual', description: 'replace with && or npm-run-all' },
@@ -42,10 +46,15 @@ export const PS050: RuleModule = {
         if (finding !== null) findings.push(finding);
       } else if (op === '&') {
         const finding = makeFinding(this, ctx, {
-          message: 'single `&` backgrounds a command in POSIX sh but sequences in cmd.exe — semantics differ',
+          message:
+            'single `&` backgrounds a command in POSIX sh but sequences in cmd.exe — semantics differ',
           span,
           affectedTargets: ['posix-sh', 'cmd'],
-          fix: { ruleId: this.id, safety: 'manual', description: 'use && for sequencing or a task runner' },
+          fix: {
+            ruleId: this.id,
+            safety: 'manual',
+            description: 'use && for sequencing or a task runner',
+          },
         });
         if (finding !== null) findings.push(finding);
       }

@@ -3,8 +3,8 @@
  * script to Windows artifacts.
  */
 import { makeFinding } from '../core/finding';
-import { commandsOf } from './util';
 import type { Finding, RuleContext, RuleModule } from './types';
+import { commandsOf } from './util';
 
 const EXE_RE = /\.(bat|cmd|exe|ps1)$/i;
 
@@ -23,7 +23,8 @@ export const PS041: RuleModule = {
   provenance: [
     {
       source: 'https://en.wikipedia.org/wiki/Batch_file',
-      claim: '.bat/.cmd/.exe are Windows executable formats; POSIX systems cannot run them directly.',
+      claim:
+        '.bat/.cmd/.exe are Windows executable formats; POSIX systems cannot run them directly.',
     },
   ],
   check(ir, ctx: RuleContext): Finding[] {
@@ -39,7 +40,7 @@ export const PS041: RuleModule = {
         fix: {
           ruleId: this.id,
           safety: 'manual',
-          description: 'use the package\'s cross-platform bin or a Node wrapper',
+          description: "use the package's cross-platform bin or a Node wrapper",
         },
       });
       if (finding !== null) findings.push(finding);

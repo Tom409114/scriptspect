@@ -1,8 +1,9 @@
 /**
  * PS021 — POSIX_EXPORT: `export` is a POSIX shell builtin; cmd.exe uses `set`.
  */
-import { availabilityRule } from './util';
+
 import type { RuleModule } from './types';
+import { availabilityRule } from './util';
 
 export const PS021: RuleModule = availabilityRule(
   {
@@ -22,7 +23,8 @@ export const PS021: RuleModule = availabilityRule(
         claim: 'export marks variables for the environment — a POSIX builtin.',
       },
       {
-        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
+        source:
+          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
         claim: 'cmd.exe uses `set` to define session variables; `export` is not recognized.',
       },
     ],

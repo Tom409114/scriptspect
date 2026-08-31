@@ -6,10 +6,10 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Severity } from '../rules/types';
-import type { ShellTarget } from '../parser/ir';
 import { ALL_TARGETS, DEFAULT_TARGETS } from '../core/targets';
+import type { ShellTarget } from '../parser/ir';
 import { getRule } from '../rules';
+import type { Severity } from '../rules/types';
 import { globMatch } from './match';
 
 export interface IgnoreEntry {
@@ -94,8 +94,14 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
       for (const key of ['packages', 'scripts', 'rules'] as const) {
         const value = e[key];
         if (value === undefined) continue;
-        if (!Array.isArray(value) || value.length === 0 || value.some((v) => typeof v !== 'string')) {
-          throw new ConfigError(`${origin}: ignore[${i}].${key} must be a non-empty array of strings`);
+        if (
+          !Array.isArray(value) ||
+          value.length === 0 ||
+          value.some((v) => typeof v !== 'string')
+        ) {
+          throw new ConfigError(
+            `${origin}: ignore[${i}].${key} must be a non-empty array of strings`,
+          );
         }
         if (key === 'rules') {
           for (const ruleId of value as string[]) {
@@ -125,7 +131,10 @@ export function parseConfig(raw: unknown, origin: string): ScriptspectConfig {
 }
 
 /** Load config for a project root (or an explicit `--config` path). */
-export function loadConfig(root: string, explicitPath?: string): { config: ScriptspectConfig; source: string } {
+export function loadConfig(
+  root: string,
+  explicitPath?: string,
+): { config: ScriptspectConfig; source: string } {
   const readJson = (file: string): unknown => {
     try {
       return JSON.parse(readFileSync(file, 'utf8'));
@@ -144,7 +153,10 @@ export function loadConfig(root: string, explicitPath?: string): { config: Scrip
     const pkg = readJson(pkgFile) as Record<string, unknown>;
     const field = pkg[PACKAGE_FIELD];
     if (field !== undefined) {
-      return { config: parseConfig(field, `${pkgFile} (field "${PACKAGE_FIELD}")`), source: pkgFile };
+      return {
+        config: parseConfig(field, `${pkgFile} (field "${PACKAGE_FIELD}")`),
+        source: pkgFile,
+      };
     }
   } catch (err) {
     if (err instanceof ConfigError) throw err;
@@ -157,7 +169,10 @@ export function loadConfig(root: string, explicitPath?: string): { config: Scrip
     return { config: parseConfig(readJson(file), file), source: file };
   }
 
-  return { config: { targets: DEFAULT_TARGETS, severity: new Map(), ignore: [] }, source: 'defaults' };
+  return {
+    config: { targets: DEFAULT_TARGETS, severity: new Map(), ignore: [] },
+    source: 'defaults',
+  };
 }
 
 /** True when a finding is suppressed by an ignore entry (all keys must match). */

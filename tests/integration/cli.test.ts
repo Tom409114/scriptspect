@@ -2,12 +2,13 @@
  * CLI integration tests through runCli with on-disk fixture projects in a
  * temp directory (exit codes 0/1/2, formats, config, path, filters).
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runCli } from '../../src/cli/index';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CliIo } from '../../src/cli/index';
+import { runCli } from '../../src/cli/index';
 
 let dir: string;
 let outLines: string[];
@@ -18,7 +19,10 @@ const io: CliIo = {
 };
 
 function project(scripts: Record<string, string>, extra: Record<string, unknown> = {}): string {
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fixture', scripts, ...extra }, null, 2));
+  writeFileSync(
+    join(dir, 'package.json'),
+    JSON.stringify({ name: 'fixture', scripts, ...extra }, null, 2),
+  );
   return dir;
 }
 
@@ -165,7 +169,12 @@ describe('CLI: formats', () => {
   it('config file is honored (severity override + ignore)', async () => {
     project(
       { a: 'rm -rf dist', b: 'chmod +x f' },
-      { scriptspect: { severity: { PS015: 'advisory' }, ignore: [{ scripts: ['a'], rules: ['PS010'] }] } },
+      {
+        scriptspect: {
+          severity: { PS015: 'advisory' },
+          ignore: [{ scripts: ['a'], rules: ['PS010'] }],
+        },
+      },
     );
     const code = await runCli([dir, '--format', 'json'], io);
     const parsed = JSON.parse(outLines.join('\n'));

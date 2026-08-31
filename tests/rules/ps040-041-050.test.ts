@@ -10,8 +10,12 @@ describe('PS040 MISSING_LOCAL_BIN', () => {
 
   it('negative: tool is a dependency', () => {
     expect(only(run('vite build', { dependencies: new Set(['vite']) }), 'PS040')).toEqual([]);
-    expect(only(run('tsc --noEmit', { dependencies: new Set(['typescript']) }), 'PS040')).toEqual([]);
-    expect(only(run('biome check .', { dependencies: new Set(['@biomejs/biome']) }), 'PS040')).toEqual([]);
+    expect(only(run('tsc --noEmit', { dependencies: new Set(['typescript']) }), 'PS040')).toEqual(
+      [],
+    );
+    expect(
+      only(run('biome check .', { dependencies: new Set(['@biomejs/biome']) }), 'PS040'),
+    ).toEqual([]);
   });
 
   it('negative: workspace bins count as present', () => {

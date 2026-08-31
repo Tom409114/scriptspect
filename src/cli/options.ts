@@ -2,8 +2,9 @@
  * CLI option normalization and validation. Invalid values are tool errors
  * (exit code 2), not findings.
  */
-import type { ShellTarget } from '../parser/ir';
+
 import { ALL_TARGETS } from '../core/targets';
+import type { ShellTarget } from '../parser/ir';
 import { getRule } from '../rules';
 
 export type Format = 'stylish' | 'json' | 'github';
@@ -39,7 +40,9 @@ export function normalizeOptions(raw: Record<string, unknown>): CliOptions {
 
   const severity = typeof raw.severity === 'string' ? raw.severity : 'advisory';
   if (severity !== 'error' && severity !== 'warn' && severity !== 'advisory') {
-    throw new CliOptionError(`invalid --severity "${severity}" (expected error, warn, or advisory)`);
+    throw new CliOptionError(
+      `invalid --severity "${severity}" (expected error, warn, or advisory)`,
+    );
   }
 
   let targets: ShellTarget[] | undefined;
@@ -49,7 +52,9 @@ export function normalizeOptions(raw: Record<string, unknown>): CliOptions {
       const t = part.trim();
       if (t === '') continue;
       if (!ALL_TARGETS.includes(t as ShellTarget)) {
-        throw new CliOptionError(`invalid --target "${t}" (expected one of ${ALL_TARGETS.join(', ')})`);
+        throw new CliOptionError(
+          `invalid --target "${t}" (expected one of ${ALL_TARGETS.join(', ')})`,
+        );
       }
       if (!targets.includes(t as ShellTarget)) targets.push(t as ShellTarget);
     }
@@ -74,7 +79,9 @@ export function normalizeOptions(raw: Record<string, unknown>): CliOptions {
   if (raw.maxWarnings !== undefined) {
     const n = Number(raw.maxWarnings);
     if (!Number.isInteger(n) || n < 0) {
-      throw new CliOptionError(`invalid --max-warnings "${String(raw.maxWarnings)}" (expected a non-negative integer)`);
+      throw new CliOptionError(
+        `invalid --max-warnings "${String(raw.maxWarnings)}" (expected a non-negative integer)`,
+      );
     }
     maxWarnings = n;
   }

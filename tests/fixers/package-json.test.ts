@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyRewritesToFile, locateScriptSpans, rewriteScripts } from '../../src/fixers/package-json';
+import { describe, expect, it } from 'vitest';
+import {
+  applyRewritesToFile,
+  locateScriptSpans,
+  rewriteScripts,
+} from '../../src/fixers/package-json';
 
 const PKG_2SPACE = `{
   "name": "demo",
@@ -66,7 +70,9 @@ describe('rewriteScripts preserves formatting', () => {
   });
 
   it('returns null when nothing changes', () => {
-    expect(rewriteScripts(PKG_2SPACE, [{ scriptName: 'clean', newValue: 'rm -rf dist' }])).toBeNull();
+    expect(
+      rewriteScripts(PKG_2SPACE, [{ scriptName: 'clean', newValue: 'rm -rf dist' }]),
+    ).toBeNull();
     expect(rewriteScripts(PKG_2SPACE, [])).toBeNull();
   });
 
@@ -86,7 +92,11 @@ describe('applyRewritesToFile', () => {
     try {
       const file = join(dir, 'package.json');
       writeFileSync(file, PKG_2SPACE);
-      const dry = applyRewritesToFile(file, [{ scriptName: 'clean', newValue: 'rimraf dist' }], false);
+      const dry = applyRewritesToFile(
+        file,
+        [{ scriptName: 'clean', newValue: 'rimraf dist' }],
+        false,
+      );
       expect(dry).toContain('rimraf dist');
       expect(readFileSync(file, 'utf8')).toBe(PKG_2SPACE);
       applyRewritesToFile(file, [{ scriptName: 'clean', newValue: 'rimraf dist' }], true);

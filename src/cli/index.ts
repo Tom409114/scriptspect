@@ -9,21 +9,21 @@
  */
 import { join, resolve } from 'node:path';
 import cac from 'cac';
-import { version } from '../core/version';
-import { analyze, resolveRoot } from '../core/analyze';
+import { ConfigError, loadConfig } from '../config/load';
 import type { AnalysisResult } from '../core/analyze';
-import { loadConfig, ConfigError } from '../config/load';
-import { normalizeOptions, SEVERITY_ORDER } from './options';
-import type { CliOptions } from './options';
-import { renderStylish } from '../reporters/stylish';
-import { renderJson } from '../reporters/json';
+import { analyze, resolveRoot } from '../core/analyze';
+import { version } from '../core/version';
+import { renderPatch } from '../fixers/diff';
+import { planFixes, rewritesByPackage } from '../fixers/fix-plan';
+import { applyRewritesToFile } from '../fixers/package-json';
 import { renderAnnotations, writeJobSummary } from '../reporters/github';
-import { renderExplain } from './explain';
+import { renderJson } from '../reporters/json';
+import { renderStylish } from '../reporters/stylish';
 import { getRule } from '../rules';
 import type { Finding } from '../rules/types';
-import { planFixes, rewritesByPackage } from '../fixers/fix-plan';
-import { renderPatch } from '../fixers/diff';
-import { applyRewritesToFile } from '../fixers/package-json';
+import { renderExplain } from './explain';
+import type { CliOptions } from './options';
+import { normalizeOptions, SEVERITY_ORDER } from './options';
 
 export interface CliIo {
   out: (text: string) => void;
@@ -47,7 +47,11 @@ function exitCodeFor(result: AnalysisResult, options: CliOptions): number {
   return 0;
 }
 
-async function runCheck(pathArg: string | undefined, raw: Record<string, unknown>, io: CliIo): Promise<number> {
+async function runCheck(
+  pathArg: string | undefined,
+  raw: Record<string, unknown>,
+  io: CliIo,
+): Promise<number> {
   let options: CliOptions;
   try {
     options = normalizeOptions(raw);
@@ -156,12 +160,12 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
 
   let outcome: Promise<number> | undefined;
 
-  cli.command('[path]', 'analyze package.json scripts for cross-platform portability').action(
-    (args: CheckArgs, raw) => {
+  cli
+    .command('[path]', 'analyze package.json scripts for cross-platform portability')
+    .action((args: CheckArgs, raw) => {
       outcome = checkAction(args, raw);
       return outcome;
-    },
-  );
+    });
 
   const check = cli.command('check [path]', 'analyze (explicit form of the default command)');
   check.action((path: string | undefined, raw) => {
@@ -169,10 +173,12 @@ export async function runCli(argv: string[], io: CliIo = DEFAULT_IO): Promise<nu
     return outcome;
   });
 
-  cli.command('explain <ruleId>', 'show rule documentation offline').action((args: { ruleId: string }) => {
-    outcome = runExplain(args.ruleId, io);
-    return outcome;
-  });
+  cli
+    .command('explain <ruleId>', 'show rule documentation offline')
+    .action((args: { ruleId: string }) => {
+      outcome = runExplain(args.ruleId, io);
+      return outcome;
+    });
 
   try {
     cli.parse(['node', 'scriptspect.mjs', ...argv], { run: true });

@@ -42,7 +42,10 @@ export function applicableFixes(findings: readonly Finding[]): Finding[] {
 export function applyToScript(script: string, findings: readonly Finding[]): ApplyResult {
   const candidates = applicableFixes(findings)
     .map((f) => ({ finding: f, rep: f.fix?.replacement }))
-    .filter((c): c is { finding: Finding; rep: NonNullable<Finding['fix']>['replacement'] } => c.rep !== undefined)
+    .filter(
+      (c): c is { finding: Finding; rep: NonNullable<Finding['fix']>['replacement'] } =>
+        c.rep !== undefined,
+    )
     .sort((x, y) => y.rep.span[0] - x.rep.span[0]);
 
   let out = script;
@@ -64,7 +67,8 @@ export function applyToScript(script: string, findings: readonly Finding[]): App
       after: rep.text,
     });
     appliedSpans.push([start, end]);
-    covered = covered === null ? [start, end] : [Math.min(covered[0], start), Math.max(covered[1], end)];
+    covered =
+      covered === null ? [start, end] : [Math.min(covered[0], start), Math.max(covered[1], end)];
   }
 
   applied.reverse(); // restore source order for reporting

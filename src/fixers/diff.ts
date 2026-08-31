@@ -9,10 +9,13 @@ function splitLines(text: string): string[] {
 
 /** Longest-common-subsequence table for line arrays. */
 function lcsTable(a: readonly string[], b: readonly string[]): number[][] {
-  const table: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  const table: number[][] = Array.from({ length: a.length + 1 }, () =>
+    new Array<number>(b.length + 1).fill(0),
+  );
   for (let i = a.length - 1; i >= 0; i -= 1) {
     for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i][j] = a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+      table[i][j] =
+        a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
     }
   }
   return table;
@@ -53,7 +56,12 @@ export function diffLines(before: string, after: string): DiffOp[] {
 }
 
 /** Render a unified-style patch for one script change. */
-export function renderPatch(path: string, scriptName: string, before: string, after: string): string {
+export function renderPatch(
+  path: string,
+  scriptName: string,
+  before: string,
+  after: string,
+): string {
   const ops = diffLines(before, after);
   const lines = [`--- a/${path} (scripts.${scriptName})`, `+++ b/${path} (scripts.${scriptName})`];
   for (const op of ops) {

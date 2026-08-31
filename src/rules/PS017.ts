@@ -2,8 +2,8 @@
  * PS017 — POSIX_GREP: `grep` does not exist under cmd.exe.
  */
 import { rimrafFix, shxPrefixFix } from './fix-builders';
-import { availabilityRule } from './util';
 import type { RuleModule } from './types';
+import { availabilityRule } from './util';
 
 export const PS017: RuleModule = availabilityRule(
   {
@@ -19,7 +19,8 @@ export const PS017: RuleModule = availabilityRule(
     fixSafety: 'conditional',
     provenance: [
       {
-        source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/findstr',
+        source:
+          'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/findstr',
         claim: 'cmd.exe ships findstr, not grep.',
       },
     ],

@@ -3,8 +3,8 @@
  * are literal text under cmd.exe (`%VAR%` there).
  */
 import { makeFinding } from '../core/finding';
-import { commandsOf } from './util';
 import type { Finding, RuleContext, RuleModule } from './types';
+import { commandsOf } from './util';
 
 export const PS023: RuleModule = {
   id: 'PS023',
@@ -20,18 +20,23 @@ export const PS023: RuleModule = {
   fixSafety: 'manual',
   provenance: [
     {
-      source: 'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_05_02',
+      source:
+        'https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_05_02',
       claim: 'POSIX shells expand $VAR/${VAR}.',
     },
     {
-      source: 'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
+      source:
+        'https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1',
       claim: 'cmd.exe expands %VAR%; $VAR stays literal.',
     },
   ],
   check(ir, ctx: RuleContext): Finding[] {
     const findings: Finding[] = [];
     for (const cmd of commandsOf(ir)) {
-      const tokens = [...cmd.argv, ...cmd.redirects.flatMap((r) => (r.target !== null ? [r.target] : []))];
+      const tokens = [
+        ...cmd.argv,
+        ...cmd.redirects.flatMap((r) => (r.target !== null ? [r.target] : [])),
+      ];
       for (const tok of tokens) {
         if (tok.value.startsWith('$env:')) continue; // PS003
         for (const exp of tok.expansions) {

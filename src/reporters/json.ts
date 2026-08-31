@@ -2,10 +2,11 @@
  * Machine-readable JSON reporter with a versioned schema (spec §3.2, M3-02):
  * schema version is API; changes require a schema/version evaluation.
  */
-import type { Finding, FixSafety } from '../rules/types';
+
 import type { AnalysisResult } from '../core/analyze';
 import { version } from '../core/version';
 import type { ShellTarget } from '../parser/ir';
+import type { Finding, FixSafety } from '../rules/types';
 
 export const JSON_SCHEMA_VERSION = 1;
 
@@ -47,7 +48,10 @@ export interface JsonReport {
   };
 }
 
-export function buildJsonReport(result: AnalysisResult, targets: readonly ShellTarget[]): JsonReport {
+export function buildJsonReport(
+  result: AnalysisResult,
+  targets: readonly ShellTarget[],
+): JsonReport {
   return {
     schemaVersion: JSON_SCHEMA_VERSION,
     tool: { name: 'scriptspect', version },

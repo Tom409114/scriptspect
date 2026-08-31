@@ -1,12 +1,13 @@
 /**
  * CLI integration tests for --fix / --fix-dry-run (spec §7, §4.3).
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runCli } from '../../src/cli/index';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CliIo } from '../../src/cli/index';
+import { runCli } from '../../src/cli/index';
 
 let dir: string;
 let outLines: string[];
@@ -57,7 +58,10 @@ describe('CLI --fix-dry-run', () => {
 
 describe('CLI --fix', () => {
   it('applies safe fixes and re-analyzes to a clean exit code', async () => {
-    project({ clean: 'rm -rf dist', build: 'NODE_ENV=x vite build' }, { rimraf: '^5', 'cross-env': '^7', vite: '^5' });
+    project(
+      { clean: 'rm -rf dist', build: 'NODE_ENV=x vite build' },
+      { rimraf: '^5', 'cross-env': '^7', vite: '^5' },
+    );
     const code = await runCli([dir, '--fix'], io);
     const after = readFileSync(join(dir, 'package.json'), 'utf8');
     expect(after).toContain('"clean": "rimraf dist"');
