@@ -35,6 +35,13 @@ export interface SelectedCorpusFiles {
   truncations: string[];
 }
 
+export interface SampleFinding {
+  findingId: string;
+  ruleId: string;
+  severity: 'error' | 'warn' | 'advisory';
+  confidence: 'high' | 'medium';
+}
+
 const EXCLUDED_SEGMENTS = new Set([
   '.git',
   '.hg',
@@ -147,4 +154,46 @@ export function redactCorpusText(value: string): string {
       /\b(?:token|secret|password|passwd|api[_-]?key|authorization)\s*[=:]\s*[^\s,;]+/giu,
       '[REDACTED]',
     );
+}
+
+/** Deterministically round-robin rule/severity/confidence strata. */
+export function stratifiedSample<T extends SampleFinding>(
+  findings: readonly T[],
+  size: number,
+  seed: string,
+): T[] {
+  if (!Number.isSafeInteger(size) || size < 1 || size > findings.length) {
+    throw new Error('sample size must be a positive integer no larger than the finding set');
+  }
+  const identifiers = new Set<string>();
+  const strata = new Map<string, T[]>();
+  for (const finding of findings) {
+    if (identifiers.has(finding.findingId)) {
+      throw new Error(`duplicate findingId: ${finding.findingId}`);
+    }
+    identifiers.add(finding.findingId);
+    const key = `${finding.ruleId}\0${finding.severity}\0${finding.confidence}`;
+    const stratum = strata.get(key);
+    if (stratum === undefined) strata.set(key, [finding]);
+    else stratum.push(finding);
+  }
+  const queues = [...strata.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, entries]) =>
+      entries.toSorted((left, right) => {
+        const byDigest = sha256(`${seed}\0${left.findingId}`).localeCompare(
+          sha256(`${seed}\0${right.findingId}`),
+        );
+        return byDigest === 0 ? left.findingId.localeCompare(right.findingId) : byDigest;
+      }),
+    );
+  const selected: T[] = [];
+  for (let offset = 0; selected.length < size; offset += 1) {
+    for (const queue of queues) {
+      const candidate = queue[offset];
+      if (candidate !== undefined) selected.push(candidate);
+      if (selected.length === size) return selected;
+    }
+  }
+  return selected;
 }
