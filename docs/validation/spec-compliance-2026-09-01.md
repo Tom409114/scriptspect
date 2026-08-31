@@ -368,3 +368,51 @@
 9. ≥100人工样本、真实workspace corpus、同语料scripts-doctor对比及明确限制。
 10. 发布后的真实onboarding/外部interest证据；不得自造或自动写第三方仓库。
 11. 基于本矩阵的最终§23 DoD报告，未能公开证明的运营/KPI项保持未完成，不得用代码替代事实。
+
+## 后续状态（追加，不改写基线）：v0.1 hardening 实现后
+
+- 追加日期：2026-09-01
+- 报告落盘前的分支 HEAD：`feat/v0.1-hardening` at `82f4a0952093cc4716e6e9d0509c54c3c8800dc6`
+- README/status 固定的已审阅 runtime/release source：`069a9a7ffec7c844eebf89777456fb6723253fe5`
+- 逐门核签：[v0.1 Definition of Done 核签账本](v0.1-dod-2026-09-01.md)
+
+本节是 append-only 的后续审计。上文的 212 项基线、`73 FAIL / 90 PARTIAL / 36 PASS / 12 UNVERIFIABLE / 1 TIME-BOUND` 和当时远程状态都保留为修复前历史，不被回填或伪装成当时已经通过。本节只说明当前 hardening 分支关闭了哪些仓库内缺陷，以及哪些 hosted、管理员、公开发布与外部门禁仍然未完成。
+
+### 后续总体状态
+
+| 范围 | 状态 | 后续事实 |
+|---|---|---|
+| Parser、rules、配置、schema、root/workspace 边界 | `LOCAL PASS` | target-aware parse matrix、PS050/PS051、严格 JSON/config、canonical containment、真实 bin visibility 与生成式 schema parity 已实现并有回归。 |
+| Fixer 原子性、安全与恢复 | `LOCAL PASS` | 根 `scripts` 定位、dependency gate、事务 journal、race/hardlink/inode 防护、fault recovery、rollback、manual recovery 与幂等测试已实现。 |
+| CLI、package 与 bundled Action | `LOCAL PASS` | no-color/exit semantics、包内容、Node 24 Action bundle、严格 inputs、numeric outputs、annotations/summary 与只读行为已有本地消费测试。 |
+| 双语首页与公开 claims | `LOCAL PASS` | 中英双向切换、单 fixture 生成 before/output/patch/after、FAQ/docs 入口与 pre-release 状态机已实现；不展示不存在的 npm/Action 命令。 |
+| CI/release workflow 源码契约 | `LOCAL PASS` | frozen installs、full-SHA Actions、read-only PR policy、真实 `uses: ./` job、single candidate、draft assets、exact-tag publisher、provenance 与 alias recovery 均有 policy/state-machine tests。 |
+| 最终 GitHub-hosted 验收 | `HOSTED PENDING` | 修复分支尚无候选 SHA 对应的完整三 OS × Node 22/24、CodeQL、dependency review、hosted Action/benchmark 证据；本地结果不替代它。 |
+| Branch/tag/environment 配置 | `ADMIN OPEN` | main/tag rulesets、required checks、`npm-bootstrap`/`release` environments、审批与 coordinator actor 需管理员操作。 |
+| npm 与 GitHub 正式发布 | `PUBLICATION OPEN` | bootstrap ownership/integrity contract、OIDC、`v0.1.0`、Release assets、checksum、registry provenance、`v0.1`/`v0` aliases 尚未用公开产物验证。 |
+| Corpus precision、competition、onboarding、adoption、KPI | `EXTERNAL OPEN` | 自动化工具和 draft schema 已具备；≥100 人工裁决、独立反馈/下游、计时和时间型指标不能由代码生成，也没有被声明为完成。 |
+
+### 已关闭的高风险缺陷簇
+
+1. 原共享 lexer/IR 混合 POSIX 与 cmd 语义的问题，已替换为 target-local parsing、raw span、wrapper exact-slice 与 parse diagnostics。
+2. explicit config、workspace manifest 与 symlink 逃逸，unknown/duplicate config/manifest 输入和虚假 workspace bins，已加入 canonical boundary 与严格验证。
+3. fixer 误改 nested `scripts`、未验证依赖、固定临时文件、TOCTOU 与多文件 partial write，已改为 root-aware 且可恢复的两阶段 transaction。
+4. 原 Action 依赖 `npx @latest` 且从未执行，已改为同 revision 的 self-contained Node 24 bundle，并在 CI 源码中加入真实 `uses: ./` consumer。
+5. 原 schema 不随包发布、runtime/schema 漂移，已改为唯一生成式 `schema/config.schema.json` 与 `schema/output.schema.json` 契约。
+6. 原 release 流程在 publish 后才做脆弱 checksum 比较、失败会跳过资产且 alias 不存在，已拆为候选 coordinator 与 exact-tag publisher，并加入 durable state、recovery、checksum-before-publish、provenance 与 CAS aliases。
+7. 原首页只有英文、手写 demo 和不存在的 `@v0.1`，已改为中英 parity、可复现生成式演示与明确 pre-release source evaluation。
+
+### 保持未完成的门禁
+
+- 旧 PR #62 不应直接合并；应由包含本次修复的新 PR 取代，并在准确候选 SHA 上完成 hosted checks 与审阅。
+- `main` 与 version/floating tags 的 rulesets、required checks、no-force/no-delete、environment approvals 和 tag permission drill 仍需管理员配置并记录 ID。
+- npm 首次认领必须先通过 `npm-bootstrap.yml` 发布独立 `0.0.0-bootstrap.N`、验证 `latest` 未移动并提交完整性契约；随后撤销 granular token。
+- npm Trusted Publisher 的准确绑定已改为：`Tom409114/scriptspect`、workflow `npm-publish.yml`、environment `release`、allowed action `npm publish`。旧的 `release.yml` 绑定建议已经过时，因为 steady-state OIDC 必须绑定实际执行 publish 的 exact-tag workflow。
+- 在 npm provenance、Release assets/checksum、immutable `v0.1.0` 和 tagged Action consumer 全部通过前，不更新 `v0.1`/`v0`，也不创建 `v1`。
+- comparison harness 已固定 `scripts-doctor@1.0.0` 并捕获同 fixture outputs，但人工 adjudication 尚未完成，不能宣称胜出。
+- corpus workflow 可选择恰好 100 个 immutable commits 并生成 100-finding draft；draft 不等于人工 precision 证明，也不等于真实 adoption。
+- 外部 issue/反馈、首次用户 onboarding、downstream、downloads、stars 和 30/60/90/180 天 KPI 均保持真实、可核验但未完成。
+
+### 后续审计结论
+
+仓库内可修复的 correctness、安全、Action、schema、release recovery 与首页缺陷已经从基线的失败形态升级为有本地测试支撑的候选实现。由于 hosted、管理员、公开发布和外部证据仍有明确缺口，项目当前结论仍是 **NOT RELEASE READY**，而不是“全部 DoD PASS”。最终状态只应在[逐门核签账本](v0.1-dod-2026-09-01.md)列出的真实证据产生后更新。
