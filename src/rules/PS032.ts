@@ -16,7 +16,7 @@ export const PS032: RuleModule = availabilityRule(
     confidence: 'high',
     affectedTargets: ['posix-sh'],
     badExamples: ['powershell -Command "echo hi"', 'pwsh -File ./build.ps1'],
-    goodExamples: ['node ./build.js'],
+    goodExamples: ['node ./build.js', 'node scripts/build.mjs'],
     falsePositiveNotes:
       'Wrapper payloads are never re-analyzed. macOS can install pwsh, but a stock environment does not ship it.',
     fixSafety: 'manual',
