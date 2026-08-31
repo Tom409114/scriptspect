@@ -15,27 +15,28 @@ Zero config. It finds your project root, discovers your workspaces, and analyzes
 
 ## What it looks like
 
-<!-- Sample output reflects the reporter format shipped in v0.1 (milestone M3). -->
+<!-- Sample output reflects the reporter format shipped in v0.1 (milestones M3–M8). -->
 
 ```text
 package.json  ›  scripts.build
 
-PS001  error  HIGH  POSIX inline env assignment is not portable to cmd.exe
+PS001  error  HIGH  POSIX inline env assignment `NODE_ENV=production` is not portable to cmd.exe
        NODE_ENV=production vite build
        ^^^^^^^^^^^^^^^^^^^
        Affected: cmd
-       Fix: use cross-env (safe if cross-env is already a devDependency)
+       Fix: add cross-env as a devDependency, then wrap the assignment
        Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS001.md
 
 packages/web/package.json  ›  scripts.clean
 
 PS010  error  HIGH  `rm -rf` is not available in native Windows npm scripts
        rm -rf dist
-       ^^^^^^
+       ^^
        Affected: cmd
-       Fix options: rimraf / shx rm / Node fs.rm (manual)
+       Fix: add rimraf (or shx) as a devDependency, then re-run --fix
+       Learn more: https://github.com/Tom409114/scriptspect/blob/main/docs/rules/PS010.md
 
-Scanned 42 scripts across 7 packages · 2 errors · 0 warnings
+Scanned 2 scripts across 2 packages · 2 errors · 0 warnings
 ```
 
 Every finding carries a stable rule ID, the exact script and span, the affected shells, a confidence level, and an actionable fix path.
@@ -64,7 +65,7 @@ Key properties:
 | powershell target (opt-in) | ✅ |
 | Formats: stylish / json / github annotations | ✅ |
 | Safe + conditional auto-fix with dry-run | ✅ |
-| GitHub Action | 🚧 v0.2 (milestone M6) |
+| GitHub Action | ✅ |
 | SARIF output | 🚧 later |
 
 Rules: [docs/rules](docs/rules) — each with why/bad/good examples, false-positive notes, fix safety, and provenance.
@@ -77,7 +78,16 @@ Rules: [docs/rules](docs/rules) — each with why/bad/good examples, false-posit
 
 ## Use it in CI
 
-A first-class GitHub Action ships in milestone M6; until then:
+The GitHub Action runs the same CLI core, emits inline annotations plus a job summary, and fails the job on findings:
+
+```yaml
+- uses: Tom409114/scriptspect@v0.1
+  with:
+    path: .            # project path to analyze (default: repository root)
+    target: posix-sh,cmd
+```
+
+Or call the CLI directly:
 
 ```yaml
 - run: npx scriptspect --format github
@@ -102,7 +112,7 @@ A published JSON Schema gives editor completion for every field.
 
 ## Status
 
-Early development — milestones [M0–M8](docs/roadmap.md). Rule IDs are a stable API once published; semantic changes are tracked in release notes.
+All milestones [M0–M8](docs/roadmap.md) are merged and CI-green on main; the M8 corpus validation gate is underway. Rule IDs are a stable API once published; semantic changes are tracked in release notes.
 
 ## License
 
