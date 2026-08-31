@@ -1,0 +1,4 @@
+# pnpm settings (pnpm 11 reads configuration here, not from package.json).
+# This file doubles as the workspace root declaration once `packages:` is added.
+allowBuilds:
+  esbuild: true
