@@ -15,6 +15,7 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
@@ -73,6 +74,11 @@ jobs:
         id: pack
         run: |
           TARBALL=$(pnpm pack --pack-destination "$RUNNER_TEMP" | tail -1)
+          # pnpm prints the tarball's absolute path; keep only the filename so
+          # later steps can prefix it with "$RUNNER_TEMP/" exactly once.
+          TARBALL=$(basename "$TARBALL")
+          test -n "$TARBALL" || { echo "::error::pnpm pack produced no tarball name" >&2; exit 1; }
+          test -f "$RUNNER_TEMP/$TARBALL" || { echo "::error::$TARBALL not found in RUNNER_TEMP" >&2; exit 1; }
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
           echo "Packed $TARBALL"
       - name: Smoke-test the packed artifact
@@ -84,13 +90,17 @@ jobs:
       - name: Generate SHA256SUMS
         run: |
           cd "$RUNNER_TEMP"
+          test -f "${{ steps.pack.outputs.tarball }}" || { echo "::error::tarball missing in RUNNER_TEMP" >&2; exit 1; }
           sha256sum "${{ steps.pack.outputs.tarball }}" | tee SHA256SUMS
       - name: Verify the published npm tarball matches the local pack
         run: |
           cd "$RUNNER_TEMP"
-          VERSION="${{ needs.release-please.outputs.tag_name }}"
-          VERSION="${VERSION#v}"
-          curl -fsSL -o published.tgz \
+          # tag_name may carry a component prefix (e.g. scriptspect-v0.1.0);
+          # use the plain semver from release-please for the npm URL.
+          VERSION="${{ needs.release-please.outputs.version }}"
+          test -n "$VERSION" || { echo "::error::release-please version output is empty" >&2; exit 1; }
+          # The registry can lag the publish by a few seconds; retry transient failures.
+          curl -fsSL --retry 5 --retry-delay 5 --retry-connrefused --retry-all-errors -o published.tgz \
             "https://registry.npmjs.org/scriptspect/-/scriptspect-${VERSION}.tgz"
           mkdir -p local npm
           tar -xzf "${{ steps.pack.outputs.tarball }}" -C local
@@ -102,13 +112,15 @@ jobs:
             echo "::error::published npm tarball file set differs from the CI-built tarball" >&2
             exit 1
           fi
-          # Content digest of the shipped runtime artifact (dist/).
-          digest() { ( cd "$1" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1 ); }
-          LOCAL=$(digest local/package/dist)
-          NPM=$(digest npm/package/dist)
-          echo "local  dist sha256: $LOCAL"
-          echo "npm    dist sha256: $NPM"
-          test "$LOCAL" = "$NPM" || { echo "::error::published dist/ content differs from CI build" >&2; exit 1; }
+          # Content digest of every published file except package.json: npm
+          # normalizes the manifest on publish (e.g. repository string -> object),
+          # so it is covered by file-set parity but excluded from the digest.
+          digest() { ( cd "$1" && find . -type f ! -name package.json -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1 ); }
+          LOCAL=$(digest local/package)
+          NPM=$(digest npm/package)
+          echo "local  sha256: $LOCAL"
+          echo "npm    sha256: $NPM"
+          test "$LOCAL" = "$NPM" || { echo "::error::published tarball content differs from CI build" >&2; exit 1; }
       - name: Upload tarball and checksums to the release
         run: |
           gh release upload "${{ needs.release-please.outputs.tag_name }}" \
