@@ -416,3 +416,33 @@
 ### 后续审计结论
 
 仓库内可修复的 correctness、安全、Action、schema、release recovery 与首页缺陷已经从基线的失败形态升级为有本地测试支撑的候选实现。由于 hosted、管理员、公开发布和外部证据仍有明确缺口，项目当前结论仍是 **NOT RELEASE READY**，而不是“全部 DoD PASS”。最终状态只应在[逐门核签账本](v0.1-dod-2026-09-01.md)列出的真实证据产生后更新。
+
+## 远程落地审计（2026-09-01，追加）
+
+本节是 append-only 的远程落地审计，只记录 2026-09-01 再核验时的 GitHub 与 npm 权威状态；不回写上文 212 项修复前基线，也不篡改前一节 hardening re-audit 的历史判断。远程工程、CI 与部分管理员控制已经闭合，但公开发布、floating alias 权限和 M8 外部/时间证据仍保持 OPEN。
+
+### 已闭合的远程工程与管理员项
+
+| 项目 | 状态 | 远程证据 |
+|---|---|---|
+| 远程审计基线 `main` | `CLOSED` | 本次核验时 `main` 为 [`4d34f86827dbb7a13b1300e317083aae64002ef2`](https://github.com/Tom409114/scriptspect/commit/4d34f86827dbb7a13b1300e317083aae64002ef2)；[PR #65](https://github.com/Tom409114/scriptspect/pull/65)、[#67](https://github.com/Tom409114/scriptspect/pull/67)、[#68](https://github.com/Tom409114/scriptspect/pull/68) 与 [#69](https://github.com/Tom409114/scriptspect/pull/69) 均已 merged。后续仅文档合入可使 `main` SHA 前进，不改变这条审计证据。 |
+| `main` hosted CI | `CLOSED` | push run [`33447746364`](https://github.com/Tom409114/scriptspect/actions/runs/33447746364) 在上述 exact `main` SHA 上 completed/success。 |
+| `main` 保护 | `CLOSED` | active branch ruleset [`21964571`](https://github.com/Tom409114/scriptspect/rules/21964571) 保护默认分支：要求 pull request、严格 required status checks、linear history，并禁止 deletion 与 non-fast-forward。 |
+| immutable version tag 保护 | `CLOSED（配置）` | active tag ruleset [`21964642`](https://github.com/Tom409114/scriptspect/rules/21964642) 匹配 `refs/tags/v*.*.*`，阻止 update 与 deletion。当前尚无正式 tag，因此这里只核签规则已落地，不把它表述为发布已完成。 |
+| environments 与 variables | `CLOSED（配置）` | `npm-bootstrap` 与 `release` environments 已创建并设置 required reviewer/branch policy；仓库变量为 `NPM_BOOTSTRAP_ENABLED=false`、`NPM_TRUSTED_PUBLISHING_READY=false`、`RELEASE_PR_ACTORS=github-actions[bot]`、`RELEASE_PR_CI_MODE=manual-approval`。两个 `false` 是正确的关闭态，不代表 npm bootstrap 或 Trusted Publisher 已完成。 |
+| workflow 供应链 | `CLOSED` | 当前所有第三方 GitHub Actions `uses:` 均固定到完整 commit SHA；本仓库内 Action 继续使用同 revision 的 `./`。 |
+| Dependabot | `CLOSED` | PR #68 将解析版本统一到 `esbuild 0.28.2`，已高于 advisory 的 first-patched `0.28.1`；原 low-severity alert #1 已 fixed，本次核验时 open Dependabot alerts 为 0。 |
+
+### 仍然 OPEN 的发布与外部证据项
+
+| 项目 | 状态 | 当前事实与关闭条件 |
+|---|---|---|
+| release PR | `OPEN` | 本次核验时 [PR #66](https://github.com/Tom409114/scriptspect/pull/66) 为 OPEN；head 为 `39a464752b1321464b474aa42682fddde5df7ea5`，mergeable state 为 `CLEAN`。其 CI run [`33447786827`](https://github.com/Tom409114/scriptspect/actions/runs/33447786827) 已 completed/success，16/16 jobs success；这关闭该快照的候选 CI 门禁，但不等于 PR 已合并或 release 已发布。后续 `main` 更新会让 release-please 刷新 head，届时必须以新 head 的 CI 为准。 |
+| npm package 与公开产物 | `PUBLICATION OPEN` | `npm view scriptspect` 仍返回 `E404`；Git tags 为 0，GitHub Releases 为 0。不存在 `scriptspect@0.1.0`、provenance、Release assets/checksum 或可消费的 released Action reference。 |
+| bootstrap contract / Trusted Publisher | `ADMIN + PUBLICATION OPEN` | 首次认领的独立 bootstrap 版本、`latest` 不移动证明、registry integrity contract、短期 token 撤销记录和 npm 侧 Trusted Publisher 配置尚未产生。准确 Trusted Publisher tuple 是 repository `Tom409114/scriptspect`、workflow **`npm-publish.yml`**、environment **`release`**、allowed action `npm publish`；不是 `release.yml`。只有配置完成并经真实 OIDC publish 验证后，才可把 `NPM_TRUSTED_PUBLISHING_READY` 设为 `true`。 |
+| floating aliases | `ADMIN OPEN` | ruleset `21964642` 只关闭 immutable `v*.*.*` 的 update/delete；当前没有 `v0`/`v0.*` floating policy 或 coordinator bypass actor。必须先落实并演练仅允许 coordinator 单调 CAS create/update、以及“此前不存在且同一发布失败”时窄范围 CAS delete 的权限路径，不能假设默认 `GITHUB_TOKEN` 可绕过 ruleset。 |
+| M8 / 外部与时间证据 | `EXTERNAL + TIME OPEN` | ≥100 条人工裁决与二次复核、同语料 scripts-doctor adjudication、两周窗口、独立试用/反馈、首次 onboarding 计时、真实 downstream，以及 30/60/90/180 天 KPI 仍需真实用户与时间产生；merged PR、green CI 和管理员配置不能替代这些证据。 |
+
+### 远程落地结论
+
+截至本次核验，hardening、修复 PR、准确 `main` hosted CI、主分支保护、immutable version tag update/delete 保护、environments/variables、Action SHA pinning 与 Dependabot 修复均已有远程落地证据；PR #66 也有准确 head 上 16/16 全绿且 CLEAN 的候选证据。但 npm 仍为 E404、tag/release 均为 0，bootstrap/Trusted Publisher、floating alias coordinator bypass 与 M8 外部/时间证据仍未关闭。因此当前判定仍是 **NOT RELEASE READY**，不得表述为“v0.1 已发布”“全部 DoD PASS”或“M0–M8 已完成”。
