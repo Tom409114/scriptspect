@@ -49,9 +49,9 @@ function workflowNames(): string[] {
     .sort();
 }
 
-function runCorpusSelection(requested: number, candidates: string[]) {
+function runCorpusCandidatePool(requested: number, candidates: string[]) {
   const selectionStep = allSteps(workflow('corpus.yml')).find(
-    (step) => step.name === 'Select the exact deterministic repository sample',
+    (step) => step.name === 'Prepare the deterministic repository candidate pool',
   );
   const match = selectionStep?.run?.match(
     /node --input-type=module <<'NODE'\n(?<program>[\s\S]+?)\nNODE/u,
@@ -63,7 +63,6 @@ function runCorpusSelection(requested: number, candidates: string[]) {
   const directory = mkdtempSync(join(tmpdir(), 'scriptspect-corpus-selection-'));
   const candidateFile = join(directory, 'candidates.txt');
   const selectedFile = join(directory, 'selected.txt');
-  const selectionFile = join(directory, 'selection.json');
   try {
     writeFileSync(candidateFile, `${candidates.join('\n')}\n`, 'utf8');
     const result = spawnSync(
@@ -76,17 +75,13 @@ function runCorpusSelection(requested: number, candidates: string[]) {
           REPO_COUNT: String(requested),
           CANDIDATE_FILE: candidateFile,
           SELECTED_FILE: selectedFile,
-          SELECTION_FILE: selectionFile,
         },
       },
     );
     if (result.status !== 0) {
       throw new Error(`corpus selection failed:\n${result.stderr}`);
     }
-    return {
-      repositories: readFileSync(selectedFile, 'utf8').trimEnd().split('\n'),
-      selection: JSON.parse(readFileSync(selectionFile, 'utf8')) as unknown,
-    };
+    return readFileSync(selectedFile, 'utf8').trimEnd().split('\n');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -383,28 +378,26 @@ describe('reproducible CI', () => {
 });
 
 describe('corpus repository selection', () => {
-  it('selects exactly one repository and records requested and actual counts', () => {
-    const result = runCorpusSelection(1, ['zeta/project', 'alpha/project']);
+  it('retains sorted replacements beyond the requested count', () => {
+    const repositories = runCorpusCandidatePool(1, ['zeta/project', 'alpha/project']);
 
-    expect(result.repositories).toEqual(['alpha/project']);
-    expect(result.selection).toEqual({ schemaVersion: 1, requested: 1, actual: 1 });
+    expect(repositories).toEqual(['alpha/project', 'zeta/project']);
   });
 
-  it('selects exactly 100 repositories at the supported upper bound', () => {
+  it('retains every valid candidate when 100 eligible repositories are requested', () => {
     const candidates = Array.from(
       { length: 120 },
       (_, index) => `owner/project-${String(119 - index).padStart(3, '0')}`,
     );
-    const result = runCorpusSelection(100, candidates);
+    const repositories = runCorpusCandidatePool(100, candidates);
 
-    expect(result.repositories).toHaveLength(100);
-    expect(result.repositories[0]).toBe('owner/project-000');
-    expect(result.repositories[99]).toBe('owner/project-099');
-    expect(result.selection).toEqual({ schemaVersion: 1, requested: 100, actual: 100 });
+    expect(repositories).toHaveLength(120);
+    expect(repositories[0]).toBe('owner/project-000');
+    expect(repositories[119]).toBe('owner/project-119');
   });
 
-  it('deduplicates overlapping search results before applying the exact limit', () => {
-    const result = runCorpusSelection(3, [
+  it('deduplicates overlapping search results without discarding replacements', () => {
+    const repositories = runCorpusCandidatePool(3, [
       'owner/project-c',
       'owner/project-a',
       'owner/project-b',
@@ -413,7 +406,32 @@ describe('corpus repository selection', () => {
       'owner/project-d',
     ]);
 
-    expect(result.repositories).toEqual(['owner/project-a', 'owner/project-b', 'owner/project-c']);
-    expect(result.selection).toEqual({ schemaVersion: 1, requested: 3, actual: 3 });
+    expect(repositories).toEqual([
+      'owner/project-a',
+      'owner/project-b',
+      'owner/project-c',
+      'owner/project-d',
+    ]);
+  });
+
+  it('resolves the exact root-eligible sample before the scanner runs', () => {
+    const steps = allSteps(workflow('corpus.yml'));
+    const resolver = steps.find(
+      (step) => step.name === 'Resolve the exact root-eligible repository sample',
+    );
+    const scannerIndex = steps.findIndex(
+      (step) => step.name === 'Scan scripts without writing to sampled repositories',
+    );
+    const resolverIndex = steps.indexOf(resolver as Step);
+
+    expect(resolverIndex).toBeGreaterThanOrEqual(0);
+    expect(resolverIndex).toBeLessThan(scannerIndex);
+    expect(resolver?.run).toBe(
+      'pnpm exec tsx tools/corpus-resolve.ts "$CANDIDATE_FILE" repos.txt repository-sample.json "$REPO_COUNT"',
+    );
+    expect(resolver?.env).toMatchObject({
+      GITHUB_TOKEN: `\${{ github.token }}`,
+      REPO_COUNT: `\${{ inputs.repo-count || '100' }}`,
+    });
   });
 });

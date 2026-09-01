@@ -59,6 +59,22 @@ describe('bounded workspace manifest selection', () => {
       expect.arrayContaining(['manifest-limit:2', 'depth-limit:3', 'byte-limit:160']),
     );
   });
+
+  it('keeps the root manifest inside the tree-entry budget even when GitHub lists it late', () => {
+    const tree: TreeEntry[] = [
+      { path: 'a/readme.md', type: 'blob', mode: '100644', size: 20, sha: 'a' },
+      { path: 'b/readme.md', type: 'blob', mode: '100644', size: 20, sha: 'b' },
+      { path: 'package.json', type: 'blob', mode: '100644', size: 80, sha: 'root' },
+    ];
+
+    const selected = selectCorpusFiles(tree, {
+      ...DEFAULT_CORPUS_LIMITS,
+      maxTreeEntries: 2,
+    });
+
+    expect(selected.files.map((entry) => entry.path)).toEqual(['package.json']);
+    expect(selected.truncations).toEqual(['tree-entry-limit:2']);
+  });
 });
 
 describe('corpus evidence redaction', () => {

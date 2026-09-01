@@ -96,6 +96,23 @@ function addTruncation(truncations: string[], reason: string): void {
   if (!truncations.includes(reason)) truncations.push(reason);
 }
 
+function boundedTreeEntries(tree: readonly TreeEntry[], maxTreeEntries: number): TreeEntry[] {
+  const rootControlFiles = tree
+    .filter(
+      (entry) =>
+        (entry.path === 'package.json' || entry.path === 'pnpm-workspace.yaml') &&
+        isCandidate(entry),
+    )
+    .sort((left, right) => {
+      if (left.path === 'package.json') return -1;
+      if (right.path === 'package.json') return 1;
+      return left.path.localeCompare(right.path);
+    });
+  const rootPaths = new Set(rootControlFiles.map((entry) => entry.path));
+  const boundedPrefix = tree.slice(0, maxTreeEntries).filter((entry) => !rootPaths.has(entry.path));
+  return [...rootControlFiles, ...boundedPrefix].slice(0, maxTreeEntries);
+}
+
 /** Select only bounded manifest inputs; every discarded limit is surfaced. */
 export function selectCorpusFiles(
   tree: readonly TreeEntry[],
@@ -105,8 +122,7 @@ export function selectCorpusFiles(
   if (tree.length > limits.maxTreeEntries) {
     addTruncation(truncations, `tree-entry-limit:${limits.maxTreeEntries}`);
   }
-  const candidates = tree
-    .slice(0, limits.maxTreeEntries)
+  const candidates = boundedTreeEntries(tree, limits.maxTreeEntries)
     .filter(isCandidate)
     .sort((left, right) => {
       if (left.path === 'package.json') return -1;

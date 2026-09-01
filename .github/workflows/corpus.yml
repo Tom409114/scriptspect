@@ -37,12 +37,11 @@ jobs:
             --jq '.items[].full_name' > "$CANDIDATE_FILE"
           gh api 'search/repositories?q=language:javascript+stars:%3E5000&sort=stars&order=desc&per_page=100' \
             --jq '.items[].full_name' >> "$CANDIDATE_FILE"
-      - name: Select the exact deterministic repository sample
+      - name: Prepare the deterministic repository candidate pool
         env:
           REPO_COUNT: ${{ inputs.repo-count || '100' }}
           CANDIDATE_FILE: ${{ runner.temp }}/repository-candidates.txt
-          SELECTED_FILE: ${{ runner.temp }}/repository-names.txt
-          SELECTION_FILE: repository-sample.json
+          SELECTED_FILE: ${{ runner.temp }}/repository-candidate-pool.txt
         run: |
           set -euo pipefail
           [[ "$REPO_COUNT" =~ ^([1-9]|[1-9][0-9]|100)$ ]]
@@ -57,8 +56,7 @@ jobs:
           const requested = Number(countText);
           const candidateFile = process.env.CANDIDATE_FILE;
           const selectedFile = process.env.SELECTED_FILE;
-          const selectionFile = process.env.SELECTION_FILE;
-          if (!candidateFile || !selectedFile || !selectionFile) {
+          if (!candidateFile || !selectedFile) {
             throw new Error('corpus selection file paths are required');
           }
 
@@ -76,35 +74,14 @@ jobs:
               `requested ${requested} repositories but only ${uniqueCandidates.length} unique candidates were returned`,
             );
           }
-          const selected = uniqueCandidates.slice(0, requested);
-          writeFileSync(selectedFile, `${selected.join('\n')}\n`, 'utf8');
-          writeFileSync(
-            selectionFile,
-            `${JSON.stringify({ schemaVersion: 1, requested, actual: selected.length }, null, 2)}\n`,
-            'utf8',
-          );
+          writeFileSync(selectedFile, `${uniqueCandidates.join('\n')}\n`, 'utf8');
           NODE
-      - name: Resolve immutable repository commits
+      - name: Resolve the exact root-eligible repository sample
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           REPO_COUNT: ${{ inputs.repo-count || '100' }}
-          SELECTED_FILE: ${{ runner.temp }}/repository-names.txt
-        run: |
-          set -euo pipefail
-          : > repos.txt
-          while IFS= read -r repository; do
-            [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
-            default_branch=$(gh api "repos/$repository" --jq '.default_branch')
-            [[ -n "$default_branch" ]]
-            commit=$(gh api -X GET "repos/$repository/commits" \
-              -f sha="$default_branch" -f per_page=1 --jq '.[0].sha')
-            [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
-            printf '%s@%s\n' "$repository" "$commit" >> repos.txt
-          done < "$SELECTED_FILE"
-          sort -u repos.txt -o repos.txt
-          awk '!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/ { exit 1 }' repos.txt
-          ACTUAL_COUNT=$(wc -l < repos.txt)
-          test "$ACTUAL_COUNT" -eq "$REPO_COUNT"
+          CANDIDATE_FILE: ${{ runner.temp }}/repository-candidate-pool.txt
+        run: pnpm exec tsx tools/corpus-resolve.ts "$CANDIDATE_FILE" repos.txt repository-sample.json "$REPO_COUNT"
       - name: Scan scripts without writing to sampled repositories
         env:
           GITHUB_TOKEN: ${{ github.token }}
