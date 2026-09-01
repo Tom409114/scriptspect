@@ -363,22 +363,41 @@ function executeReplay(
     shellAfter?: string;
     runnerOs?: string;
     environment?: NodeJS.ProcessEnv;
+    token?: string;
+    corepackBody?: string;
+    pnpmBody?: string;
   } = {},
 ): ReturnType<typeof spawnSync> {
+  const commandDirectory = temporaryDirectory();
+  const corepackPath = join(commandDirectory, 'corepack');
+  const pnpmPath = join(commandDirectory, 'pnpm');
+  writeFileSync(corepackPath, `#!/bin/sh\nset -eu\n${options.corepackBody ?? 'exit 0'}\n`);
+  writeFileSync(
+    pnpmPath,
+    `#!/bin/sh\nset -eu\n${
+      options.pnpmBody ??
+      [
+        `if [ "\${1-}" = "exec" ]; then`,
+        `  printf "RUNNER_OS=%s\\n" "\${RUNNER_OS-<unset>}" > replay-observation.txt`,
+        `  printf "CORPUS_LIMITS_JSON=%s\\n" "\${CORPUS_LIMITS_JSON-<unset>}" >> replay-observation.txt`,
+        '  printf "ARGS=" >> replay-observation.txt',
+        '  printf "<%s>" "$@" >> replay-observation.txt',
+        '  printf "\\n" >> replay-observation.txt',
+        'fi',
+        'exit 0',
+      ].join('\n')
+    }\n`,
+  );
+  chmodSync(corepackPath, 0o755);
+  chmodSync(pnpmPath, 0o755);
+  const shellCommandDirectory = execFileSync(posixShell(), ['-c', 'pwd'], {
+    cwd: commandDirectory,
+    encoding: 'utf8',
+  }).trim();
+  const quotedCommandDirectory = `'${shellCommandDirectory.replaceAll("'", `'"'"'`)}'`;
   const script = [
-    'corepack() { return 0; }',
-    [
-      'pnpm() {',
-      '  if [ "$1" = "exec" ]; then',
-      `    printf "RUNNER_OS=%s\\n" "\${RUNNER_OS-<unset>}" > replay-observation.txt`,
-      `    printf "CORPUS_LIMITS_JSON=%s\\n" "\${CORPUS_LIMITS_JSON-<unset>}" >> replay-observation.txt`,
-      '    printf "ARGS=" >> replay-observation.txt',
-      '    printf "<%s>" "$@" >> replay-observation.txt',
-      '    printf "\\n" >> replay-observation.txt',
-      '  fi',
-      '  return 0',
-      '}',
-    ].join('\n'),
+    `PATH=${quotedCommandDirectory}:"$PATH"`,
+    'export PATH',
     options.shellSetup ?? '',
     reproduction,
     options.shellAfter ?? '',
@@ -389,7 +408,7 @@ function executeReplay(
     env: {
       ...process.env,
       ...options.environment,
-      GITHUB_TOKEN: 'ephemeral-replay-test-token',
+      GITHUB_TOKEN: options.token ?? 'ephemeral-replay-test-token',
       ...(options.runnerOs === undefined ? {} : { RUNNER_OS: options.runnerOs }),
     },
   });
@@ -1018,19 +1037,17 @@ describe('immutable corpus run evidence', () => {
 
   it('allows the frozen install to create an ignored dependency directory', async () => {
     const replay = await replayFixture();
-    const shellSetup = [
-      'pnpm() {',
-      '  if [ "$1" = "install" ]; then',
+    const pnpmBody = [
+      `if [ "\${1-}" = "install" ]; then`,
       '    mkdir -p node_modules/installed',
       '    printf installed > node_modules/installed/package.json',
-      '  elif [ "$1" = "exec" ]; then',
+      `elif [ "\${1-}" = "exec" ]; then`,
       '    printf scanner-ran > replay-observation.txt',
-      '  fi',
-      '  return 0',
-      '}',
+      'fi',
+      'exit 0',
     ].join('\n');
 
-    const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+    const result = executeReplay(replay.directory, replay.reproduction, { pnpmBody });
 
     expect(result.status, String(result.stderr)).toBe(0);
     expect(readFileSync(join(replay.directory, 'replay-observation.txt'), 'utf8')).toBe(
@@ -1040,28 +1057,75 @@ describe('immutable corpus run evidence', () => {
 
   it('withholds the token from package setup and injects it only into the scanner command', async () => {
     const replay = await replayFixture();
-    const shellSetup = [
-      'set -a',
-      'pnpm() {',
-      '  if [ "$1" = "install" ]; then',
-      '    if env | grep -q "^GITHUB_TOKEN=" || env | grep -q "^SCRIPTSPECT_REPLAY_TOKEN="; then',
+    const pnpmBody = [
+      `if [ "\${1-}" = "install" ]; then`,
+      '  if env | grep -q "^GITHUB_TOKEN=" || env | grep -q "^SCRIPTSPECT_REPLAY_TOKEN="; then',
       '      printf leaked > package-setup-token-leak.txt',
-      '      return 97',
-      '    fi',
-      '  elif [ "$1" = "exec" ]; then',
-      '    env | grep "^GITHUB_TOKEN=" > scanner-token.txt',
+      '      exit 97',
       '  fi',
-      '  return 0',
-      '}',
+      `elif [ "\${1-}" = "exec" ]; then`,
+      '    env | grep "^GITHUB_TOKEN=" > scanner-token.txt',
+      'fi',
+      'exit 0',
     ].join('\n');
 
-    const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+    const result = executeReplay(replay.directory, replay.reproduction, {
+      shellSetup: 'set -a',
+      pnpmBody,
+    });
 
     expect(result.status, String(result.stderr)).toBe(0);
     expect(existsSync(join(replay.directory, 'package-setup-token-leak.txt'))).toBe(false);
     expect(readFileSync(join(replay.directory, 'scanner-token.txt'), 'utf8')).toBe(
       'GITHUB_TOKEN=ephemeral-replay-test-token\n',
     );
+  });
+
+  it.each(['corepack', 'pnpm'])(
+    'bypasses a caller-defined %s function that can read shell-local replay state',
+    async (command) => {
+      const replay = await replayFixture();
+      const shellSetup = [
+        `${command}() {`,
+        `  if [ -n "\${SCRIPTSPECT_REPLAY_TOKEN-}" ]; then`,
+        '    printf leaked > caller-function-token-leak.txt',
+        '    return 97',
+        '  fi',
+        '  return 96',
+        '}',
+      ].join('\n');
+
+      const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+
+      expect(result.status, String(result.stderr)).toBe(0);
+      expect(existsSync(join(replay.directory, 'caller-function-token-leak.txt'))).toBe(false);
+      expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(true);
+    },
+  );
+
+  it('rejects an empty token before package setup or output creation and remains retryable', async () => {
+    const replay = await replayFixture();
+    const markerDirectory = temporaryDirectory();
+    const packageSetupMarker = join(markerDirectory, 'package-setup-called.txt');
+    const outputDirectory = join(
+      replay.directory,
+      `corpus-reproduction-${git(replay.directory, 'rev-parse', 'HEAD')}`,
+    );
+    const markerBody = 'printf called > "$PACKAGE_SETUP_MARKER"\nexit 0';
+
+    const missingToken = executeReplay(replay.directory, replay.reproduction, {
+      token: '',
+      environment: { PACKAGE_SETUP_MARKER: packageSetupMarker.replaceAll('\\', '/') },
+      corepackBody: markerBody,
+      pnpmBody: markerBody,
+    });
+
+    expect(missingToken.status, String(missingToken.stderr)).not.toBe(0);
+    expect(existsSync(packageSetupMarker)).toBe(false);
+    expect(existsSync(outputDirectory)).toBe(false);
+
+    const retry = executeReplay(replay.directory, replay.reproduction);
+    expect(retry.status, String(retry.stderr)).toBe(0);
   });
 
   it('ignores inherited Git repository redirection while validating the checkout', async () => {
@@ -1104,18 +1168,16 @@ describe('immutable corpus run evidence', () => {
     'rejects lifecycle changes to %s evidence after the frozen install',
     async (evidenceName) => {
       const replay = await replayFixture();
-      const shellSetup = [
-        'pnpm() {',
-        '  if [ "$1" = "install" ]; then',
+      const pnpmBody = [
+        `if [ "\${1-}" = "install" ]; then`,
         `    printf tampered > '${evidenceName}'`,
-        '  elif [ "$1" = "exec" ]; then',
+        `elif [ "\${1-}" = "exec" ]; then`,
         '    printf scanner-ran > replay-observation.txt',
-        '  fi',
-        '  return 0',
-        '}',
+        'fi',
+        'exit 0',
       ].join('\n');
 
-      const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+      const result = executeReplay(replay.directory, replay.reproduction, { pnpmBody });
 
       expect(result.status, String(result.stderr)).not.toBe(0);
       expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);

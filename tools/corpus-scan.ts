@@ -421,22 +421,22 @@ function reproductionCommand(options: {
     'unset SCRIPTSPECT_REPLAY_TOKEN',
     `SCRIPTSPECT_REPLAY_TOKEN="\${GITHUB_TOKEN-}"`,
     'unset GITHUB_TOKEN',
+    'test -n "$SCRIPTSPECT_REPLAY_TOKEN"',
     `test "$(node --version)" = ${posixShellQuote(options.environment.node)}`,
     `test "$(node -p 'process.platform')" = ${posixShellQuote(options.environment.platform)}`,
     `test "$(node -p 'process.arch')" = ${posixShellQuote(options.environment.arch)}`,
     ...cleanCheckout,
     'test ! -e node_modules && test ! -L node_modules',
-    'corepack enable',
-    "corepack prepare 'pnpm@11.24.0' --activate",
-    'pnpm install --frozen-lockfile',
+    'command env corepack enable',
+    "command env corepack prepare 'pnpm@11.24.0' --activate",
+    'command env pnpm install --frozen-lockfile',
     ...cleanCheckout,
     `test ! -e ${posixShellQuote(outputDirectory)}`,
     `mkdir -- ${posixShellQuote(outputDirectory)}`,
     options.environment.runnerOs === undefined
       ? 'unset RUNNER_OS'
       : `export RUNNER_OS=${posixShellQuote(options.environment.runnerOs)}`,
-    'test -n "$SCRIPTSPECT_REPLAY_TOKEN"',
-    `GITHUB_TOKEN="$SCRIPTSPECT_REPLAY_TOKEN" ${environment.join(' ')} pnpm exec tsx tools/corpus-scan.ts ${posixShellQuote(options.input.name)} ${posixShellQuote(outputDirectory)}`,
+    `command env GITHUB_TOKEN="$SCRIPTSPECT_REPLAY_TOKEN" ${environment.join(' ')} pnpm exec tsx tools/corpus-scan.ts ${posixShellQuote(options.input.name)} ${posixShellQuote(outputDirectory)}`,
   ];
   return `(${commands.join(' && ')})`;
 }

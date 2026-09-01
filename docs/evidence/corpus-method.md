@@ -102,11 +102,14 @@ not exist before package tooling starts (including as a broken link), while the
 second gate permits the frozen install's ignored `node_modules` output. The
 complete replay runs in a POSIX subshell. It first disables inherited shell
 `allexport`, copies `GITHUB_TOKEN` into a non-exported shell variable, and
-removes the credential from the environment before Git, Corepack, and pnpm
-install run; the token is injected as a
-single-command environment assignment
-only for the final scanner invocation. Caller environment values therefore
-survive the replay unchanged.
+removes the credential from the environment. An empty token fails before
+package setup or output-directory creation, so adding a token and retrying does
+not require cleanup. Corepack, pnpm install, and the final pnpm scanner command
+are resolved as external commands through `command env`, bypassing caller shell
+functions and aliases that could otherwise read shell-local replay state. The
+token is injected as a single-command environment assignment only for the final
+scanner invocation. Caller environment values therefore survive the replay
+unchanged.
 
 Replay also requires the exact recorded Node version, platform, and
 architecture; inside its subshell it restores the recorded `RUNNER_OS` value or
