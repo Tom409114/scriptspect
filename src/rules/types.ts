@@ -68,6 +68,8 @@ export interface RuleMetadata {
 }
 
 export interface RuleModule extends RuleMetadata {
+  /** Factory-derived marker for fixes that may rewrite a command invocation. */
+  automaticReplacementKind?: 'command';
   check(matrix: ParseMatrix, ctx: RuleContext): Finding[];
 }
 

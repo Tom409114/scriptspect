@@ -121,9 +121,14 @@ function tokenizeDialect(src: string, target: LexerTarget | null): Token[] {
   while (i < n) {
     const ch = src.charAt(i);
 
-    // In PowerShell, an unquoted `#` starts a comment through end-of-line.
-    // Comment bytes deliberately produce no generic command/operator tokens.
-    if (ch === '#' && target === 'powershell') break;
+    // In POSIX shells, `#` starts a comment only at a word boundary; in
+    // PowerShell it starts one anywhere outside quotes. Reaching this outer
+    // loop is a word boundary for both dialects. Preserve a following newline
+    // so commands on later lines remain independently tokenized.
+    if (ch === '#' && (target === 'posix-sh' || target === 'powershell')) {
+      while (i < n && src.charAt(i) !== '\n') i += 1;
+      continue;
+    }
 
     // Newline is a sequence operator, not mere whitespace — check it before
     // the whitespace skip so it always becomes a token (spec §5.1).

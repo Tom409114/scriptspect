@@ -132,7 +132,7 @@ describe('PS051 target shell parse diagnostics', () => {
 
 describe('matrix diagnostic fix gates', () => {
   it('keeps a replacement when an unrelated diagnostic is elsewhere in the script', () => {
-    const script = 'rm -rf $HOME';
+    const script = 'rm -rf dist && echo $HOME';
     const [finding] = analyzeScript(
       script,
       makeCtx({
@@ -161,5 +161,170 @@ describe('matrix diagnostic fix gates', () => {
     );
 
     expect(finding?.fix?.replacement).toBeUndefined();
+  });
+
+  it.each([
+    ['(rm -rf dist', 'PS010', 'rimraf'],
+    ['rm -rf dist &&', 'PS010', 'rimraf'],
+    ['cp -r src dist)', 'PS011', 'shx'],
+    ['rm -rf dist && echo "oops', 'PS010', 'rimraf'],
+  ] as const)(
+    'withholds %s when any active-shell error makes the script structurally invalid',
+    (script, ruleId, dependency) => {
+      const findings = analyzeScript(
+        script,
+        makeCtx({
+          script,
+          targets: ['posix-sh', 'cmd'],
+          dependencies: new Set([dependency]),
+        }),
+        { onlyRules: new Set([ruleId]) },
+      ).filter((finding) => finding.ruleId === ruleId);
+
+      expect(findings, `expected ${ruleId} for ${JSON.stringify(script)}`).not.toHaveLength(0);
+      expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
+    },
+  );
+});
+
+const AUTOMATIC_COMMAND_FIXTURE_CASES = [
+  {
+    ruleId: 'PS010',
+    dependency: 'rimraf',
+    supported: 'rm -rf dist',
+    semicolon: 'rm -rf dist; echo hi',
+    caret: 'rm -rf foo^ bar',
+    backslash: 'rm -rf foo\\bar',
+    quotedBackslash: 'rm -rf "foo\\bar"',
+    posixComment: 'rm -rf dist # comment',
+    unterminatedOperand: 'rm -rf "dist',
+  },
+  {
+    ruleId: 'PS011',
+    dependency: 'shx',
+    supported: 'cp -r src dist',
+    semicolon: 'cp -r src dist; echo hi',
+    caret: 'cp -r src foo^ bar',
+    backslash: 'cp -r src foo\\bar',
+    quotedBackslash: 'cp -r src "foo\\bar"',
+    posixComment: 'cp -r src dist # comment',
+    unterminatedOperand: 'cp -r src "dist',
+  },
+  {
+    ruleId: 'PS012',
+    dependency: 'shx',
+    supported: 'mv src dist',
+    semicolon: 'mv src dist; echo hi',
+    caret: 'mv src foo^ bar',
+    backslash: 'mv src foo\\bar',
+    quotedBackslash: 'mv src "foo\\bar"',
+    posixComment: 'mv src dist # comment',
+    unterminatedOperand: 'mv src "dist',
+  },
+  {
+    ruleId: 'PS013',
+    dependency: 'shx',
+    supported: 'mkdir -p dist',
+    semicolon: 'mkdir -p dist; echo hi',
+    caret: 'mkdir -p foo^ bar',
+    backslash: 'mkdir -p foo\\bar',
+    quotedBackslash: 'mkdir -p "foo\\bar"',
+    posixComment: 'mkdir -p dist # comment',
+    unterminatedOperand: 'mkdir -p "dist',
+  },
+  {
+    ruleId: 'PS017',
+    dependency: 'shx',
+    supported: 'grep TODO file',
+    semicolon: 'grep TODO file; echo hi',
+    caret: 'grep TODO foo^ bar',
+    backslash: 'grep TODO foo\\bar',
+    quotedBackslash: 'grep TODO "foo\\bar"',
+    posixComment: 'grep TODO file # comment',
+    unterminatedOperand: 'grep TODO "file',
+  },
+  {
+    ruleId: 'PS018',
+    dependency: 'shx',
+    supported: 'sed "s/a/b/" file',
+    semicolon: 'sed "s/a/b/" file; echo hi',
+    caret: 'sed "s/a/b/" foo^ bar',
+    backslash: 'sed "s/a/b/" foo\\bar',
+    quotedBackslash: 'sed "s/a/b/" "foo\\bar"',
+    posixComment: 'sed "s/a/b/" file # comment',
+    unterminatedOperand: 'sed "s/a/b/" "file',
+  },
+] as const;
+
+function automaticCommandFindings(
+  script: string,
+  ruleId: string,
+  dependency: string,
+  targets: Array<'posix-sh' | 'cmd' | 'powershell'>,
+) {
+  const findings = analyzeScript(
+    script,
+    makeCtx({ script, targets, dependencies: new Set([dependency]) }),
+    { onlyRules: new Set([ruleId]) },
+  );
+  const matching = findings.filter((candidate) => candidate.ruleId === ruleId);
+  expect(matching, `expected ${ruleId} for ${JSON.stringify(script)}`).not.toHaveLength(0);
+  return matching;
+}
+
+describe('automatic command replacements require one cross-target command shape', () => {
+  for (const fixture of AUTOMATIC_COMMAND_FIXTURE_CASES) {
+    it(`${fixture.ruleId} retains its supported replacement when every active graph agrees`, () => {
+      const findings = automaticCommandFindings(
+        fixture.supported,
+        fixture.ruleId,
+        fixture.dependency,
+        ['posix-sh', 'cmd', 'powershell'],
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.fix?.replacement).toBeDefined();
+    });
+
+    it(`${fixture.ruleId} withholds a fully double-quoted backslash path`, () => {
+      const findings = automaticCommandFindings(
+        fixture.quotedBackslash,
+        fixture.ruleId,
+        fixture.dependency,
+        ['posix-sh', 'cmd', 'powershell'],
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
+    });
+
+    it.each([
+      ['semicolon boundary', fixture.semicolon, ['posix-sh', 'cmd']],
+      ['cmd caret escape', fixture.caret, ['posix-sh', 'cmd']],
+      ['backslash escape/path boundary', fixture.backslash, ['posix-sh', 'cmd']],
+      ['POSIX comment boundary', fixture.posixComment, ['posix-sh', 'cmd']],
+    ] as const)(`${fixture.ruleId} withholds replacement at %s`, (_label, script, targets) => {
+      const findings = automaticCommandFindings(script, fixture.ruleId, fixture.dependency, [
+        ...targets,
+      ]);
+      expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
+    });
+
+    it(`${fixture.ruleId} withholds replacement when an operand diagnostic intersects the command`, () => {
+      const findings = automaticCommandFindings(
+        fixture.unterminatedOperand,
+        fixture.ruleId,
+        fixture.dependency,
+        ['posix-sh', 'cmd'],
+      );
+      expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
+    });
+  }
+
+  it('withholds the reproduced rm replacement when cmd consumes the POSIX sequence as argv', () => {
+    const findings = automaticCommandFindings('rm -rf foo; echo hi', 'PS010', 'rimraf', [
+      'posix-sh',
+      'cmd',
+    ]);
+    expect(findings.some((finding) => finding.fix?.safety === 'safe')).toBe(true);
+    expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
   });
 });
