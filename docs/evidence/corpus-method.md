@@ -5,22 +5,40 @@ public code. A machine scan produces a **data draft**, not a precision claim.
 
 ## Immutable scan
 
-1. The manual/monthly corpus workflow selects public JavaScript and TypeScript
-   repositories, resolves each default branch once, and records only
-   `owner/repository@40-character-commit` locators.
-2. `tools/corpus-scan.ts` reads those immutable locators through GitHub's tree
-   and blob APIs. It never clones with credentials, executes scripts, or writes
-   to a sampled repository.
-3. Only the root `package.json`, `pnpm-workspace.yaml`, and candidate workspace
+1. The manual/monthly corpus workflow captures the complete first page of two
+   popularity-ranked GitHub Search strata (JavaScript and TypeScript), including
+   each query, response hash, rank, star count, and repository. It then uses a
+   deterministic rank-by-rank round robin and de-duplicates a repository at its
+   first appearance. The full ordered snapshot is preserved rather than sorting
+   away its rank or stratum.
+2. The resolver batches candidates through GitHub GraphQL. One response anchors
+   the default-branch commit and root `package.json` blob together. Only an exact
+   `NOT_FOUND` error at that candidate's root-file field is an eligibility
+   exclusion; every other partial error or response mismatch fails closed. The
+   resolver records only `owner/repository@40-character-commit` locators and
+   hashes the complete ordered candidate snapshot into its evidence.
+3. `tools/corpus-scan.ts` makes one bounded recursive-tree REST request per
+   selected repository. It reads each selected manifest from
+   `raw.githubusercontent.com` at the exact commit without an Authorization
+   header, then verifies byte length and the Git blob OID from the immutable tree
+   before analysis. Manifest downloads therefore do not consume per-blob GitHub
+   REST core requests. The scanner never clones, executes scripts, or writes to
+   a sampled repository.
+4. Only the root `package.json`, `pnpm-workspace.yaml`, and candidate workspace
    `package.json` files are materialized in a fresh temporary directory. The
    normal CLI analyzer then applies the same canonical-root, workspace glob,
    dependency visibility, and symlink-boundary policy used for local projects.
-4. Dependency/VCS/vendor/generated/build/distribution directories and symlink
+5. Dependency/VCS/vendor/generated/build/distribution directories and symlink
    tree entries are excluded. The default ceilings are 20,000 tree entries,
    500 manifests, depth 12, 1 MiB per file, and 10 MiB decoded bytes per
    repository. A GitHub-truncated tree or any local limit marks the repository
-   `truncated`; API, decoding, or analysis errors mark it `failed`. Neither
-   status contributes to promoted totals.
+   `truncated`; API, decoding, immutable-blob verification, or analysis errors
+   mark it `failed`. Neither status contributes to promoted totals. GitHub HTTP
+   failures retain their status, rate-limit limit/remaining/reset/used/resource,
+   Retry-After, request ID, and a rate/auth/permission classification; request
+   credentials are never persisted. Findings from truncated or failed
+   repositories are also excluded from `findings.jsonl`, so the adjudication
+   draft cannot silently sample incomplete repositories.
 
 The scan reports root-only and workspace-full counts separately. This prevents
 root-only PS040 results from being presented as monorepo truth.
@@ -29,12 +47,18 @@ root-only PS040 results from being presented as monorepo truth.
 
 The workflow artifact contains:
 
+- `repository-candidates.json`: the complete ordered popularity-strata snapshot,
+  including query metadata, ranks, repositories, response hashes, and status;
+- `repository-sample.json`: candidate-snapshot SHA-256, deterministic method,
+  GraphQL request/cost evidence, rootless replacements, and selected immutable
+  commits/root-manifest blobs;
 - `repos.txt`: the exact immutable sample;
 - `findings.jsonl`: stable finding IDs, immutable source URLs, script SHA-256,
   rule metadata, spans, and redacted messages—never raw script source;
 - `corpus-run.json`: selected manifest paths, scanner/source commit and hashes,
-  rule-registry hash, limits, sample method/seed, environment, per-repository
-  status, separate scan modes, artifact hashes, and reproduction command;
+  rule-registry hash, limits, sample method/seed, hashes of the full candidate
+  snapshot and sample evidence, environment, per-repository status, separate
+  scan modes, artifact hashes, and reproduction command;
 - `summary.md`: an explicitly unverified summary for maintainers.
 
 The run fails if any repository fails, while still leaving `corpus-run.json`
@@ -77,4 +101,3 @@ exist, scriptspect makes no head-to-head superiority claim.
 - Draft, partial, overdue, or failed runs leave the relevant gate `OPEN`.
 - No issue, pull request, comment, email, or other third-party write is made
   from corpus automation. Such contact requires explicit human authorization.
-

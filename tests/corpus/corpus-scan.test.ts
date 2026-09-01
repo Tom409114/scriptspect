@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_CORPUS_LIMITS,
+  gitBlobOid,
   parseRepoLocator,
   redactCorpusText,
   selectCorpusFiles,
@@ -8,6 +9,12 @@ import {
 } from '../../tools/corpus-lib';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
+
+describe('Git blob integrity', () => {
+  it('derives the canonical SHA-1 object ID from the exact blob bytes', () => {
+    expect(gitBlobOid(Buffer.from('hello\n'))).toBe('ce013625030ba8dba906f756967f9e9ca394464a');
+  });
+});
 
 describe('immutable corpus locators', () => {
   it('accepts only owner/repo plus an exact 40-character commit', () => {

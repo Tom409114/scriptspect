@@ -63,6 +63,12 @@ export function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+/** Derive the canonical Git object ID for exact blob bytes. */
+export function gitBlobOid(value: string | Buffer): string {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+}
+
 export function parseRepoLocator(value: string): RepoLocator {
   const match =
     /^([A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})\/[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99}))@([a-f0-9]{40})$/.exec(

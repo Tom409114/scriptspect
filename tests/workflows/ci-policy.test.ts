@@ -1,6 +1,5 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -47,44 +46,6 @@ function workflowNames(): string[] {
   return readdirSync(join(root, '.github', 'workflows'))
     .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
     .sort();
-}
-
-function runCorpusCandidatePool(requested: number, candidates: string[]) {
-  const selectionStep = allSteps(workflow('corpus.yml')).find(
-    (step) => step.name === 'Prepare the deterministic repository candidate pool',
-  );
-  const match = selectionStep?.run?.match(
-    /node --input-type=module <<'NODE'\n(?<program>[\s\S]+?)\nNODE/u,
-  );
-  if (!match?.groups?.program) {
-    throw new Error('corpus selection step must expose an executable inline Node program');
-  }
-
-  const directory = mkdtempSync(join(tmpdir(), 'scriptspect-corpus-selection-'));
-  const candidateFile = join(directory, 'candidates.txt');
-  const selectedFile = join(directory, 'selected.txt');
-  try {
-    writeFileSync(candidateFile, `${candidates.join('\n')}\n`, 'utf8');
-    const result = spawnSync(
-      process.execPath,
-      ['--input-type=module', '--eval', match.groups.program],
-      {
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          REPO_COUNT: String(requested),
-          CANDIDATE_FILE: candidateFile,
-          SELECTED_FILE: selectedFile,
-        },
-      },
-    );
-    if (result.status !== 0) {
-      throw new Error(`corpus selection failed:\n${result.stderr}`);
-    }
-    return readFileSync(selectedFile, 'utf8').trimEnd().split('\n');
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
 }
 
 describe('pull-request trust boundary', () => {
@@ -331,14 +292,15 @@ describe('reproducible CI', () => {
     );
   });
 
-  it('bounds every hosted job and caps GitHub Search pages at 100', () => {
+  it('bounds every hosted job and delegates the 100-repository cap to the typed resolver', () => {
     for (const name of workflowNames()) {
       for (const [jobName, job] of Object.entries(workflow(name).jobs ?? {})) {
         expect(job['timeout-minutes'], `${name}:${jobName}`).toBeGreaterThan(0);
       }
     }
     const corpus = workflowSource('corpus.yml');
-    expect(corpus).toContain('REPO_COUNT" -le 100');
+    expect(corpus).toContain("default: '100'");
+    expect(corpus).toContain('tools/corpus-resolve.ts');
     expect(corpus).not.toContain('{0,2}');
   });
 
@@ -378,40 +340,22 @@ describe('reproducible CI', () => {
 });
 
 describe('corpus repository selection', () => {
-  it('retains sorted replacements beyond the requested count', () => {
-    const repositories = runCorpusCandidatePool(1, ['zeta/project', 'alpha/project']);
-
-    expect(repositories).toEqual(['alpha/project', 'zeta/project']);
-  });
-
-  it('retains every valid candidate when 100 eligible repositories are requested', () => {
-    const candidates = Array.from(
-      { length: 120 },
-      (_, index) => `owner/project-${String(119 - index).padStart(3, '0')}`,
+  it('captures the complete ranked candidate universe before resolving the sample', () => {
+    const steps = allSteps(workflow('corpus.yml'));
+    const collector = steps.find(
+      (step) => step.name === 'Collect the ranked repository candidate snapshot',
     );
-    const repositories = runCorpusCandidatePool(100, candidates);
+    const resolver = steps.find(
+      (step) => step.name === 'Resolve the exact root-eligible repository sample',
+    );
 
-    expect(repositories).toHaveLength(120);
-    expect(repositories[0]).toBe('owner/project-000');
-    expect(repositories[119]).toBe('owner/project-119');
-  });
-
-  it('deduplicates overlapping search results without discarding replacements', () => {
-    const repositories = runCorpusCandidatePool(3, [
-      'owner/project-c',
-      'owner/project-a',
-      'owner/project-b',
-      'owner/project-a',
-      'owner/project-c',
-      'owner/project-d',
-    ]);
-
-    expect(repositories).toEqual([
-      'owner/project-a',
-      'owner/project-b',
-      'owner/project-c',
-      'owner/project-d',
-    ]);
+    expect(collector?.run).toBe(
+      'pnpm exec tsx tools/corpus-candidates.ts repository-candidates.json',
+    );
+    expect(collector?.env).toEqual({ GITHUB_TOKEN: `\${{ github.token }}` });
+    expect(steps.indexOf(collector as Step)).toBeLessThan(steps.indexOf(resolver as Step));
+    expect(workflowSource('corpus.yml')).not.toContain('uniqueCandidates.sort');
+    expect(workflowSource('corpus.yml')).not.toContain('gh api');
   });
 
   it('resolves the exact root-eligible sample before the scanner runs', () => {
@@ -427,11 +371,22 @@ describe('corpus repository selection', () => {
     expect(resolverIndex).toBeGreaterThanOrEqual(0);
     expect(resolverIndex).toBeLessThan(scannerIndex);
     expect(resolver?.run).toBe(
-      'pnpm exec tsx tools/corpus-resolve.ts "$CANDIDATE_FILE" repos.txt repository-sample.json "$REPO_COUNT"',
+      'pnpm exec tsx tools/corpus-resolve.ts repository-candidates.json repos.txt repository-sample.json "$REPO_COUNT"',
     );
     expect(resolver?.env).toMatchObject({
       GITHUB_TOKEN: `\${{ github.token }}`,
       REPO_COUNT: `\${{ inputs.repo-count || '100' }}`,
     });
+
+    const scanner = steps[scannerIndex];
+    expect(scanner?.env).toMatchObject({
+      CORPUS_SAMPLE_METHOD: 'popularity-strata-round-robin-v1',
+      CORPUS_CANDIDATE_SNAPSHOT: 'repository-candidates.json',
+      CORPUS_SAMPLE_EVIDENCE: 'repository-sample.json',
+    });
+    const upload = steps.find(
+      (step) => step.name === 'Upload draft evidence for maintainer review',
+    );
+    expect(String(upload?.with?.path)).toContain('repository-candidates.json');
   });
 });

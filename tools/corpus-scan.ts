@@ -16,24 +16,27 @@ import type { Finding } from '../src/rules/types';
 import {
   type CorpusLimits,
   DEFAULT_CORPUS_LIMITS,
+  gitBlobOid,
   parseRepoLocator,
   redactCorpusText,
   selectCorpusFiles,
   sha256,
   type TreeEntry,
 } from './corpus-lib';
+import {
+  checkedResponse,
+  type GitHubFailureEvidence,
+  githubApiResponse,
+  githubFailureEvidence,
+  invalidGitHubResponse,
+} from './github-api';
 
 const GITHUB_API = 'https://api.github.com';
+const GITHUB_RAW = 'https://raw.githubusercontent.com';
 
 interface GitHubTreeResponse {
   tree?: TreeEntry[];
   truncated?: boolean;
-}
-
-interface GitHubBlobResponse {
-  content?: string;
-  encoding?: string;
-  size?: number;
 }
 
 interface CountSummary {
@@ -52,6 +55,7 @@ interface RepositoryEvidence {
   manifestPaths: string[];
   truncations: string[];
   error?: string;
+  failure?: GitHubFailureEvidence;
   rootOnly: Omit<CountSummary, 'repositories'>;
   workspaceFull: Omit<CountSummary, 'repositories'>;
 }
@@ -83,7 +87,12 @@ interface CorpusRunManifest {
   mode: 'root-and-workspace';
   targets: typeof DEFAULT_TARGETS;
   limits: CorpusLimits;
-  sampling: { method: string; seed: string };
+  sampling: {
+    method: string;
+    seed: string;
+    candidateSnapshotSha256?: string;
+    sampleEvidenceSha256?: string;
+  };
   environment: { node: string; platform: NodeJS.Platform; arch: string; runnerOs?: string };
   repositories: RepositoryEvidence[];
   promotedTotals: { rootOnly: CountSummary; workspaceFull: CountSummary };
@@ -100,6 +109,8 @@ export interface CorpusScanOptions {
   limits?: CorpusLimits;
   sampleMethod?: string;
   sampleSeed?: string;
+  candidateSnapshotFile?: string;
+  sampleEvidenceFile?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -112,54 +123,169 @@ function exactSourceCommit(value: string): string {
   return value;
 }
 
-function readLocators(inputFile: string): ReturnType<typeof parseRepoLocator>[] {
-  const locators = readFileSync(inputFile, 'utf8')
+function readLocatorSequence(inputFile: string): ReturnType<typeof parseRepoLocator>[] {
+  return readFileSync(inputFile, 'utf8')
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter((line) => line !== '' && !line.startsWith('#'))
     .map(parseRepoLocator);
+}
+
+function sortedUniqueLocators(
+  locators: readonly ReturnType<typeof parseRepoLocator>[],
+): ReturnType<typeof parseRepoLocator>[] {
   const unique = new Map(locators.map((locator) => [`${locator.repo}@${locator.commit}`, locator]));
   return [...unique.values()].sort((left, right) =>
     `${left.repo}@${left.commit}`.localeCompare(`${right.repo}@${right.commit}`),
   );
 }
 
-function headers(token: string): Record<string, string> {
-  return {
-    Accept: 'application/vnd.github+json',
-    Authorization: `Bearer ${token}`,
-    'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'scriptspect-corpus-scan',
+function validateSampleEvidence(
+  bytes: Buffer,
+  candidateSnapshotSha256: string,
+  sampleMethod: string,
+  inputLocators: readonly ReturnType<typeof parseRepoLocator>[],
+): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString('utf8'));
+  } catch {
+    throw new Error('corpus sample evidence was not valid JSON');
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error('corpus sample evidence was invalid');
+  }
+  const evidence = parsed as {
+    status?: unknown;
+    method?: unknown;
+    candidateSnapshotSha256?: unknown;
+    selected?: unknown;
   };
+  if (evidence.status !== 'complete') {
+    throw new Error('corpus sample evidence status was not complete');
+  }
+  if (evidence.method !== sampleMethod) {
+    throw new Error('corpus sample evidence method did not match the scanner method');
+  }
+  if (evidence.candidateSnapshotSha256 !== candidateSnapshotSha256) {
+    throw new Error('corpus sample evidence candidate snapshot digest did not match');
+  }
+  if (!Array.isArray(evidence.selected)) {
+    throw new Error('corpus sample evidence selected locators were invalid');
+  }
+  const selectedLocators = evidence.selected.map((value) => {
+    if (typeof value !== 'object' || value === null) {
+      throw new Error('corpus sample evidence selected locators were invalid');
+    }
+    const selected = value as { repository?: unknown; commit?: unknown };
+    if (typeof selected.repository !== 'string' || typeof selected.commit !== 'string') {
+      throw new Error('corpus sample evidence selected locators were invalid');
+    }
+    try {
+      return parseRepoLocator(`${selected.repository}@${selected.commit}`);
+    } catch {
+      throw new Error('corpus sample evidence selected locators were invalid');
+    }
+  });
+  const selectedSequence = selectedLocators.map((value) => `${value.repo}@${value.commit}`);
+  const inputSequence = inputLocators.map((value) => `${value.repo}@${value.commit}`);
+  if (JSON.stringify(selectedSequence) !== JSON.stringify(inputSequence)) {
+    throw new Error('corpus sample evidence selected locators did not match repos.txt');
+  }
 }
 
-async function fetchJson<T>(fetchImpl: typeof fetch, url: string, token: string): Promise<T> {
-  const response = await fetchImpl(url, { headers: headers(token) });
-  if (!response.ok) throw new Error(`GitHub API ${response.status} for ${url}`);
-  return (await response.json()) as T;
+async function fetchJson<T>(
+  fetchImpl: typeof fetch,
+  url: string,
+  token: string,
+): Promise<{ data: T; response: Response }> {
+  const response = await githubApiResponse(fetchImpl, url, token, 'scriptspect-corpus-scan');
+  try {
+    return { data: (await response.json()) as T, response };
+  } catch {
+    throw invalidGitHubResponse(url, `GitHub API returned invalid JSON for ${url}`, response);
+  }
+}
+
+function rawManifestUrl(repo: string, commit: string, path: string): string {
+  const [owner, repository] = repo.split('/');
+  if (owner === undefined || repository === undefined) {
+    throw new Error(`invalid repository name: ${repo}`);
+  }
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  return `${GITHUB_RAW}/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${commit}/${encodedPath}`;
+}
+
+async function readBoundedBody(
+  response: Response,
+  maxBytes: number,
+  overflowMessage: string,
+): Promise<Buffer> {
+  if (response.body === null) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error(overflowMessage);
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, totalBytes);
 }
 
 async function downloadSelectedFiles(
   repo: string,
+  commit: string,
   entries: readonly TreeEntry[],
   targetRoot: string,
-  token: string,
   fetchImpl: typeof fetch,
   limits: CorpusLimits,
 ): Promise<void> {
   let actualTotal = 0;
   for (const entry of entries) {
-    const blob = await fetchJson<GitHubBlobResponse>(
-      fetchImpl,
-      `${GITHUB_API}/repos/${repo}/git/blobs/${entry.sha}`,
-      token,
-    );
-    if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
-      throw new Error(`${entry.path}: GitHub blob response was not base64`);
+    if (!/^[a-f0-9]{40}$/.test(entry.sha)) {
+      throw new Error(
+        `${entry.path}: immutable tree Git blob OID was not 40 lowercase hex characters`,
+      );
     }
-    const bytes = Buffer.from(blob.content.replace(/\s/gu, ''), 'base64');
-    if (bytes.length !== entry.size || blob.size !== entry.size) {
-      throw new Error(`${entry.path}: blob size did not match the immutable tree entry`);
+    if (!Number.isSafeInteger(entry.size) || (entry.size as number) < 0) {
+      throw new Error(`${entry.path}: immutable tree entry had no valid byte size`);
+    }
+    const expectedBytes = entry.size as number;
+    const url = rawManifestUrl(repo, commit, entry.path);
+    const response = await checkedResponse(
+      fetchImpl,
+      url,
+      {
+        headers: {
+          Accept: 'application/octet-stream',
+          'User-Agent': 'scriptspect-corpus-scan',
+        },
+        redirect: 'error',
+      },
+      'GitHub raw',
+    );
+    const hardCap = Math.min(
+      expectedBytes,
+      limits.maxFileBytes,
+      limits.maxTotalBytes - actualTotal,
+    );
+    const sizeMismatchMessage = `${entry.path}: raw byte length did not match the immutable tree entry`;
+    const bytes = await readBoundedBody(response, hardCap, sizeMismatchMessage);
+    if (bytes.length !== expectedBytes) {
+      throw new Error(`${entry.path}: raw byte length did not match the immutable tree entry`);
+    }
+    if (gitBlobOid(bytes) !== entry.sha) {
+      throw new Error(`${entry.path}: raw bytes did not match the immutable tree Git blob OID`);
     }
     actualTotal += bytes.length;
     if (bytes.length > limits.maxFileBytes || actualTotal > limits.maxTotalBytes) {
@@ -284,8 +410,32 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
   const sourceCommit = exactSourceCommit(options.sourceCommit);
   const limits = options.limits ?? DEFAULT_CORPUS_LIMITS;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const locators = readLocators(options.inputFile);
-  if (locators.length === 0) throw new Error('repository list is empty');
+  const sampleMethod = options.sampleMethod ?? 'popularity-strata-round-robin-v1';
+  const candidateSnapshotBytes =
+    options.candidateSnapshotFile === undefined
+      ? undefined
+      : readFileSync(options.candidateSnapshotFile);
+  const sampleEvidenceBytes =
+    options.sampleEvidenceFile === undefined ? undefined : readFileSync(options.sampleEvidenceFile);
+  const candidateSnapshotSha256 =
+    candidateSnapshotBytes === undefined ? undefined : sha256(candidateSnapshotBytes);
+  const sampleEvidenceSha256 =
+    sampleEvidenceBytes === undefined ? undefined : sha256(sampleEvidenceBytes);
+  const locatorSequence = readLocatorSequence(options.inputFile);
+  if (locatorSequence.length === 0) throw new Error('repository list is empty');
+  if (
+    candidateSnapshotBytes !== undefined &&
+    candidateSnapshotSha256 !== undefined &&
+    sampleEvidenceBytes !== undefined
+  ) {
+    validateSampleEvidence(
+      sampleEvidenceBytes,
+      candidateSnapshotSha256,
+      sampleMethod,
+      locatorSequence,
+    );
+  }
+  const locators = sortedUniqueLocators(locatorSequence);
   const outputDir = resolve(options.outputDir);
   mkdirSync(outputDir, { recursive: true });
 
@@ -296,23 +446,35 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
     let manifestPaths: string[] = [];
     let truncations: string[] = [];
     try {
-      const treeResponse = await fetchJson<GitHubTreeResponse>(
-        fetchImpl,
-        `${GITHUB_API}/repos/${locator.repo}/git/trees/${locator.commit}?recursive=1`,
-        options.token,
-      );
-      if (!Array.isArray(treeResponse.tree)) throw new Error('GitHub tree response had no tree');
+      const treeUrl = `${GITHUB_API}/repos/${locator.repo}/git/trees/${locator.commit}?recursive=1`;
+      const { data: treeResponse, response: treeHttpResponse } =
+        await fetchJson<GitHubTreeResponse>(fetchImpl, treeUrl, options.token);
+      if (!Array.isArray(treeResponse.tree)) {
+        throw invalidGitHubResponse(treeUrl, 'GitHub tree response had no tree', treeHttpResponse);
+      }
       const selected = selectCorpusFiles(treeResponse.tree, limits);
       truncations = [...selected.truncations];
       if (treeResponse.truncated === true) truncations.unshift('github-tree-truncated');
       manifestPaths = selected.files.map((entry) => entry.path);
       if (!manifestPaths.includes('package.json'))
         throw new Error('root package.json was unavailable');
+      if (truncations.length !== 0) {
+        repositories.push({
+          repository: locator.repo,
+          commit: locator.commit,
+          status: 'truncated',
+          manifestPaths,
+          truncations,
+          rootOnly: emptyCounts(),
+          workspaceFull: emptyCounts(),
+        });
+        continue;
+      }
       await downloadSelectedFiles(
         locator.repo,
+        locator.commit,
         selected.files,
         tempRoot,
-        options.token,
         fetchImpl,
         limits,
       );
@@ -320,7 +482,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
         config: { targets: DEFAULT_TARGETS, severity: new Map(), ignore: [] },
       });
       const counts = repositoryCounts(result);
-      const status: RepositoryStatus = truncations.length === 0 ? 'complete' : 'truncated';
+      const status: RepositoryStatus = 'complete';
       repositories.push({
         repository: locator.repo,
         commit: locator.commit,
@@ -329,10 +491,13 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
         truncations,
         ...counts,
       });
-      for (const finding of result.findings) {
-        findings.push(findingEvidence(locator.repo, locator.commit, result, finding));
+      if (status === 'complete') {
+        for (const finding of result.findings) {
+          findings.push(findingEvidence(locator.repo, locator.commit, result, finding));
+        }
       }
     } catch (error) {
+      const failure = githubFailureEvidence(error);
       repositories.push({
         repository: locator.repo,
         commit: locator.commit,
@@ -340,6 +505,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
         manifestPaths,
         truncations,
         error: redactCorpusText(error instanceof Error ? error.message : String(error)),
+        ...(failure === undefined ? {} : { failure }),
         rootOnly: emptyCounts(),
         workspaceFull: emptyCounts(),
       });
@@ -370,8 +536,10 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
     targets: DEFAULT_TARGETS,
     limits,
     sampling: {
-      method: options.sampleMethod ?? 'workflow-curated-popularity-strata',
+      method: sampleMethod,
       seed: options.sampleSeed ?? 'none',
+      ...(candidateSnapshotSha256 === undefined ? {} : { candidateSnapshotSha256 }),
+      ...(sampleEvidenceSha256 === undefined ? {} : { sampleEvidenceSha256 }),
     },
     environment: {
       node: process.version,
@@ -393,6 +561,12 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
     artifactSha256: {
       'findings.jsonl': sha256(findingsArtifact),
       'summary.md': sha256(summaryText),
+      ...(options.candidateSnapshotFile === undefined || candidateSnapshotSha256 === undefined
+        ? {}
+        : { [basename(options.candidateSnapshotFile)]: candidateSnapshotSha256 }),
+      ...(options.sampleEvidenceFile === undefined || sampleEvidenceSha256 === undefined
+        ? {}
+        : { [basename(options.sampleEvidenceFile)]: sampleEvidenceSha256 }),
     },
   };
   writeFileSync(join(outputDir, 'findings.jsonl'), findingsArtifact, {
@@ -423,6 +597,8 @@ async function main(): Promise<void> {
     sourceCommit: process.env.SCRIPTSPECT_SOURCE_COMMIT ?? process.env.GITHUB_SHA ?? '',
     sampleMethod: process.env.CORPUS_SAMPLE_METHOD,
     sampleSeed: process.env.CORPUS_SAMPLE_SEED,
+    candidateSnapshotFile: process.env.CORPUS_CANDIDATE_SNAPSHOT,
+    sampleEvidenceFile: process.env.CORPUS_SAMPLE_EVIDENCE,
   });
 }
 
