@@ -1,6 +1,16 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -248,19 +258,62 @@ function posixShell(): string {
 }
 
 async function replayFixture(
-  options: { limits?: CorpusLimits; runnerOs?: string } = {},
+  options: { gitlink?: boolean; limits?: CorpusLimits; runnerOs?: string } = {},
 ): Promise<{ directory: string; reproduction: string }> {
   const directory = temporaryDirectory();
   const outputRoot = temporaryDirectory();
   mkdirSync(join(directory, 'tools'), { recursive: true });
   writeFileSync(join(directory, 'tools', 'corpus-scan.ts'), 'export const committed = true;\n');
+  copyFileSync(
+    join(process.cwd(), 'tools', 'corpus-replay-check.mjs'),
+    join(directory, 'tools', 'corpus-replay-check.mjs'),
+  );
   writeFileSync(join(directory, 'package.json'), '{"packageManager":"pnpm@11.24.0"}\n');
+  writeFileSync(join(directory, 'README.md'), 'committed replay fixture\n');
+  writeFileSync(join(directory, '.gitattributes'), 'filtered.txt filter=replay-clean\n');
+  writeFileSync(join(directory, 'filtered.txt'), 'canonical\n');
+  writeFileSync(join(directory, "special ' [x] ;.txt"), 'special filename\n');
+  writeFileSync(join(directory, 'executable.sh'), '#!/bin/sh\nexit 0\n');
+  if (process.platform !== 'win32') {
+    chmodSync(join(directory, 'executable.sh'), 0o755);
+    symlinkSync('README.md', join(directory, 'readme-link'));
+  }
   git(directory, 'init', '--quiet');
   git(directory, 'config', 'user.name', 'Corpus Replay Test');
   git(directory, 'config', 'user.email', 'corpus-replay@example.invalid');
   git(directory, 'config', 'core.autocrlf', 'false');
-  git(directory, 'add', '--', 'tools/corpus-scan.ts', 'package.json');
+  git(directory, 'config', 'filter.replay-clean.clean', "sed 's/.*/canonical/'");
+  git(directory, 'config', 'filter.replay-clean.smudge', 'cat');
+  git(
+    directory,
+    'add',
+    '--',
+    'tools/corpus-scan.ts',
+    'tools/corpus-replay-check.mjs',
+    'package.json',
+    'README.md',
+    '.gitattributes',
+    'filtered.txt',
+    "special ' [x] ;.txt",
+    'executable.sh',
+    ...(process.platform === 'win32' ? [] : ['readme-link']),
+  );
   git(directory, 'commit', '--quiet', '-m', 'fixture');
+  if (options.gitlink === true) {
+    const submodule = join(directory, 'vendor', 'submodule');
+    execFileSync('git', ['clone', '--quiet', '--no-hardlinks', directory, submodule], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const gitlinkCommit = git(submodule, 'rev-parse', 'HEAD');
+    git(
+      directory,
+      'update-index',
+      '--add',
+      '--cacheinfo',
+      `160000,${gitlinkCommit},vendor/submodule`,
+    );
+    git(directory, 'commit', '--quiet', '-m', 'add gitlink fixture');
+  }
   const sourceCommit = git(directory, 'rev-parse', 'HEAD');
   const inputFile = join(directory, 'repos.txt');
   const candidateSnapshotFile = join(directory, 'repository-candidates.json');
@@ -842,32 +895,14 @@ describe('immutable corpus run evidence', () => {
       sampleEvidenceFile,
     });
 
-    const replayOutput = `corpus-reproduction-${SOURCE_COMMIT}`;
-    const cleanCheckout = [
-      `test "$(git rev-parse --verify HEAD)" = '${SOURCE_COMMIT}'`,
-      'git ls-files -v >/dev/null',
-      'git ls-files -v | while IFS= read -r entry; do case "$entry" in H\\ *) ;; *) exit 1 ;; esac; done',
-      'git diff --quiet --',
-      'git diff --cached --quiet --',
-      `test -z "$(git status --porcelain=v1 --untracked-files=all -- '.' ':(top,literal,exclude)repos copy.txt' ':(top,literal,exclude)repository candidate'"'"'s.json' ':(top,literal,exclude)repository sample;ignored.json')"`,
-    ];
-    expect(manifest.reproduction).toBe(
-      [
-        `: "\${GITHUB_TOKEN:?set GITHUB_TOKEN to a read-only public-repository token}"`,
-        `git -c advice.detachedHead=false checkout --detach '${SOURCE_COMMIT}'`,
-        ...cleanCheckout,
-        `test "$(node --version)" = '${process.version}'`,
-        `test "$(node -p 'process.platform')" = '${process.platform}'`,
-        `test "$(node -p 'process.arch')" = '${process.arch}'`,
-        'corepack enable',
-        "corepack prepare 'pnpm@11.24.0' --activate",
-        'pnpm install --frozen-lockfile',
-        ...cleanCheckout,
-        `test ! -e '${replayOutput}'`,
-        `mkdir -- '${replayOutput}'`,
-        'unset RUNNER_OS',
-        `SCRIPTSPECT_SOURCE_COMMIT='${SOURCE_COMMIT}' CORPUS_GENERATED_AT='2026-09-01T00:00:00.000Z' CORPUS_SAMPLE_METHOD='popularity-strata-round-robin-v1' CORPUS_SAMPLE_SEED='candidate-seed' CORPUS_LIMITS_JSON='{"maxTreeEntries":20000,"maxManifests":500,"maxDepth":12,"maxFileBytes":1048576,"maxTotalBytes":10485760}' CORPUS_CANDIDATE_SNAPSHOT='repository candidate'"'"'s.json' CORPUS_SAMPLE_EVIDENCE='repository sample;ignored.json' pnpm exec tsx tools/corpus-scan.ts 'repos copy.txt' '${replayOutput}'`,
-      ].join(' && '),
+    const preflight = `node --input-type=module -e "$SCRIPTSPECT_REPLAY_CHECK" -- '${SOURCE_COMMIT}' 'repos copy.txt' 'repository candidate'"'"'s.json' 'repository sample;ignored.json'`;
+    expect(manifest.reproduction).toMatch(/^SCRIPTSPECT_REPLAY_CHECK='/u);
+    expect(manifest.reproduction.split(preflight)).toHaveLength(3);
+    expect(manifest.reproduction).toContain(
+      `CORPUS_LIMITS_JSON='{"maxTreeEntries":20000,"maxManifests":500,"maxDepth":12,"maxFileBytes":1048576,"maxTotalBytes":10485760}'`,
+    );
+    expect(manifest.reproduction).toContain(
+      `pnpm exec tsx tools/corpus-scan.ts 'repos copy.txt' 'corpus-reproduction-${SOURCE_COMMIT}'`,
     );
     expect(manifest.reproduction).not.toContain('read-only-test-token-must-not-be-persisted');
     expect(manifest.reproduction).not.toContain(directory);
@@ -908,7 +943,7 @@ describe('immutable corpus run evidence', () => {
       expect(result.status, `${testCase.name}: ${result.stderr}`).not.toBe(0);
       expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
     }
-  });
+  }, 15_000);
 
   it.each([
     ['assume-unchanged', '--assume-unchanged'],
@@ -926,6 +961,68 @@ describe('immutable corpus run evidence', () => {
     expect(result.status, String(result.stderr)).not.toBe(0);
     expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
   });
+
+  it('fails closed when fsmonitor-valid hides a dirty tracked file', async () => {
+    const replay = await replayFixture();
+    git(replay.directory, 'config', 'core.fsmonitor', 'true');
+    writeFileSync(join(replay.directory, 'README.md'), 'dirty content hidden by fsmonitor\n');
+    git(replay.directory, 'update-index', '--fsmonitor-valid', '--', 'README.md');
+    expect(git(replay.directory, 'ls-files', '-v', '--', 'README.md')).toBe('H README.md');
+    expect(git(replay.directory, 'ls-files', '-f', '--', 'README.md')).toBe('h README.md');
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it('fails closed when a clean filter hides different worktree bytes', async () => {
+    const replay = await replayFixture();
+    writeFileSync(join(replay.directory, 'filtered.txt'), 'malicious worktree bytes\n');
+    git(replay.directory, 'add', '--', 'filtered.txt');
+    git(replay.directory, 'diff', '--quiet', '--', 'filtered.txt');
+    git(replay.directory, 'diff', '--cached', '--quiet', '--', 'filtered.txt');
+    expect(git(replay.directory, 'status', '--porcelain=v1', '--', 'filtered.txt')).toBe('');
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it('propagates a Git status failure instead of treating it as clean', async () => {
+    const replay = await replayFixture();
+    git(replay.directory, 'config', 'status.showUntrackedFiles', 'invalid-mode');
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it('rejects a gitlink even when its checked-out submodule is clean', async () => {
+    const replay = await replayFixture({ gitlink: true });
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'fails closed when core.filemode hides an executable-bit mismatch',
+    async () => {
+      const replay = await replayFixture();
+      git(replay.directory, 'config', 'core.filemode', 'false');
+      chmodSync(join(replay.directory, 'executable.sh'), 0o644);
+      git(replay.directory, 'diff', '--quiet', '--', 'executable.sh');
+
+      const result = executeReplay(replay.directory, replay.reproduction);
+
+      expect(result.status, String(result.stderr)).not.toBe(0);
+      expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+    },
+  );
 
   it('fails closed before scanning under a different Node runtime', async () => {
     const cases = [

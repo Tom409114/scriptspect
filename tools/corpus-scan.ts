@@ -39,6 +39,10 @@ import {
 
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
+const CORPUS_REPLAY_CHECK_SOURCE = readFileSync(
+  fileURLToPath(new URL('./corpus-replay-check.mjs', import.meta.url)),
+  'utf8',
+);
 const CORPUS_LIMIT_KEYS = [
   'maxTreeEntries',
   'maxManifests',
@@ -200,19 +204,11 @@ function reproductionCommand(options: {
       : [basename(options.candidateSnapshotFile)]),
     ...(options.sampleEvidenceFile === undefined ? [] : [basename(options.sampleEvidenceFile)]),
   ];
-  const cleanStatusPathspec = [
-    '.',
-    ...new Set(evidenceFiles.map((file) => `:(top,literal,exclude)${file}`)),
-  ]
+  const replayCheckArguments = [options.sourceCommit, ...new Set(evidenceFiles)]
     .map(posixShellQuote)
     .join(' ');
   const cleanCheckout = [
-    `test "$(git rev-parse --verify HEAD)" = ${posixShellQuote(options.sourceCommit)}`,
-    'git ls-files -v >/dev/null',
-    'git ls-files -v | while IFS= read -r entry; do case "$entry" in H\\ *) ;; *) exit 1 ;; esac; done',
-    'git diff --quiet --',
-    'git diff --cached --quiet --',
-    `test -z "$(git status --porcelain=v1 --untracked-files=all -- ${cleanStatusPathspec})"`,
+    `node --input-type=module -e "$SCRIPTSPECT_REPLAY_CHECK" -- ${replayCheckArguments}`,
   ];
   const environment = [
     `SCRIPTSPECT_SOURCE_COMMIT=${posixShellQuote(options.sourceCommit)}`,
@@ -228,12 +224,13 @@ function reproductionCommand(options: {
       : [`CORPUS_SAMPLE_EVIDENCE=${posixShellQuote(basename(options.sampleEvidenceFile))}`]),
   ];
   return [
+    `SCRIPTSPECT_REPLAY_CHECK=${posixShellQuote(CORPUS_REPLAY_CHECK_SOURCE)}`,
     `: "\${GITHUB_TOKEN:?set GITHUB_TOKEN to a read-only public-repository token}"`,
     `git -c advice.detachedHead=false checkout --detach ${posixShellQuote(options.sourceCommit)}`,
-    ...cleanCheckout,
     `test "$(node --version)" = ${posixShellQuote(options.environment.node)}`,
     `test "$(node -p 'process.platform')" = ${posixShellQuote(options.environment.platform)}`,
     `test "$(node -p 'process.arch')" = ${posixShellQuote(options.environment.arch)}`,
+    ...cleanCheckout,
     'corepack enable',
     "corepack prepare 'pnpm@11.24.0' --activate",
     'pnpm install --frozen-lockfile',

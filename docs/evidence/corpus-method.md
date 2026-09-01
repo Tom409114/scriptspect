@@ -67,10 +67,22 @@ To replay a run, place its `repository-candidates.json`,
 `GITHUB_TOKEN` externally to a read-only public-repository token, and run the
 command recorded in `corpus-run.json`. The command checks out the exact source
 commit and fails unless HEAD, the index, and every tracked file are clean. Every
-tracked-index tag other than ordinary `H` is rejected, including Git's
-`assume-unchanged` and `skip-worktree` hiding flags. Apart from the three named
-evidence inputs, any nonignored untracked file is also a failure. These Git
-checks run both before and after the frozen-lockfile install, before the scanner
+tracked-index tag other than ordinary `H` is rejected. The preflight reads
+separate NUL-delimited `git ls-files -v` and `git ls-files -f` results so Git's
+`assume-unchanged`, `skip-worktree`, and `fsmonitor-valid` hiding flags cannot
+mask a changed file. The validator source is embedded once in the reproduction
+command rather than loaded from the checkout it is validating. It parses the
+raw NUL-delimited `HEAD` tree and hashes every regular file's worktree bytes
+with the repository's Git object algorithm; clean/smudge filters, EOL or
+working-tree encodings, symlink emulation, racy stat data, and hidden index bits
+therefore cannot substitute different bytes. POSIX executable bits and raw
+symlink targets must match their tree modes. Gitlinks are rejected rather than
+trusted as submodules. Git is invoked without an interpolating shell, and
+NUL-delimited output plus literal pathspec arguments preserve unusual evidence
+filenames. Working-tree, cached, and status checks explicitly do not ignore
+submodules; any Git or filesystem failure is fatal. Apart from the three named
+evidence inputs, any nonignored untracked file is also a failure. These checks
+run both before and after the frozen-lockfile install, before the scanner
 starts. Replay requires the exact recorded Node version, platform, and
 architecture; it restores the recorded `RUNNER_OS` value or explicitly unsets
 it. It also binds the complete canonical limits JSON, original generation
