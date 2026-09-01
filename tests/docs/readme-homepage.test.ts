@@ -57,6 +57,23 @@ describe('bilingual homepage', () => {
     }
   });
 
+  it('answers what the product does, who uses it, and how it works', () => {
+    const english = read('README.md');
+    const chinese = read('README.zh-CN.md');
+
+    expect(english).toContain('## What it does, who it is for, and how it works');
+    expect(english).toContain('JS/TS maintainers');
+    expect(english).toContain('repository → static target-shell analysis');
+    expect(chinese).toContain('## 它到底做什么、谁适合用、怎么工作');
+    expect(chinese).toContain('JS/TS 维护者');
+    expect(chinese).toContain('repository → target-shell 静态分析');
+    for (const homepage of [english, chinese]) {
+      expect(homepage.indexOf('<!-- readme-section: purpose -->')).toBeLessThan(
+        homepage.indexOf('<!-- readme-section: demo -->'),
+      );
+    }
+  });
+
   it('presents only commands supported by the recorded release state', () => {
     const english = read('README.md');
     const chinese = read('README.zh-CN.md');
@@ -96,16 +113,16 @@ describe('bilingual homepage', () => {
       annotations: Array<{ title: string; displayTitle?: string; message: string }>;
     };
 
-    expect(evidence.sourceCommit).toBe('bf37b4132508c685a91cc16a9c0a3058c252502e');
+    expect(evidence.sourceCommit).toBe('c9c671c8e150705d78d9169d4c5a8f22cb37fad0');
     expect(evidence.workflowRun).toEqual(
       expect.objectContaining({
-        id: 33467290054,
+        id: 33482453059,
         conclusion: 'success',
-        url: 'https://github.com/Tom409114/scriptspect/actions/runs/33467290054',
+        url: 'https://github.com/Tom409114/scriptspect/actions/runs/33482453059',
       }),
     );
     expect(evidence.checkRun).toEqual(
-      expect.objectContaining({ id: 99729679961, annotationCount: 2 }),
+      expect.objectContaining({ id: 99774890433, annotationCount: 2 }),
     );
     expect(evidence.cleanConsumer).toEqual(
       expect.objectContaining({ exitCode: 0, packages: 1, scripts: 1, errors: 0 }),
@@ -133,8 +150,8 @@ describe('bilingual homepage', () => {
       expect(homepage).toContain('docs/assets/demo/action.txt');
       expect(homepage).toContain('docs/validation/readme-action-evidence.json');
       expect(homepage).toContain(evidence.workflowRun.url);
-      expect(homepage).toContain('33467290054');
-      expect(homepage).toContain('bf37b413');
+      expect(homepage).toContain('33482453059');
+      expect(homepage).toContain('c9c671c8');
     }
   });
 
@@ -395,14 +412,14 @@ describe('README demo artifacts', () => {
     expect(renderedColumnCounts.length).toBeGreaterThan(terminal.split('\n').length);
     expect(Math.max(...renderedColumnCounts)).toBeLessThanOrEqual(104);
     const actionText = read('docs/assets/demo/action.txt');
-    expect(actionText).toContain('workflow run: 33467290054 (success)');
-    expect(actionText).toContain('source commit: bf37b4132508c685a91cc16a9c0a3058c252502e');
+    expect(actionText).toContain('workflow run: 33482453059 (success)');
+    expect(actionText).toContain('source commit: c9c671c8e150705d78d9169d4c5a8f22cb37fad0');
     expect(actionText).toContain('broken fixture: 2 annotations');
     expect(actionText).toContain('PS010: scripts.clean');
     const actionSvg = read('docs/assets/demo/action.svg');
     expect(actionSvg).toMatch(/<svg[^>]+role="img"[^>]+aria-labelledby=/);
     expect(actionSvg).toContain('Hosted Action evidence');
-    expect(actionSvg).toContain('data-run-id="33467290054"');
+    expect(actionSvg).toContain('data-run-id="33482453059"');
     expect(actionSvg).not.toMatch(/<script|(?:href|src)=["']https?:\/\//iu);
     const patch = read('docs/assets/demo/fix.patch');
     expect(patch).toContain('--- a/package.json');

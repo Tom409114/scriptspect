@@ -12,12 +12,13 @@
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-6f7bf7.svg"></a>
 </p>
 
-<p align="center"><strong>One script. Multiple shell interpretations. A finding tied to the target that breaks.</strong></p>
+<p align="center"><strong>Make package.json scripts work on macOS, Linux, and Windows—before CI or users find the breakage.</strong></p>
 
-ScriptSpect statically checks npm-style `package.json` scripts without running
-them. It identifies constructs that mean different things to `posix-sh`,
-Windows `cmd`, or optional `powershell`, points to the relevant span, and keeps
-automatic fixes behind explicit safety gates.
+ScriptSpect is a preflight checker for npm-style `package.json` scripts. Point
+it at a Node.js project or monorepo: without running the scripts, it shows the
+exact command fragment that will break in `posix-sh`, Windows `cmd`, or optional
+`powershell`, explains the affected platform, and offers a fix only when its
+safety conditions are proved.
 
 <!-- readme-state:overview:start -->
 > [!IMPORTANT]
@@ -27,6 +28,29 @@ automatic fixes behind explicit safety gates.
 
 **[See the real demo](#before-result-and-after)** · **[Evaluate from source](#evaluate-from-source-pre-release)** · **[GitHub Actions](#github-actions-preview-pre-release)** · **[Rules](docs/rules/README.md)**
 <!-- readme-state:overview:end -->
+
+<!-- readme-section: purpose -->
+## What it does, who it is for, and how it works
+
+Use ScriptSpect if you maintain a JS/TS app, library, CLI, or monorepo; own CI
+or releases; or support contributors on more than one operating system. It
+solves the familiar failure where a script works on its author's Mac or Linux
+machine but fails for Windows users—or contains Windows-only syntax that fails
+on Unix CI.
+
+| Question | Direct answer |
+| --- | --- |
+| **Who uses it?** | JS/TS maintainers, monorepo owners, Windows contributors, and CI/release teams. |
+| **What problem does it catch?** | Shell-specific environment assignment, commands such as `rm`/`cp`/`mv`, expansion, redirection, operators, paths, explicit shell dependencies, and undeclared executables. |
+| **How does it check?** | It discovers the root package and workspaces, structurally parses every script for the selected shell targets, and never executes the target commands. |
+| **What do you get?** | An exact rule ID, package and script name, source span, affected shell/OS, severity, confidence, explanation, and terminal/JSON/PR-annotation output. |
+| **How does it help fix it?** | `--fix-dry-run` previews a patch. `--fix` applies only proven safe or precondition-satisfied changes; ambiguous cases stay manual. |
+
+The mental model is: **repository → static target-shell analysis → exact
+findings → reviewable fix plan**. For the current pre-release, follow
+[Evaluate from source](#evaluate-from-source-pre-release), run
+`node dist/cli.mjs <your-project>`, and add `--fix-dry-run` to preview changes.
+For pull requests, copy the [GitHub Actions preview](#github-actions-preview-pre-release).
 
 <!-- readme-section: why -->
 ## Why it is useful
@@ -39,6 +63,10 @@ ScriptSpect uses a target-specific structural parser rather than scanning quoted
 text with a stack of regular expressions. It is intentionally not a full shell
 interpreter: findings should still be reviewed in the project that owns the
 script.
+
+[`scripts-doctor`](docs/comparison.md) is the adjacent analyzer baseline.
+`cross-env`, `shx`, and `rimraf` are remedies ScriptSpect may recommend when
+their preconditions are satisfied, not competing analyzers.
 
 <!-- readme-section: demo -->
 ## Before, result, and after
@@ -97,7 +125,7 @@ configuration, or I/O exits `2`.
 ```bash
 git clone https://github.com/Tom409114/scriptspect.git
 cd scriptspect
-git checkout bf37b4132508c685a91cc16a9c0a3058c252502e
+git checkout c9c671c8e150705d78d9169d4c5a8f22cb37fad0
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
@@ -151,7 +179,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Tom409114/scriptspect
-          ref: bf37b4132508c685a91cc16a9c0a3058c252502e
+          ref: c9c671c8e150705d78d9169d4c5a8f22cb37fad0
           path: .scriptspect
           persist-credentials: false
       - uses: ./.scriptspect
@@ -164,15 +192,15 @@ The Action writes annotations, a job summary, and numeric outputs named
 marking a finding run as failed. Its default mode is read-only.
 <!-- readme-state:action:end -->
 
-**Real hosted proof — not a mock screenshot.** On `main` at `bf37b413`, public
-[CI run #33467290054](https://github.com/Tom409114/scriptspect/actions/runs/33467290054)
+**Real hosted proof — not a mock screenshot.** On `main` at `c9c671c8`, public
+[CI run #33482453059](https://github.com/Tom409114/scriptspect/actions/runs/33482453059)
 consumed `uses: ./` against both clean and broken fixtures. The clean consumer
 reported `1 package · 1 script · 0 errors`; the broken fixture emitted 2 check
 annotations, including `PS010: scripts.clean` on `package.json`.
 
 ![Generated card summarizing the verified hosted Action run](docs/assets/demo/action.svg)
 
-[Selectable Action evidence](docs/assets/demo/action.txt) · [Committed source evidence](docs/validation/readme-action-evidence.json) · [Open the hosted job](https://github.com/Tom409114/scriptspect/actions/runs/33467290054/job/99729679961)
+[Selectable Action evidence](docs/assets/demo/action.txt) · [Committed source evidence](docs/validation/readme-action-evidence.json) · [Open the hosted job](https://github.com/Tom409114/scriptspect/actions/runs/33482453059/job/99774890433)
 
 <!-- readme-section: config -->
 ## Minimal configuration
