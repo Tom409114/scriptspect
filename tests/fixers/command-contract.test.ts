@@ -2,19 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_TARGETS } from '../../src/core/targets';
 import { applicableFixes, applyToScript } from '../../src/fixers/apply';
 import { analyzeScript } from '../../src/rules';
+import {
+  AUTOMATIC_COMMAND_FIXERS,
+  STATIC_PATH_REJECTION_CATEGORIES,
+} from '../../src/rules/fix-builders';
 import type { Finding, RuleContext } from '../../src/rules/types';
 
-const AUTOMATIC_COMMAND_RULES = [
-  'PS010',
-  'PS011',
-  'PS012',
-  'PS013',
-  'PS017',
-  'PS018',
-  'PS019',
-] as const;
+const AUTOMATIC_COMMAND_RULES = AUTOMATIC_COMMAND_FIXERS.map(({ ruleId }) => ruleId);
 
-type AutomaticCommandRule = (typeof AUTOMATIC_COMMAND_RULES)[number];
+type AutomaticCommandRule = (typeof AUTOMATIC_COMMAND_FIXERS)[number]['ruleId'];
+type StaticPathRejectionCategory = (typeof STATIC_PATH_REJECTION_CATEGORIES)[number];
 
 interface CommandContractCase {
   ruleId: AutomaticCommandRule;
@@ -43,14 +40,14 @@ const COMMAND_CONTRACTS: readonly CommandContractCase[] = [
     dependency: 'shx',
     supported: { before: 'cp -r src dist', after: 'shx cp -r src dist' },
     unsupportedOption: 'cp -a src dist',
-    semanticBoundary: 'cp -r -p src dist',
+    semanticBoundary: 'cp -p src dist',
   },
   {
     ruleId: 'PS012',
     dependency: 'shx',
-    supported: { before: 'mv -n old.txt new.txt', after: 'shx mv -n old.txt new.txt' },
+    supported: { before: 'mv old.txt new.txt', after: 'shx mv old.txt new.txt' },
     unsupportedOption: 'mv -T old.txt new.txt',
-    semanticBoundary: 'mv only-source.txt',
+    semanticBoundary: 'mv -n old.txt new.txt',
   },
   {
     ruleId: 'PS013',
@@ -107,12 +104,37 @@ function fixed(script: string, deps: string[] = []): string {
   return applyToScript(script, run(script, deps)).script;
 }
 
+function expectManual(script: string, ruleId: AutomaticCommandRule): void {
+  const candidate = finding(script, ruleId, ['rimraf', 'shx']);
+  expect(candidate.fix).toMatchObject({ safety: 'manual' });
+  expect(candidate.fix?.replacement).toBeUndefined();
+  expect(fixed(script, ['rimraf', 'shx'])).toBe(script);
+}
+
 describe('automatic command fixer contract coverage', () => {
-  it('has exactly one complete contract row for every automatic command rule', () => {
-    expect(COMMAND_CONTRACTS).toHaveLength(AUTOMATIC_COMMAND_RULES.length);
+  it('has exactly one complete contract row for every production automatic command rule', () => {
+    expect(COMMAND_CONTRACTS).toHaveLength(AUTOMATIC_COMMAND_FIXERS.length);
     expect(new Set(COMMAND_CONTRACTS.map(({ ruleId }) => ruleId))).toEqual(
       new Set(AUTOMATIC_COMMAND_RULES),
     );
+    expect(COMMAND_CONTRACTS.map(({ ruleId, dependency }) => ({ ruleId, dependency }))).toEqual(
+      AUTOMATIC_COMMAND_FIXERS.map(({ ruleId, primaryDependency }) => ({
+        ruleId,
+        dependency: primaryDependency,
+      })),
+    );
+  });
+
+  it('declares the enforced path-safety categories on every production fixer', () => {
+    expect(new Set(UNSAFE_PATH_CASES.map(([, , category]) => category))).toEqual(
+      new Set(STATIC_PATH_REJECTION_CATEGORIES),
+    );
+    for (const metadata of AUTOMATIC_COMMAND_FIXERS) {
+      expect(metadata.pathSafetyPolicy).toBe('static-project-relative');
+      expect(new Set(metadata.rejectedPathCategories)).toEqual(
+        new Set(STATIC_PATH_REJECTION_CATEGORIES),
+      );
+    }
   });
 
   for (const contract of COMMAND_CONTRACTS) {
@@ -176,6 +198,11 @@ describe('rm replacement boundaries', () => {
 
   it.each([
     'rm -rf .',
+    'rm -rf ./.',
+    'rm -rf foo/.',
+    'rm -rf ././',
+    'rm -rf .//./',
+    'rm -rf foo//.',
     'rm -rf *',
     'rm -rf C:\\',
     'rm -rf C:temp',
@@ -186,6 +213,80 @@ describe('rm replacement boundaries', () => {
     expect(candidate.fix).toMatchObject({ safety: 'manual' });
     expect(candidate.fix?.replacement).toBeUndefined();
     expect(applicableFixes([candidate])).toHaveLength(0);
+  });
+
+  it.each([
+    'rm -rf foo/*',
+    'rm -rf "foo/*"',
+    'rm -rf foo/**',
+    'rm -rf "foo/{a,b}"',
+    'rm -rf "foo/[ab]"',
+    'rm -rf "foo/@(a|b)"',
+    'rm -rf foo/\\*',
+  ])('never routes a nested or quoted glob through rimraf or shx: %s', (script) => {
+    expectManual(script, 'PS010');
+  });
+});
+
+const UNSAFE_PATH_CASES = [
+  ['POSIX absolute path', '/tmp/file', 'absolute-or-drive'],
+  ['drive-absolute path', 'C:/temp/file', 'absolute-or-drive'],
+  ['drive-relative path', 'C:temp/file', 'absolute-or-drive'],
+  ['slash-form UNC path', '//server/share/file', 'absolute-or-drive'],
+  ['backslash-form UNC path', '\\\\server\\share\\file', 'absolute-or-drive'],
+  ['parent traversal', 'safe/../outside', 'parent-traversal'],
+  ['current directory', './.', 'empty-or-current-directory'],
+  ['home path', '~/file', 'home-relative'],
+  ['nested glob', 'safe/*.txt', 'glob'],
+  ['brace expansion', 'safe/{a,b}.txt', 'glob'],
+  ['bracket glob', 'safe/[ab].txt', 'glob'],
+  ['extended glob', '"safe/@(a|b).txt"', 'glob'],
+  ['backtick substitution', '`pwd`/file', 'runtime-expansion'],
+  ['POSIX variable expansion', '$HOME/file', 'runtime-expansion'],
+  ['POSIX command substitution', '$(pwd)/file', 'runtime-expansion'],
+  ['cmd variable expansion', '%TEMP%/file', 'runtime-expansion'],
+  ['cmd substring expansion', '%CD:~0,2%/file', 'runtime-expansion'],
+  ['cmd delayed expansion', '!TEMP!/file', 'runtime-expansion'],
+  ['PowerShell environment expansion', '$env:TEMP/file', 'runtime-expansion'],
+  ['dash-prefixed/stdin path', '-', 'dash-prefixed-or-stdin'],
+] as const satisfies readonly (readonly [string, string, StaticPathRejectionCategory])[];
+
+const PATH_OPERAND_COMMANDS: readonly {
+  ruleId: AutomaticCommandRule;
+  scripts: (unsafePath: string) => string[];
+}[] = [
+  { ruleId: 'PS010', scripts: (path) => [`rm -rf ${path}`] },
+  {
+    ruleId: 'PS011',
+    scripts: (path) => [`cp -r ${path} dist`, `cp -r src ${path}`],
+  },
+  {
+    ruleId: 'PS012',
+    scripts: (path) => [`mv ${path} dist`, `mv src ${path}`],
+  },
+  { ruleId: 'PS013', scripts: (path) => [`mkdir -p ${path}`] },
+  { ruleId: 'PS017', scripts: (path) => [`grep TODO ${path}`] },
+  { ruleId: 'PS018', scripts: (path) => [`sed "s/a/b/" ${path}`] },
+  { ruleId: 'PS019', scripts: (path) => [`cat ${path}`] },
+];
+
+describe('shared static project-relative path boundary', () => {
+  for (const command of PATH_OPERAND_COMMANDS) {
+    describe(command.ruleId, () => {
+      it.each(UNSAFE_PATH_CASES)(
+        'refuses %s in every file operand',
+        (_description, path, _category) => {
+          for (const script of command.scripts(path)) {
+            expectManual(script, command.ruleId);
+          }
+        },
+      );
+    });
+  }
+
+  it('does not mistake grep patterns or sed expressions for file operands', () => {
+    expect(fixed('grep literal/path src/app.ts', ['shx'])).toBe('shx grep literal/path src/app.ts');
+    expect(fixed('sed "s/old/~new/" src/app.ts', ['shx'])).toBe('shx sed "s/old/~new/" src/app.ts');
   });
 });
 
@@ -204,4 +305,36 @@ describe('documented ShellJS subset boundaries', () => {
       expect(candidate?.fix?.replacement).toBeUndefined();
     },
   );
+
+  it.each(['cp -u src dist', 'cp -p src dist', 'mv -n old new'])(
+    'refuses flags whose filesystem and exit behavior is not proven equivalent: %s',
+    (script) => {
+      const ruleId = script.startsWith('cp ') ? 'PS011' : 'PS012';
+      expectManual(script, ruleId);
+    },
+  );
+
+  it.each(['grep -vl TODO src/app.ts', 'grep -lv TODO src/app.ts'])(
+    'refuses grep -v/-l combinations with different output behavior: %s',
+    (script) => {
+      expectManual(script, 'PS017');
+    },
+  );
+
+  it('refuses grep with multiple explicit files because shx changes filename prefixes', () => {
+    expectManual('grep TODO src/a.ts src/b.ts', 'PS017');
+  });
+
+  it('requires sed -i to have both an expression and a real file operand', () => {
+    expectManual('sed -i "s/a/b/"', 'PS018');
+    expectManual('sed -i "s/a/b/" -', 'PS018');
+  });
+
+  it.each([
+    ['cat -', 'PS019'],
+    ['grep TODO -', 'PS017'],
+    ['sed "s/a/b/" -', 'PS018'],
+  ] as const)('does not claim explicit stdin operand equivalence: %s', (script, ruleId) => {
+    expectManual(script, ruleId);
+  });
 });
