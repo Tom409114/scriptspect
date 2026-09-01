@@ -224,8 +224,9 @@ function parseShxArgs(cmd: CommandNode, contract: ShxCommandContract): ParsedShx
   }
   if (valueFlags.length === 1) {
     const value = positionals[0];
-    if (value === undefined || !/^\d+$/.test(value.value)) {
-      return `-${valueFlags[0]} requires a non-negative integer argument`;
+    const numericValue = value === undefined ? Number.NaN : Number(value.value);
+    if (value === undefined || !/^\d+$/.test(value.value) || !Number.isSafeInteger(numericValue)) {
+      return `-${valueFlags[0]} requires an exactly representable integer from 0 to ${Number.MAX_SAFE_INTEGER}`;
     }
     positionals = positionals.slice(1);
   }

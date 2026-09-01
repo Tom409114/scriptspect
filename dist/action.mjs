@@ -14631,8 +14631,9 @@ function parseShxArgs(cmd, contract) {
   }
   if (valueFlags.length === 1) {
     const value = positionals[0];
-    if (value === void 0 || !/^\d+$/.test(value.value)) {
-      return `-${valueFlags[0]} requires a non-negative integer argument`;
+    const numericValue = value === void 0 ? Number.NaN : Number(value.value);
+    if (value === void 0 || !/^\d+$/.test(value.value) || !Number.isSafeInteger(numericValue)) {
+      return `-${valueFlags[0]} requires an exactly representable integer from 0 to ${Number.MAX_SAFE_INTEGER}`;
     }
     positionals = positionals.slice(1);
   }
@@ -15967,11 +15968,15 @@ function withoutAutomaticReplacement(finding) {
 function shouldGateReplacement(matrix, finding) {
   const replacement = finding.fix?.replacement;
   if (replacement === void 0) return false;
+  const automaticCommandReplacement = AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId);
   for (const target of matrix.activeTargets) {
     const parsed = matrix.byTarget.get(target);
     if (parsed === void 0) return true;
+    if (automaticCommandReplacement && parsed.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+      return true;
+    }
     const guardedSpans = [finding.span, replacement.span];
-    if (AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId)) {
+    if (automaticCommandReplacement) {
       guardedSpans.push(
         ...findCommandMatches(parsed.root, finding.span).map(({ command }) => command.span)
       );
@@ -15982,7 +15987,7 @@ function shouldGateReplacement(matrix, finding) {
       return true;
     }
   }
-  if (AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId) && !hasEquivalentCommandShape(matrix, finding)) {
+  if (automaticCommandReplacement && !hasEquivalentCommandShape(matrix, finding)) {
     return true;
   }
   return !hasStableReplacementRole(matrix, finding);

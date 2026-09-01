@@ -303,6 +303,36 @@ describe('documented ShellJS subset boundaries', () => {
     expect(fixed('grep -A 2 TODO app.txt', ['shx'])).toBe('shx grep -A 2 TODO app.txt');
   });
 
+  it.each([
+    ['grep -B 0 TODO app.txt', 'shx grep -B 0 TODO app.txt'],
+    [
+      'grep -A 9007199254740991 TODO app.txt && echo done',
+      'shx grep -A 9007199254740991 TODO app.txt && echo done',
+    ],
+    ['grep -inC 9007199254740991 TODO app.txt', 'shx grep -inC 9007199254740991 TODO app.txt'],
+  ])('accepts an exactly representable grep context boundary: %s', (script, expected) => {
+    expect(fixed(script, ['shx'])).toBe(expected);
+  });
+
+  for (const { label, script } of [
+    {
+      label: 'separate -A one above Number.MAX_SAFE_INTEGER',
+      script: 'grep -A 9007199254740992 TODO app.txt',
+    },
+    {
+      label: 'combined -inB overflow before a boolean operator',
+      script: 'grep -inB 9007199254740992 TODO app.txt && echo done',
+    },
+    {
+      label: '400-digit -C value that coerces to Infinity',
+      script: `grep -C ${'9'.repeat(400)} TODO app.txt`,
+    },
+  ]) {
+    it(`refuses ${label}`, () => {
+      expectManual(script, 'PS017');
+    });
+  }
+
   it.each(['cp -LP src dist', 'mv -fn old new'])(
     'refuses contradictory option combinations: %s',
     (script) => {

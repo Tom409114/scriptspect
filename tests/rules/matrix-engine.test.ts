@@ -162,6 +162,29 @@ describe('matrix diagnostic fix gates', () => {
 
     expect(finding?.fix?.replacement).toBeUndefined();
   });
+
+  it.each([
+    ['(rm -rf dist', 'PS010', 'rimraf'],
+    ['rm -rf dist &&', 'PS010', 'rimraf'],
+    ['cp -r src dist)', 'PS011', 'shx'],
+    ['rm -rf dist && echo "oops', 'PS010', 'rimraf'],
+  ] as const)(
+    'withholds %s when any active-shell error makes the script structurally invalid',
+    (script, ruleId, dependency) => {
+      const findings = analyzeScript(
+        script,
+        makeCtx({
+          script,
+          targets: ['posix-sh', 'cmd'],
+          dependencies: new Set([dependency]),
+        }),
+        { onlyRules: new Set([ruleId]) },
+      ).filter((finding) => finding.ruleId === ruleId);
+
+      expect(findings, `expected ${ruleId} for ${JSON.stringify(script)}`).not.toHaveLength(0);
+      expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
+    },
+  );
 });
 
 const AUTOMATIC_COMMAND_FIXTURE_CASES = [

@@ -145,11 +145,18 @@ function withoutAutomaticReplacement(finding: Finding): Finding {
 function shouldGateReplacement(matrix: ParseMatrix, finding: Finding): boolean {
   const replacement = finding.fix?.replacement;
   if (replacement === undefined) return false;
+  const automaticCommandReplacement = AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId);
   for (const target of matrix.activeTargets) {
     const parsed = matrix.byTarget.get(target);
     if (parsed === undefined) return true;
+    if (
+      automaticCommandReplacement &&
+      parsed.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+    ) {
+      return true;
+    }
     const guardedSpans: [number, number][] = [finding.span, replacement.span];
-    if (AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId)) {
+    if (automaticCommandReplacement) {
       guardedSpans.push(
         ...findCommandMatches(parsed.root, finding.span).map(({ command }) => command.span),
       );
@@ -162,10 +169,7 @@ function shouldGateReplacement(matrix: ParseMatrix, finding: Finding): boolean {
       return true;
     }
   }
-  if (
-    AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId) &&
-    !hasEquivalentCommandShape(matrix, finding)
-  ) {
+  if (automaticCommandReplacement && !hasEquivalentCommandShape(matrix, finding)) {
     return true;
   }
   return !hasStableReplacementRole(matrix, finding);
