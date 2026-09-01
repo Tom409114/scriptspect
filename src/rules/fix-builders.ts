@@ -20,7 +20,6 @@ interface ParsedShxArgs {
   flags: string[];
   /** Positional arguments after removing a context-option value. */
   positionals: Token[];
-  usedOptionTerminator: boolean;
 }
 
 interface ShxCommandContract {
@@ -205,12 +204,10 @@ function parseShxArgs(cmd: CommandNode, contract: ShxCommandContract): ParsedShx
   const args = cmd.argv.slice(1);
   let positionals = args;
   let flags: string[] = [];
-  let usedOptionTerminator = false;
 
   const firstArg = args[0];
   if (firstArg?.value === '--') {
-    usedOptionTerminator = true;
-    positionals = args.slice(1);
+    return `option terminator is outside the proven ShellJS ${command} invocation contract`;
   } else if (firstArg?.value.startsWith('-')) {
     if (!/^-[A-Za-z]+$/.test(firstArg.value)) {
       return `option ${JSON.stringify(firstArg.raw)} is outside the ShellJS ${command} contract`;
@@ -223,7 +220,7 @@ function parseShxArgs(cmd: CommandNode, contract: ShxCommandContract): ParsedShx
     positionals = args.slice(1);
   }
 
-  if (!usedOptionTerminator && positionals.some((token) => token.value.startsWith('-'))) {
+  if (positionals.some((token) => token.value.startsWith('-'))) {
     return 'ShellJS accepts only one leading short-option string; use -- for dash-prefixed paths';
   }
 
@@ -253,7 +250,7 @@ function parseShxArgs(cmd: CommandNode, contract: ShxCommandContract): ParsedShx
     return 'single-quoted or runtime-expanded arguments are not equivalent across npm script shells';
   }
 
-  const parsed = { flags, positionals, usedOptionTerminator };
+  const parsed = { flags, positionals };
   const semanticError = contract.validate?.(parsed);
   if (semanticError !== undefined && semanticError !== null) return semanticError;
 
@@ -353,7 +350,6 @@ function validateLiteralSed(args: ParsedShxArgs): string | null {
 }
 
 function rimrafEquivalent(args: ParsedShxArgs): boolean {
-  if (args.usedOptionTerminator) return false;
   const recursive = args.flags.includes('r') || args.flags.includes('R');
   const force = args.flags.includes('f');
   if (!recursive || !force) return false;

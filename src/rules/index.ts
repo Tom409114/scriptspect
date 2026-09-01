@@ -6,9 +6,10 @@
 
 import { sortFindings } from '../core/finding';
 import { ALL_TARGETS } from '../core/targets';
-import type { CommandNode, ParseMatrix, ShellTarget } from '../parser/ir';
+import type { CommandNode, ParseMatrix, ScriptNode, ShellTarget } from '../parser/ir';
 import { walkCommands } from '../parser/ir';
 import { parseMatrix } from '../parser/parse';
+import { AUTOMATIC_COMMAND_FIXERS } from './fix-builders';
 import { PS001 } from './PS001';
 import { PS002 } from './PS002';
 import { PS003 } from './PS003';
@@ -37,6 +38,10 @@ import { PS041 } from './PS041';
 import { PS050 } from './PS050';
 import { PS051 } from './PS051';
 import type { Finding, RuleContext, RuleModule, Severity } from './types';
+
+const AUTOMATIC_COMMAND_FIXER_IDS: ReadonlySet<string> = new Set(
+  AUTOMATIC_COMMAND_FIXERS.map(({ ruleId }) => ruleId),
+);
 
 export const RULES: readonly RuleModule[] = [
   PS001,
@@ -151,7 +156,139 @@ function shouldGateReplacement(matrix: ParseMatrix, finding: Finding): boolean {
       return true;
     }
   }
+  if (
+    AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId) &&
+    !hasEquivalentCommandShape(matrix, finding)
+  ) {
+    return true;
+  }
   return !hasStableReplacementRole(matrix, finding);
+}
+
+interface CommandRoleSegment {
+  kind: 'sequence' | 'boolean' | 'pipeline' | 'group';
+  span: [number, number];
+  index?: number;
+  before?: { op: string; span: [number, number] };
+  after?: { op: string; span: [number, number] };
+}
+
+interface CommandMatch {
+  command: CommandNode;
+  role: CommandRoleSegment[];
+}
+
+/**
+ * An automatic command edit is valid only when it addresses one identical
+ * command in every active shell graph. This closes gaps where one dialect
+ * treats bytes as argv while another treats them as separators, escapes,
+ * comments, or redirections.
+ */
+function hasEquivalentCommandShape(matrix: ParseMatrix, finding: Finding): boolean {
+  let expected: string | undefined;
+  for (const target of matrix.activeTargets) {
+    const root = matrix.byTarget.get(target)?.root;
+    if (root === undefined) return false;
+    const matches = findCommandMatches(root, finding.span);
+    if (matches.length !== 1) return false;
+    const match = matches[0];
+    if (match === undefined) return false;
+    const actual = JSON.stringify(commandShape(match));
+    expected ??= actual;
+    if (actual !== expected) return false;
+  }
+  return expected !== undefined;
+}
+
+function findCommandMatches(
+  node: ScriptNode,
+  executableSpan: [number, number],
+  role: CommandRoleSegment[] = [],
+): CommandMatch[] {
+  if (node.kind === 'command') {
+    const executable = node.argv[0];
+    return executable !== undefined && spansEqual(executable.span, executableSpan)
+      ? [{ command: node, role }]
+      : [];
+  }
+  if (node.kind === 'group') {
+    return findCommandMatches(node.body, executableSpan, [
+      ...role,
+      { kind: 'group', span: node.span },
+    ]);
+  }
+
+  const matches: CommandMatch[] = [];
+  node.parts.forEach((part, index) => {
+    const beforeIndex = index - 1;
+    const beforeOp = beforeIndex >= 0 ? operatorAt(node, beforeIndex) : undefined;
+    const afterOp = operatorAt(node, index);
+    matches.push(
+      ...findCommandMatches(part, executableSpan, [
+        ...role,
+        {
+          kind: node.kind,
+          span: node.span,
+          index,
+          ...(beforeOp === undefined ? {} : { before: beforeOp }),
+          ...(afterOp === undefined ? {} : { after: afterOp }),
+        },
+      ]),
+    );
+  });
+  return matches;
+}
+
+function operatorAt(
+  node: Exclude<ScriptNode, CommandNode | { kind: 'group' }>,
+  index: number,
+): { op: string; span: [number, number] } | undefined {
+  const span = node.opSpans[index];
+  if (span === undefined) return undefined;
+  const op = node.kind === 'pipeline' ? '|' : node.ops[index];
+  return op === undefined ? undefined : { op, span };
+}
+
+function commandShape(match: CommandMatch): object {
+  const { command, role } = match;
+  return {
+    span: command.span,
+    raw: command.raw,
+    argv: command.argv.map(tokenShape),
+    leadingEnv: command.leadingEnv.map(({ name, value, span }) => ({ name, value, span })),
+    redirects: command.redirects.map(({ op, span, target }) => ({
+      op,
+      span,
+      target: target === null ? null : tokenShape(target),
+    })),
+    wrapper:
+      command.wrapper === undefined
+        ? null
+        : {
+            shell: command.wrapper.shell,
+            raw: command.wrapper.raw,
+            span: command.wrapper.span,
+            payloadTarget: command.wrapper.payloadTarget,
+            payloadSupport: command.wrapper.payloadSupport,
+            payloadSourceSpan: command.wrapper.payloadSourceSpan,
+            payloadRaw: command.wrapper.payloadRaw,
+          },
+    role,
+  };
+}
+
+function tokenShape(token: CommandNode['argv'][number]): object {
+  return {
+    raw: token.raw,
+    value: token.value,
+    span: token.span,
+    quote: token.quote,
+    expansions: token.expansions.map(({ kind, raw, span }) => ({ kind, raw, span })),
+  };
+}
+
+function spansEqual(left: [number, number], right: [number, number]): boolean {
+  return left[0] === right[0] && left[1] === right[1];
 }
 
 function spansIntersect(left: [number, number], right: [number, number]): boolean {

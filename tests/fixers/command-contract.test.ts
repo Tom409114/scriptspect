@@ -337,4 +337,16 @@ describe('documented ShellJS subset boundaries', () => {
   ] as const)('does not claim explicit stdin operand equivalence: %s', (script, ruleId) => {
     expectManual(script, ruleId);
   });
+
+  it.each([
+    ['rm -rf -- file', 'PS010'],
+    ['cp -r -- src dist', 'PS011'],
+    ['mv -- src dist', 'PS012'],
+    ['mkdir -p -- dist', 'PS013'],
+    ['grep -v -- TODO file', 'PS017'],
+    ['sed -i -- "s/a/b/" file', 'PS018'],
+    ['cat -- file', 'PS019'],
+  ] as const)('refuses an unproven shx option-terminator path: %s', (script, ruleId) => {
+    expectManual(script, ruleId);
+  });
 });
