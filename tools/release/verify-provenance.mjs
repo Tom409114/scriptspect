@@ -92,7 +92,7 @@ function packageReference(entry, expected) {
 }
 
 function packagePurl(name, version) {
-  const encodedName = name.startsWith('@') ? name.replace('/', '%2F') : name;
+  const encodedName = name.startsWith('@') ? name.replaceAll('/', '%2F') : name;
   return `pkg:npm/${encodedName}@${version}`;
 }
 
