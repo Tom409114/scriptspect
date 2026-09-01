@@ -15,6 +15,12 @@ it('documents the draft collector without presenting unreviewed evidence as a cl
   expect(policy).toContain('`null`');
   expect(policy).toContain('not zero');
   expect(policy).toContain('workflow job fails');
+  expect(policy).toContain('paired 404');
+  expect(policy).toMatch(/do not make the\s+monthly workflow red/u);
+  expect(policy).toContain('eight-minute global deadline');
+  expect(policy).toContain('public GitHub release count');
+  expect(policy).toMatch(/duplicate immutable\s+(?:issue|release)/u);
+  expect(policy).toContain('structurally invalid');
   expect(policy).toContain('unreviewed');
   expect(policy).toContain('external/time-dependent');
 });

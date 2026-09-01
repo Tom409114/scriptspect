@@ -17,17 +17,33 @@ export const PS040: RuleModule = {
   badExamples: ['vite build  (vite not in dependencies)', 'jest  (jest not installed)'],
   goodExamples: ['vite build  (vite in devDependencies)', 'my-workspace-tool  (workspace bin)'],
   falsePositiveNotes:
-    'Only commands in the known-tool registry are checked — arbitrary words are never flagged. Declared dependencies and workspace package bins count as present.',
+    'Only commands in the known-tool registry are checked — arbitrary words are never flagged. Dependency aliases are resolved to their provider, workspace packages must expose a real bin through a compatible dependency, and root toolchains count only for deterministically identified npm/pnpm or non-PnP Yarn Classic workspaces.',
   fixSafety: 'conditional',
   provenance: [
     {
-      source: 'https://docs.npmjs.com/cli/v10/using-npm/scripts',
+      source: 'https://github.com/npm/run-script/blob/main/lib/set-path.js',
       claim:
-        'npm adds node_modules/.bin to PATH for script execution; an undeclared tool is not there.',
+        'npm run-script walks from the script cwd to the filesystem root and adds each ancestor node_modules/.bin to PATH.',
     },
     {
-      source: 'https://pnpm.io/workspaces',
-      claim: 'Workspace packages expose their bin field to sibling scripts.',
+      source: 'https://pnpm.io/cli/run',
+      claim:
+        'pnpm run explicitly adds the workspace-root node_modules/.bin to every workspace package script PATH.',
+    },
+    {
+      source: 'https://classic.yarnpkg.com/lang/en/docs/workspaces/',
+      claim:
+        'Yarn Classic hoists compatible workspace dependencies to the root node_modules tree, while version-mismatched dependencies come from the registry.',
+    },
+    {
+      source: 'https://yarnpkg.com/features/pnp#shared-binaries',
+      claim:
+        'Yarn PnP keeps a root binary root-only; each workspace using the binary must declare its provider.',
+    },
+    {
+      source: 'https://bun.sh/docs/pm/isolated-installs',
+      claim:
+        'New Bun workspaces default to isolated installs, where packages are expected to access only explicitly declared dependencies.',
     },
   ],
   check(matrix, ctx: RuleContext): Finding[] {
@@ -37,23 +53,30 @@ export const PS040: RuleModule = {
         const first = cmd.argv[0];
         if (first === undefined) continue;
         const name = first.value;
-        const pkg = KNOWN_TOOLS.get(name);
-        if (pkg === undefined) continue;
+        const providers = KNOWN_TOOLS.get(name);
+        if (providers === undefined) continue;
         if (SYSTEM_AND_TOOLCHAIN.has(name)) continue;
+        const primaryProvider = providers[0];
+        if (primaryProvider === undefined) continue;
         const hasIt =
-          ctx.dependencies.has(pkg) || ctx.dependencies.has(name) || ctx.workspaceBins.has(name);
+          providers.some((provider) => ctx.dependencies.has(provider)) ||
+          ctx.workspaceBins.has(name);
         if (hasIt) continue;
+        const providerDescription =
+          providers.length === 1
+            ? `\`${primaryProvider}\``
+            : `one of ${providers.map((provider) => `\`${provider}\``).join(', ')}`;
         const finding = makeFinding(
           this,
           { ...ctx, targets: [target] },
           {
-            message: `\`${name}\` is not declared as a dependency (provided by \`${pkg}\`)`,
+            message: `\`${name}\` is not declared as a dependency (provided by ${providerDescription})`,
             span: first.span,
             fix: {
               ruleId: this.id,
               safety: 'conditional',
-              description: `add \`${pkg}\` to devDependencies (never auto-installed by scriptspect)`,
-              requiresDependency: pkg,
+              description: `add \`${primaryProvider}\` to devDependencies (never auto-installed by scriptspect)`,
+              requiresDependency: primaryProvider,
             },
           },
         );

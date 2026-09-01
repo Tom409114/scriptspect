@@ -12,13 +12,18 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
+import { parseArgs, TextDecoder } from 'node:util';
 import { sha256 } from './corpus-lib';
 
 const GITHUB_API = 'https://api.github.com';
 const NPM_REGISTRY = 'https://registry.npmjs.org';
 const NPM_DOWNLOADS_API = 'https://api.npmjs.org';
 const USER_AGENT = 'scriptspect-monthly-evidence/1';
+const MAX_GITHUB_PAGES = 1_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_COLLECTION_TIMEOUT_MS = 8 * 60_000;
+const MAX_COLLECTION_TIMEOUT_MS = 14 * 60_000;
 const PARTIAL_COLLECTION_MESSAGE =
   'Monthly evidence collection was partial; review the generated draft artifact.';
 
@@ -46,10 +51,13 @@ export interface EvidenceSource {
   method: 'GET';
   url: string;
   query: Record<string, string>;
+  startedAt: string;
+  completedAt: string;
   completeness: Completeness;
   httpStatus: number | null;
   response: {
     sha256: string | null;
+    pageSha256: Array<string | null>;
     byteLength: number | null;
     jsonType: 'object' | 'array' | null;
     topLevelKeys: string[];
@@ -103,11 +111,22 @@ export interface CollectMonthlyEvidenceOptions {
   commitSha?: string | null;
   workflowRunUrl?: string | null;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
+  collectionTimeoutMs?: number;
 }
 
 interface CollectedResponse {
   source: EvidenceSource;
   data: JsonValue | null;
+  hasNextPage: boolean;
+  nextPageNumber: number | null;
+}
+
+interface EvidenceRequest {
+  id: string;
+  provider: EvidenceSource['provider'];
+  url: string;
+  token?: string;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -146,10 +165,46 @@ function validPackageName(value: string): boolean {
   return /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(value);
 }
 
+function requestTimeout(value: number | undefined): number {
+  const timeout = value ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > MAX_REQUEST_TIMEOUT_MS) {
+    throw new Error(`request timeout must be an integer from 1 to ${MAX_REQUEST_TIMEOUT_MS}`);
+  }
+  return timeout;
+}
+
+function collectionTimeout(value: number | undefined): number {
+  const timeout = value ?? DEFAULT_COLLECTION_TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > MAX_COLLECTION_TIMEOUT_MS) {
+    throw new Error(`collection timeout must be an integer from 1 to ${MAX_COLLECTION_TIMEOUT_MS}`);
+  }
+  return timeout;
+}
+
 function apiUrl(base: string, path: string, query: Record<string, string> = {}): string {
   const url = new URL(path, `${base.replace(/\/$/u, '')}/`);
   for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
   return url.toString();
+}
+
+function githubNextPageNumber(linkHeader: string | null): number | null {
+  const target = /<([^>]+)>;\s*rel="next"/u.exec(linkHeader ?? '')?.[1];
+  if (target === undefined) return null;
+  try {
+    const url = new URL(target);
+    const pageValues = url.searchParams.getAll('page');
+    if (
+      url.origin !== GITHUB_API ||
+      pageValues.length !== 1 ||
+      !/^\d+$/u.test(pageValues[0] ?? '')
+    ) {
+      return null;
+    }
+    const page = Number(pageValues[0]);
+    return Number.isSafeInteger(page) && page >= 2 ? page : null;
+  } catch {
+    return null;
+  }
 }
 
 function responseShape(
@@ -172,13 +227,11 @@ function responseShape(
 
 async function collectResponse(
   fetchImpl: typeof fetch,
-  request: {
-    id: string;
-    provider: EvidenceSource['provider'];
-    url: string;
-    token?: string;
-  },
+  request: EvidenceRequest,
+  requestTimeoutMs: number,
+  collectionDeadline: number,
 ): Promise<CollectedResponse> {
+  const startedAt = new Date().toISOString();
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'User-Agent': USER_AGENT,
@@ -190,54 +243,96 @@ async function collectResponse(
       headers.Authorization = `Bearer ${request.token}`;
     }
   }
+  const remainingCollectionMs = collectionDeadline - Date.now();
+  if (remainingCollectionMs <= 0) {
+    const url = new URL(request.url);
+    return {
+      data: null,
+      hasNextPage: false,
+      nextPageNumber: null,
+      source: {
+        id: request.id,
+        provider: request.provider,
+        method: 'GET',
+        url: `${url.origin}${url.pathname}`,
+        query: Object.fromEntries(url.searchParams.entries()),
+        startedAt,
+        completedAt: new Date().toISOString(),
+        completeness: 'partial',
+        httpStatus: null,
+        response: {
+          sha256: null,
+          pageSha256: [null],
+          byteLength: null,
+          jsonType: null,
+          topLevelKeys: [],
+          recordCount: null,
+        },
+        note: 'The global collection deadline expired before this request could start.',
+      },
+    };
+  }
   let response: Response;
   try {
     response = await fetchImpl(request.url, {
       method: 'GET',
       headers,
       redirect: 'error',
+      signal: AbortSignal.timeout(Math.min(requestTimeoutMs, remainingCollectionMs)),
     });
   } catch {
     const url = new URL(request.url);
     return {
       data: null,
+      hasNextPage: false,
+      nextPageNumber: null,
       source: {
         id: request.id,
         provider: request.provider,
         method: 'GET',
         url: `${url.origin}${url.pathname}`,
         query: Object.fromEntries(url.searchParams.entries()),
+        startedAt,
+        completedAt: new Date().toISOString(),
         completeness: 'partial',
         httpStatus: null,
         response: {
           sha256: null,
+          pageSha256: [null],
           byteLength: null,
           jsonType: null,
           topLevelKeys: [],
           recordCount: null,
         },
-        note: 'The public request failed before a response; exception text is not persisted.',
+        note:
+          Date.now() >= collectionDeadline
+            ? 'The global collection deadline expired during this request; exception text is not persisted.'
+            : 'The public request failed before a response; exception text is not persisted.',
       },
     };
   }
-  let responseText: string;
+  let responseBytes: Buffer;
   try {
-    responseText = await response.text();
+    responseBytes = Buffer.from(await response.arrayBuffer());
   } catch {
     const url = new URL(request.url);
-    const completeness: Completeness = response.status === 404 ? 'missing' : 'partial';
     return {
       data: null,
+      hasNextPage: false,
+      nextPageNumber: null,
       source: {
         id: request.id,
         provider: request.provider,
         method: 'GET',
         url: `${url.origin}${url.pathname}`,
         query: Object.fromEntries(url.searchParams.entries()),
-        completeness,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        completeness: 'partial',
         httpStatus: response.status,
         response: {
           sha256: null,
+          pageSha256: [null],
           byteLength: null,
           jsonType: null,
           topLevelKeys: [],
@@ -247,36 +342,52 @@ async function collectResponse(
       },
     };
   }
-  let data: JsonValue | null = null;
+  let responseText: string | null = null;
+  let invalidUtf8 = false;
   try {
-    data = JSON.parse(responseText) as JsonValue;
+    responseText = new TextDecoder('utf-8', { fatal: true }).decode(responseBytes);
   } catch {
-    // The raw bytes are hashed below, but malformed response text is never persisted.
+    invalidUtf8 = true;
+  }
+  let data: JsonValue | null = null;
+  if (responseText !== null) {
+    try {
+      data = JSON.parse(responseText) as JsonValue;
+    } catch {
+      // The exact raw bytes are hashed below, but malformed response text is never persisted.
+    }
   }
   if (typeof data !== 'object' || data === null) data = null;
   const url = new URL(request.url);
-  const hasNextPage = /<[^>]+>;\s*rel="next"/u.test(response.headers.get('link') ?? '');
+  const linkHeader = response.headers.get('link');
+  const hasNextPage = /<[^>]+>;\s*rel="next"/u.test(linkHeader ?? '');
+  const nextPageNumber = hasNextPage ? githubNextPageNumber(linkHeader) : null;
   const completeness: Completeness =
-    response.status === 404
+    response.status === 404 && data !== null
       ? 'missing'
-      : response.ok && data !== null && !hasNextPage
+      : response.status === 200 && data !== null && !hasNextPage
         ? 'complete'
         : 'partial';
   const shape =
     data === null ? { jsonType: null, topLevelKeys: [], recordCount: null } : responseShape(data);
   return {
     data,
+    hasNextPage,
+    nextPageNumber,
     source: {
       id: request.id,
       provider: request.provider,
       method: 'GET',
       url: `${url.origin}${url.pathname}`,
       query: Object.fromEntries(url.searchParams.entries()),
+      startedAt,
+      completedAt: new Date().toISOString(),
       completeness,
       httpStatus: response.status,
       response: {
-        sha256: sha256(responseText),
-        byteLength: Buffer.byteLength(responseText),
+        sha256: sha256(responseBytes),
+        pageSha256: [sha256(responseBytes)],
+        byteLength: responseBytes.byteLength,
         ...shape,
       },
       note:
@@ -284,9 +395,265 @@ async function collectResponse(
           ? 'Complete response under endpoint pagination metadata; no raw body is persisted.'
           : completeness === 'missing'
             ? 'The public endpoint returned 404; no metric is inferred from absence.'
-            : hasNextPage
-              ? 'Additional pages exist; first-page counts are not promoted to metrics.'
-              : `The public endpoint returned HTTP ${response.status} or invalid JSON; metrics remain null.`,
+            : invalidUtf8
+              ? 'The public endpoint returned invalid UTF-8; the raw-byte receipt is retained and metrics remain null.'
+              : hasNextPage
+                ? 'Additional pages exist; first-page counts are not promoted to metrics.'
+                : `The public endpoint returned HTTP ${response.status} or invalid JSON; metrics remain null.`,
+    },
+  };
+}
+
+type GithubPaginationShape = 'issues' | 'releases' | 'workflow-runs';
+
+function successfulJsonPage(response: CollectedResponse): boolean {
+  return response.source.httpStatus === 200 && response.data !== null;
+}
+
+function paginatedItems(
+  response: CollectedResponse,
+  shape: GithubPaginationShape,
+): unknown[] | null {
+  if (shape === 'issues' || shape === 'releases') {
+    return Array.isArray(response.data) ? response.data : null;
+  }
+  if (typeof response.data !== 'object' || response.data === null || Array.isArray(response.data)) {
+    return null;
+  }
+  return Array.isArray(response.data.workflow_runs) ? response.data.workflow_runs : null;
+}
+
+function advertisedWorkflowRuns(response: CollectedResponse): number | null {
+  if (typeof response.data !== 'object' || response.data === null || Array.isArray(response.data)) {
+    return null;
+  }
+  const total = response.data.total_count;
+  return typeof total === 'number' && Number.isSafeInteger(total) && total >= 0 ? total : null;
+}
+
+function addUniqueGithubIds(items: unknown[], seen: Set<number>): boolean {
+  for (const value of items) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const id = (value as Record<string, unknown>).id;
+    if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < 1 || seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+  }
+  return true;
+}
+
+function githubItemLabel(shape: GithubPaginationShape): string {
+  if (shape === 'workflow-runs') return 'workflow-run';
+  return shape === 'issues' ? 'issue' : 'release';
+}
+
+function workflowPaginationMetadataMatches(
+  response: CollectedResponse,
+  expectedTotal: number,
+  collectedCount: number,
+): boolean {
+  return (
+    advertisedWorkflowRuns(response) === expectedTotal &&
+    collectedCount <= expectedTotal &&
+    response.hasNextPage === collectedCount < expectedTotal
+  );
+}
+
+function nextPageMetadataMatches(response: CollectedResponse, pageNumber: number): boolean {
+  return !response.hasNextPage || response.nextPageNumber === pageNumber + 1;
+}
+
+function paginatedUrl(url: string, page: number): string {
+  const next = new URL(url);
+  next.searchParams.set('page', String(page));
+  return next.toString();
+}
+
+function combinedPageReceipt(
+  pages: CollectedResponse[],
+  shape: GithubPaginationShape | null,
+  recordCount: number | null,
+): EvidenceSource['response'] {
+  const pageSha256 = pages.map((page) => page.source.response.sha256);
+  const byteLengths = pages.map((page) => page.source.response.byteLength);
+  const allHashesPresent = pageSha256.every((value): value is string => value !== null);
+  const allLengthsPresent = byteLengths.every((value): value is number => value !== null);
+  return {
+    sha256: allHashesPresent
+      ? pageSha256.length === 1
+        ? (pageSha256[0] ?? null)
+        : sha256(pageSha256.map((value, index) => `${index + 1}:${value}`).join('\n'))
+      : null,
+    pageSha256,
+    byteLength: allLengthsPresent ? byteLengths.reduce((total, value) => total + value, 0) : null,
+    jsonType: shape === null ? null : shape === 'workflow-runs' ? 'object' : 'array',
+    topLevelKeys:
+      shape === 'workflow-runs' ? (pages[0]?.source.response.topLevelKeys ?? []).toSorted() : [],
+    recordCount,
+  };
+}
+
+function partialPagination(
+  first: CollectedResponse,
+  pages: CollectedResponse[],
+  failedPage: number,
+  recordCount: number,
+  reason = 'GitHub pagination did not complete',
+): CollectedResponse {
+  const failure = pages.at(-1) ?? first;
+  return {
+    data: null,
+    hasNextPage: false,
+    nextPageNumber: null,
+    source: {
+      ...first.source,
+      completedAt: failure.source.completedAt,
+      completeness: 'partial',
+      httpStatus: failure.source.httpStatus,
+      response: combinedPageReceipt(pages, null, recordCount),
+      note: `${reason} at page ${failedPage}; partial counts are not promoted.`,
+    },
+  };
+}
+
+async function collectPaginatedGithubResponse(
+  fetchImpl: typeof fetch,
+  request: EvidenceRequest,
+  shape: GithubPaginationShape,
+  requestTimeoutMs: number,
+  collectionDeadline: number,
+): Promise<CollectedResponse> {
+  const first = await collectResponse(fetchImpl, request, requestTimeoutMs, collectionDeadline);
+  if (!successfulJsonPage(first)) return first;
+  const firstItems = paginatedItems(first, shape);
+  if (firstItems === null) return partialPagination(first, [first], 1, 0);
+
+  const pages = [first];
+  const items = [...firstItems];
+  const expectedTotal = shape === 'workflow-runs' ? advertisedWorkflowRuns(first) : null;
+
+  if (!nextPageMetadataMatches(first, 1)) {
+    return partialPagination(first, pages, 1, items.length, 'Invalid GitHub next-page Link');
+  }
+
+  const itemIds = new Set<number>();
+  if (!addUniqueGithubIds(firstItems, itemIds)) {
+    return partialPagination(
+      first,
+      pages,
+      1,
+      0,
+      `Invalid or duplicate ${githubItemLabel(shape)} id`,
+    );
+  }
+  if (shape === 'workflow-runs') {
+    if (expectedTotal === null) {
+      return partialPagination(first, pages, 1, items.length, 'Invalid Actions total_count');
+    }
+    if (!workflowPaginationMetadataMatches(first, expectedTotal, items.length)) {
+      return partialPagination(
+        first,
+        pages,
+        1,
+        items.length,
+        'Actions Link and total_count metadata conflict',
+      );
+    }
+  }
+
+  let needsNextPage = first.hasNextPage;
+  let pageNumber = 1;
+  while (needsNextPage) {
+    pageNumber += 1;
+    if (pageNumber > MAX_GITHUB_PAGES) {
+      return partialPagination(first, pages, pageNumber, items.length);
+    }
+    const page = await collectResponse(
+      fetchImpl,
+      {
+        ...request,
+        url: paginatedUrl(request.url, pageNumber),
+      },
+      requestTimeoutMs,
+      collectionDeadline,
+    );
+    pages.push(page);
+    const pageItems = paginatedItems(page, shape);
+    if (!successfulJsonPage(page) || pageItems === null) {
+      return partialPagination(
+        first,
+        pages,
+        pageNumber,
+        items.length,
+        page.source.note.includes('collection deadline')
+          ? 'Global collection deadline expired during GitHub pagination'
+          : 'GitHub pagination did not complete',
+      );
+    }
+    if (!nextPageMetadataMatches(page, pageNumber)) {
+      return partialPagination(
+        first,
+        pages,
+        pageNumber,
+        items.length,
+        'Invalid GitHub next-page Link',
+      );
+    }
+    if (!addUniqueGithubIds(pageItems, itemIds)) {
+      return partialPagination(
+        first,
+        pages,
+        pageNumber,
+        items.length,
+        `Invalid or duplicate ${githubItemLabel(shape)} id`,
+      );
+    }
+    items.push(...pageItems);
+    if (pageItems.length === 0 && page.hasNextPage) {
+      return partialPagination(first, pages, pageNumber, items.length);
+    }
+    if (shape === 'workflow-runs') {
+      if (
+        expectedTotal === null ||
+        !workflowPaginationMetadataMatches(page, expectedTotal, items.length)
+      ) {
+        return partialPagination(
+          first,
+          pages,
+          pageNumber,
+          items.length,
+          'Actions Link and total_count metadata conflict',
+        );
+      }
+    }
+    needsNextPage = page.hasNextPage;
+  }
+
+  if (expectedTotal !== null && items.length !== expectedTotal) {
+    return partialPagination(first, pages, pageNumber, items.length);
+  }
+  if (pages.length === 1) return first;
+
+  const data: JsonValue =
+    shape !== 'workflow-runs'
+      ? items
+      : {
+          ...(first.data as Record<string, unknown>),
+          total_count: expectedTotal,
+          workflow_runs: items,
+        };
+  return {
+    data,
+    hasNextPage: false,
+    nextPageNumber: null,
+    source: {
+      ...first.source,
+      completedAt: pages.at(-1)?.source.completedAt ?? first.source.completedAt,
+      completeness: 'complete',
+      httpStatus: 200,
+      response: combinedPageReceipt(pages, shape, items.length),
+      note: `Complete response across ${pages.length} GitHub API pages; SHA-256 covers the ordered page-body hash manifest and no raw body is persisted.`,
     },
   };
 }
@@ -334,6 +701,22 @@ function externalHuman(value: unknown, owner: string): { external: boolean; pull
   };
 }
 
+function extractCompleteSource<T>(
+  response: CollectedResponse,
+  label: string,
+  extract: () => T,
+): T | undefined {
+  if (response.source.completeness !== 'complete') return undefined;
+  try {
+    return extract();
+  } catch {
+    response.data = null;
+    response.source.completeness = 'partial';
+    response.source.note = `${label} returned structurally invalid 2xx JSON; affected metrics remain null.`;
+    return undefined;
+  }
+}
+
 /** Collect only machine-observable data. The returned draft is never a reviewed public claim. */
 export async function collectMonthlyEvidence(
   options: CollectMonthlyEvidenceOptions,
@@ -346,118 +729,173 @@ export async function collectMonthlyEvidence(
   const encodedRepository = `${encodeURIComponent(owner)}/${encodeURIComponent(repositoryName)}`;
   const encodedPackage = encodeURIComponent(options.packageName);
   const fetchImpl = options.fetchImpl ?? fetch;
+  const requestTimeoutMs = requestTimeout(options.requestTimeoutMs);
+  const collectionDeadline = Date.now() + collectionTimeout(options.collectionTimeoutMs);
 
   const [repository, issues, releases, actions, npmPackage, npmDownloads] = await Promise.all([
-    collectResponse(fetchImpl, {
-      id: 'github-repository',
-      provider: 'github',
-      url: apiUrl(GITHUB_API, `repos/${encodedRepository}`),
-      token: options.githubToken,
-    }),
-    collectResponse(fetchImpl, {
-      id: 'github-issues',
-      provider: 'github',
-      url: apiUrl(GITHUB_API, `repos/${encodedRepository}/issues`, {
-        state: 'all',
-        per_page: '100',
-      }),
-      token: options.githubToken,
-    }),
-    collectResponse(fetchImpl, {
-      id: 'github-releases',
-      provider: 'github',
-      url: apiUrl(GITHUB_API, `repos/${encodedRepository}/releases`, { per_page: '100' }),
-      token: options.githubToken,
-    }),
-    collectResponse(fetchImpl, {
-      id: 'github-actions-ci',
-      provider: 'github',
-      url: apiUrl(GITHUB_API, `repos/${encodedRepository}/actions/workflows/ci.yml/runs`, {
-        per_page: '100',
-      }),
-      token: options.githubToken,
-    }),
-    collectResponse(fetchImpl, {
-      id: 'npm-package',
-      provider: 'npm',
-      url: apiUrl(NPM_REGISTRY, encodedPackage),
-    }),
-    collectResponse(fetchImpl, {
-      id: 'npm-downloads',
-      provider: 'npm',
-      url: apiUrl(NPM_DOWNLOADS_API, `downloads/point/last-month/${encodedPackage}`),
-    }),
+    collectResponse(
+      fetchImpl,
+      {
+        id: 'github-repository',
+        provider: 'github',
+        url: apiUrl(GITHUB_API, `repos/${encodedRepository}`),
+        token: options.githubToken,
+      },
+      requestTimeoutMs,
+      collectionDeadline,
+    ),
+    collectPaginatedGithubResponse(
+      fetchImpl,
+      {
+        id: 'github-issues',
+        provider: 'github',
+        url: apiUrl(GITHUB_API, `repos/${encodedRepository}/issues`, {
+          state: 'all',
+          per_page: '100',
+        }),
+        token: options.githubToken,
+      },
+      'issues',
+      requestTimeoutMs,
+      collectionDeadline,
+    ),
+    collectPaginatedGithubResponse(
+      fetchImpl,
+      {
+        id: 'github-releases',
+        provider: 'github',
+        url: apiUrl(GITHUB_API, `repos/${encodedRepository}/releases`, { per_page: '100' }),
+        token: options.githubToken,
+      },
+      'releases',
+      requestTimeoutMs,
+      collectionDeadline,
+    ),
+    collectPaginatedGithubResponse(
+      fetchImpl,
+      {
+        id: 'github-actions-ci',
+        provider: 'github',
+        url: apiUrl(GITHUB_API, `repos/${encodedRepository}/actions/workflows/ci.yml/runs`, {
+          per_page: '100',
+        }),
+        token: options.githubToken,
+      },
+      'workflow-runs',
+      requestTimeoutMs,
+      collectionDeadline,
+    ),
+    collectResponse(
+      fetchImpl,
+      {
+        id: 'npm-package',
+        provider: 'npm',
+        url: apiUrl(NPM_REGISTRY, encodedPackage),
+      },
+      requestTimeoutMs,
+      collectionDeadline,
+    ),
+    collectResponse(
+      fetchImpl,
+      {
+        id: 'npm-downloads',
+        provider: 'npm',
+        url: apiUrl(NPM_DOWNLOADS_API, `downloads/point/last-month/${encodedPackage}`),
+      },
+      requestTimeoutMs,
+      collectionDeadline,
+    ),
   ]);
 
-  let stars: number | undefined;
-  let forks: number | undefined;
-  if (repository.source.completeness === 'complete') {
+  const repositoryMetrics = extractCompleteSource(repository, 'GitHub repository endpoint', () => {
     const repositoryData = record(repository.data, 'GitHub repository response');
     if (string(repositoryData.full_name, 'GitHub repository full_name') !== options.repository) {
       throw new Error('GitHub repository response did not match the requested repository');
     }
-    stars = integer(repositoryData.stargazers_count, 'GitHub repository stars');
-    forks = integer(repositoryData.forks_count, 'GitHub repository forks');
-  }
+    return {
+      stars: integer(repositoryData.stargazers_count, 'GitHub repository stars'),
+      forks: integer(repositoryData.forks_count, 'GitHub repository forks'),
+    };
+  });
+  const stars = repositoryMetrics?.stars;
+  const forks = repositoryMetrics?.forks;
 
-  let externalIssues: number | undefined;
-  let externalPullRequests: number | undefined;
-  if (issues.source.completeness === 'complete') {
-    externalIssues = 0;
-    externalPullRequests = 0;
+  const issueMetrics = extractCompleteSource(issues, 'GitHub issues endpoint', () => {
+    let externalIssues = 0;
+    let externalPullRequests = 0;
     for (const value of array(issues.data, 'GitHub issues response')) {
       const classification = externalHuman(value, owner);
       if (!classification.external) continue;
       if (classification.pullRequest) externalPullRequests += 1;
       else externalIssues += 1;
     }
-  }
+    return { externalIssues, externalPullRequests };
+  });
+  const externalIssues = issueMetrics?.externalIssues;
+  const externalPullRequests = issueMetrics?.externalPullRequests;
 
-  const releaseRows =
-    releases.source.completeness === 'complete'
-      ? array(releases.data, 'GitHub releases response').map((value) =>
-          record(value, 'GitHub release'),
-        )
-      : undefined;
-  const publishedReleaseDates = (releaseRows ?? [])
-    .filter((value) => value.draft === false && typeof value.published_at === 'string')
-    .map((value) => value.published_at as string)
-    .toSorted()
-    .reverse();
+  const releaseMetrics = extractCompleteSource(releases, 'GitHub releases endpoint', () => {
+    const releaseRows = array(releases.data, 'GitHub releases response').map((value) => {
+      const release = record(value, 'GitHub release');
+      if (typeof release.draft !== 'boolean')
+        throw new Error('GitHub release draft must be boolean');
+      if (release.draft === false) string(release.published_at, 'GitHub release published_at');
+      return release;
+    });
+    const publishedReleaseDates = releaseRows
+      .filter((value) => value.draft === false)
+      .map((value) => value.published_at as string)
+      .toSorted()
+      .reverse();
+    return { releaseRows, publishedReleaseDates };
+  });
+  const releaseRows = releaseMetrics?.releaseRows;
+  const publishedReleaseDates = releaseMetrics?.publishedReleaseDates ?? [];
 
-  let totalRuns: number | undefined;
-  let successfulRuns: number | undefined;
-  if (actions.source.completeness === 'complete') {
+  const actionMetrics = extractCompleteSource(actions, 'GitHub Actions endpoint', () => {
     const actionsData = record(actions.data, 'GitHub Actions response');
     const workflowRuns = array(actionsData.workflow_runs, 'GitHub Actions workflow_runs').map(
-      (value) => record(value, 'GitHub Actions workflow run'),
+      (value) => {
+        const workflowRun = record(value, 'GitHub Actions workflow run');
+        string(workflowRun.status, 'GitHub Actions workflow run status');
+        if (workflowRun.conclusion !== null) {
+          string(workflowRun.conclusion, 'GitHub Actions workflow run conclusion');
+        }
+        return workflowRun;
+      },
     );
     const advertisedRuns = integer(actionsData.total_count, 'GitHub Actions total_count');
-    if (advertisedRuns === workflowRuns.length) {
-      totalRuns = advertisedRuns;
-      successfulRuns = workflowRuns.filter(
-        (value) => value.status === 'completed' && value.conclusion === 'success',
-      ).length;
-    } else {
-      actions.source.completeness = 'partial';
-      actions.source.note =
-        'The workflow total exceeds the returned page; partial counts are not promoted.';
+    if (advertisedRuns !== workflowRuns.length) {
+      throw new Error('GitHub Actions total_count did not match collected runs');
     }
-  }
+    return {
+      totalRuns: advertisedRuns,
+      successfulRuns: workflowRuns.filter(
+        (value) => value.status === 'completed' && value.conclusion === 'success',
+      ).length,
+    };
+  });
+  const totalRuns = actionMetrics?.totalRuns;
+  const successfulRuns = actionMetrics?.successfulRuns;
 
-  let latestNpmVersion: string | undefined;
-  if (npmPackage.source.completeness === 'complete') {
+  const latestNpmVersion = extractCompleteSource(npmPackage, 'npm package endpoint', () => {
     const npmPackageData = record(npmPackage.data, 'npm package response');
     if (string(npmPackageData.name, 'npm package name') !== options.packageName) {
       throw new Error('npm package response did not match the requested package');
     }
     const distTags = record(npmPackageData['dist-tags'], 'npm dist-tags');
-    latestNpmVersion = string(distTags.latest, 'npm latest dist-tag');
-  }
-  const downloadCount =
-    npmDownloads.source.completeness === 'complete'
-      ? integer(record(npmDownloads.data, 'npm downloads response').downloads, 'npm downloads')
-      : undefined;
+    return string(distTags.latest, 'npm latest dist-tag');
+  });
+  const downloadCount = extractCompleteSource(npmDownloads, 'npm downloads endpoint', () => {
+    const npmDownloadsData = record(npmDownloads.data, 'npm downloads response');
+    if (
+      npmDownloadsData.package !== undefined &&
+      string(npmDownloadsData.package, 'npm downloads package') !== options.packageName
+    ) {
+      throw new Error('npm downloads response did not match the requested package');
+    }
+    return integer(npmDownloadsData.downloads, 'npm downloads');
+  });
 
   const sources = [
     repository.source,
@@ -721,6 +1159,8 @@ export interface MonthlyEvidenceCliOptions {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   now?: Date;
+  requestTimeoutMs?: number;
+  collectionTimeoutMs?: number;
   workingDirectory?: string;
 }
 
@@ -772,6 +1212,22 @@ function workflowRunUrlFromEnvironment(env: NodeJS.ProcessEnv): string | null {
   return `${serverUrl}/${repository}/actions/runs/${runId}`;
 }
 
+function validNpmNotFoundReceipt(source: EvidenceSource | undefined, id: string): boolean {
+  if (source === undefined) return false;
+  return (
+    source.id === id &&
+    source.provider === 'npm' &&
+    source.completeness === 'missing' &&
+    source.httpStatus === 404 &&
+    source.response.sha256 !== null &&
+    source.response.pageSha256.length === 1 &&
+    source.response.pageSha256[0] === source.response.sha256 &&
+    source.response.byteLength !== null &&
+    source.response.jsonType === 'object' &&
+    source.response.topLevelKeys.includes('error')
+  );
+}
+
 /** CLI entry used by the artifact-only workflow. Credentials are intentionally env-only. */
 export async function runMonthlyEvidenceCli(
   options: MonthlyEvidenceCliOptions = {},
@@ -803,9 +1259,39 @@ export async function runMonthlyEvidenceCli(
     commitSha,
     workflowRunUrl: workflowRunUrlFromEnvironment(env),
     fetchImpl: options.fetchImpl,
+    requestTimeoutMs: options.requestTimeoutMs,
+    collectionTimeoutMs: options.collectionTimeoutMs,
   });
   writeMonthlyEvidenceDraft(draft, { jsonPath, markdownPath, workingDirectory });
-  if (draft.generation.status === 'partial') {
+  const publicReleaseMetric = draft.ledger.maintenance.metrics.publicReleases;
+  const releaseSource = draft.sources.find((source) => source.id === 'github-releases');
+  const confirmedPrepublicationState =
+    releaseSource?.completeness === 'complete' &&
+    publicReleaseMetric?.status === 'observed' &&
+    publicReleaseMetric.value === 0 &&
+    publicReleaseMetric.sources.length === 1 &&
+    publicReleaseMetric.sources[0] === 'github-releases';
+  const npmPrepublicationPair =
+    confirmedPrepublicationState &&
+    validNpmNotFoundReceipt(
+      draft.sources.find((source) => source.id === 'npm-package'),
+      'npm-package',
+    ) &&
+    validNpmNotFoundReceipt(
+      draft.sources.find((source) => source.id === 'npm-downloads'),
+      'npm-downloads',
+    );
+  const hasBlockingGap = draft.sources.some((source) => {
+    if (source.completeness === 'complete') return false;
+    return !(
+      npmPrepublicationPair &&
+      source.provider === 'npm' &&
+      (source.id === 'npm-package' || source.id === 'npm-downloads') &&
+      source.completeness === 'missing' &&
+      source.httpStatus === 404
+    );
+  });
+  if (hasBlockingGap) {
     throw new PartialMonthlyEvidenceError();
   }
 }

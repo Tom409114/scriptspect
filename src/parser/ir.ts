@@ -106,7 +106,28 @@ export interface GroupNode {
   span: [number, number];
 }
 
-export type ScriptNode = CommandNode | SequenceNode | BooleanNode | PipelineNode | GroupNode;
+/** POSIX case arms. Each part is one arm body; patterns are grammar, not commands. */
+export interface CaseNode {
+  kind: 'case';
+  parts: ScriptNode[];
+  span: [number, number];
+}
+
+/** Supplemental syntax-aware nodes not represented by the target's primary graph. */
+export interface CompoundNode {
+  kind: 'compound';
+  parts: ScriptNode[];
+  span: [number, number];
+}
+
+export type ScriptNode =
+  | CommandNode
+  | SequenceNode
+  | BooleanNode
+  | PipelineNode
+  | GroupNode
+  | CaseNode
+  | CompoundNode;
 
 export interface ScriptIr {
   root: ScriptNode;
@@ -124,6 +145,8 @@ export function* walkCommands(node: ScriptNode): Generator<CommandNode> {
     case 'sequence':
     case 'boolean':
     case 'pipeline':
+    case 'case':
+    case 'compound':
       for (const part of node.parts) yield* walkCommands(part);
       return;
   }

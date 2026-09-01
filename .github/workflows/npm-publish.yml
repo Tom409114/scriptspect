@@ -1,8 +1,6 @@
 name: npm publish from immutable tag
 
 on:
-  push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
     inputs:
       intent-id:
@@ -27,8 +25,8 @@ jobs:
   verify-action-tag:
     name: Consume the immutable Action tag checkout
     if: >-
-      github.event_name == 'push' ||
-      (github.ref == format('refs/tags/{0}', inputs.tag) && github.sha == inputs.sha)
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == format('refs/tags/{0}', inputs.tag) && github.sha == inputs.sha
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -127,17 +125,16 @@ jobs:
           [[ "$NPM_BOOTSTRAP_ENABLED" == false ]]
           [[ "$NPM_TRUSTED_PUBLISHING_READY" == true ]]
           [[ "$RELEASE_TAG_POLICY_READY" == true ]]
+          [[ "$EVENT_NAME" == workflow_dispatch ]]
           TAG=${GITHUB_REF#refs/tags/}
           SHA=$GITHUB_SHA
           [[ "$GITHUB_REF" == "refs/tags/$TAG" ]]
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
           VERSION=${TAG#v}
-          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
-            [[ "$DISPATCH_TAG" == "$TAG" ]]
-            [[ "$DISPATCH_SHA" == "$SHA" ]]
-            [[ "$DISPATCH_INTENT_ID" =~ ^[1-9][0-9]*$ ]]
-          fi
+          [[ "$DISPATCH_TAG" == "$TAG" ]]
+          [[ "$DISPATCH_SHA" == "$SHA" ]]
+          [[ "$DISPATCH_INTENT_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$(git rev-parse HEAD)" == "$SHA" ]]
           gh api -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/tag-ref.json"
@@ -368,16 +365,17 @@ jobs:
       checks: write
       contents: write
     outputs:
-      minor-alias: ${{ steps.aliases.outputs.minor-alias }}
-      major-alias: ${{ steps.aliases.outputs.major-alias }}
-      old-minor: ${{ steps.aliases.outputs.old-minor }}
-      old-major: ${{ steps.aliases.outputs.old-major }}
+      minor-alias: ${{ steps.move-aliases.outputs.minor-alias }}
+      major-alias: ${{ steps.move-aliases.outputs.major-alias }}
+      old-minor: ${{ steps.move-aliases.outputs.old-minor }}
+      old-major: ${{ steps.move-aliases.outputs.old-major }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.publish.outputs.sha }}
           fetch-depth: 0
-      - name: Apply semver and ancestry guards, then update aliases by CAS
+          persist-credentials: false
+      - name: Persist semver and ancestry guards before any alias mutation
         id: aliases
         env:
           GH_TOKEN: ${{ github.token }}
@@ -477,17 +475,6 @@ jobs:
               [[ "$current" == "$previous" ]]
             fi
           }
-          apply_alias() {
-            local name=$1 previous current target
-            previous=$(jq -r --arg name "$name" '.aliases[] | select(.name == $name) | .previousTarget // ""' \
-              "$RUNNER_TEMP/verified-alias-plan.json")
-            target=$(jq -r --arg name "$name" '.aliases[] | select(.name == $name) | .target' \
-              "$RUNNER_TEMP/verified-alias-plan.json")
-            current=$(old_target "$name")
-            [[ "$current" == "$target" ]] && return 0
-            git push origin "$target:refs/tags/$name" \
-              --force-with-lease="refs/tags/$name:$previous"
-          }
           preflight_alias "$MINOR_ALIAS"
           preflight_alias "$MAJOR_ALIAS"
 
@@ -539,16 +526,105 @@ jobs:
             "$RUNNER_TEMP/published-release-input.json" \
             > "$RUNNER_TEMP/verified-published-release.json"
 
+      - name: Move exact floating aliases with protected deploy credential
+        id: move-aliases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG_DEPLOY_KEY: ${{ secrets.RELEASE_TAG_DEPLOY_KEY }}
+          REPOSITORY: ${{ github.repository }}
+          INTENT_ID: ${{ needs.publish.outputs.intent-id }}
+          SHA: ${{ needs.publish.outputs.sha }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$REPOSITORY" == "Tom409114/scriptspect" ]]
+          [[ "$INTENT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -n "$RELEASE_TAG_DEPLOY_KEY"
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MINOR_ALIAS="v$MAJOR.$MINOR"
+          MAJOR_ALIAS="v$MAJOR"
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/alias-mutation-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/alias-mutation-check.json" \
+            > "$RUNNER_TEMP/alias-mutation-state.json"
+          jq -e --arg sha "$SHA" --arg version "$VERSION" \
+            --arg minor "$MINOR_ALIAS" --arg major "$MAJOR_ALIAS" '
+            (.state | IN("alias-planned","aliases-verified","final-planned","consumed")) and
+            .intent.mergeCommitSha == $sha and .intent.version == $version and
+            .intent.tag == ("v" + $version) and
+            .aliasPlan.version == $version and .aliasPlan.commit == $sha and
+            (.aliasPlan.aliases | length == 2) and
+            ([.aliasPlan.aliases[].name] | sort) == ([$minor,$major] | sort) and
+            all(.aliasPlan.aliases[];
+              .target == $sha and
+              ((.previousTarget == null) or (.previousTarget | test("^[0-9a-f]{40}$"))))
+          ' "$RUNNER_TEMP/alias-mutation-state.json" >/dev/null
+
+          MUTATION_REPO="$RUNNER_TEMP/release-alias-mutator"
+          KEY_PATH="$RUNNER_TEMP/release-tag-deploy-key"
+          KNOWN_HOSTS="$RUNNER_TEMP/release-tag-known-hosts"
+          cleanup() {
+            rm -f -- "$KEY_PATH" "$KNOWN_HOSTS"
+            rm -rf -- "$MUTATION_REPO"
+          }
+          trap cleanup EXIT
+
+          git init -q "$MUTATION_REPO"
+          git -C "$MUTATION_REPO" remote add source "https://github.com/$REPOSITORY.git"
+          git -C "$MUTATION_REPO" fetch --no-tags --filter=blob:none source \
+            refs/heads/main:refs/remotes/source/main
+          git -C "$MUTATION_REPO" cat-file -e "$SHA^{commit}"
+          git -C "$MUTATION_REPO" merge-base --is-ancestor "$SHA" refs/remotes/source/main
+          [[ "$(git ls-remote --refs --tags "https://github.com/$REPOSITORY.git" \
+            "refs/tags/v$VERSION" | awk 'NR == 1 {print $1} NR > 1 {exit 2}')" == "$SHA" ]]
+
+          printf '%s\n' "$RELEASE_TAG_DEPLOY_KEY" > "$KEY_PATH"
+          unset RELEASE_TAG_DEPLOY_KEY
+          chmod 600 "$KEY_PATH"
+          ssh-keygen -y -f "$KEY_PATH" >/dev/null
+          printf '%s\n' \
+            'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > "$KNOWN_HOSTS"
+          chmod 600 "$KNOWN_HOSTS"
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_SSH_COMMAND="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+          REMOTE="git@github.com:$REPOSITORY.git"
+          remote_target() {
+            git ls-remote --refs --tags "https://github.com/$REPOSITORY.git" \
+              "refs/tags/$1" | awk 'NR == 1 {print $1} NR > 1 {exit 2}'
+          }
+          apply_alias() {
+            local name=$1 previous current target lease
+            previous=$(jq -r --arg name "$name" \
+              '.aliasPlan.aliases[] | select(.name == $name) | .previousTarget // ""' \
+              "$RUNNER_TEMP/alias-mutation-state.json")
+            target=$(jq -er --arg name "$name" \
+              '.aliasPlan.aliases[] | select(.name == $name) | .target' \
+              "$RUNNER_TEMP/alias-mutation-state.json")
+            [[ "$target" == "$SHA" ]]
+            current=$(remote_target "$name")
+            [[ "$current" == "$target" ]] && return 0
+            [[ "$current" == "$previous" ]]
+            lease="refs/tags/$name:$previous"
+            git -C "$MUTATION_REPO" push --no-verify "$REMOTE" \
+              "$target:refs/tags/$name" "--force-with-lease=$lease"
+            [[ "$(remote_target "$name")" == "$target" ]]
+          }
           apply_alias "$MINOR_ALIAS"
           apply_alias "$MAJOR_ALIAS"
-          [[ "$(old_target "$MINOR_ALIAS")" == "$SHA" ]]
-          [[ "$(old_target "$MAJOR_ALIAS")" == "$SHA" ]]
+          [[ "$(remote_target "$MINOR_ALIAS")" == "$SHA" ]]
+          [[ "$(remote_target "$MAJOR_ALIAS")" == "$SHA" ]]
           OUTPUT_OLD_MINOR=$(jq -r --arg name "$MINOR_ALIAS" \
-            '.aliases[] | select(.name == $name) | .previousTarget // ""' \
-            "$RUNNER_TEMP/verified-alias-plan.json")
+            '.aliasPlan.aliases[] | select(.name == $name) | .previousTarget // ""' \
+            "$RUNNER_TEMP/alias-mutation-state.json")
           OUTPUT_OLD_MAJOR=$(jq -r --arg name "$MAJOR_ALIAS" \
-            '.aliases[] | select(.name == $name) | .previousTarget // ""' \
-            "$RUNNER_TEMP/verified-alias-plan.json")
+            '.aliasPlan.aliases[] | select(.name == $name) | .previousTarget // ""' \
+            "$RUNNER_TEMP/alias-mutation-state.json")
           {
             echo "minor-alias=$MINOR_ALIAS"
             echo "major-alias=$MAJOR_ALIAS"
@@ -821,7 +897,9 @@ jobs:
         with:
           ref: ${{ needs.publish.outputs.sha }}
           fetch-depth: 0
-      - name: Restore every moved alias by reverse-order compare-and-swap
+          persist-credentials: false
+      - name: Prepare the exact durable alias rollback
+        id: prepare-rollback
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -830,6 +908,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "rollback=false" >> "$GITHUB_OUTPUT"
           old_target() { git ls-remote --tags origin "refs/tags/$1" | awk '{print $1}'; }
           gh api -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/intent-check.json"
@@ -920,42 +999,119 @@ jobs:
             CURRENT=$(old_target "$NAME")
             [[ "$CURRENT" == "$TARGET" || "$CURRENT" == "$PREVIOUS" ]]
           done
+          echo "rollback=true" >> "$GITHUB_OUTPUT"
 
-          jq -c '.aliasPlan.aliases | reverse[]' "$RUNNER_TEMP/release-state.json" |
+      - name: Restore exact floating aliases with protected deploy credential
+        if: steps.prepare-rollback.outputs.rollback == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG_DEPLOY_KEY: ${{ secrets.RELEASE_TAG_DEPLOY_KEY }}
+          REPOSITORY: ${{ github.repository }}
+          INTENT_ID: ${{ needs.publish.outputs.intent-id }}
+          SHA: ${{ needs.publish.outputs.sha }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$REPOSITORY" == "Tom409114/scriptspect" ]]
+          [[ "$INTENT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -n "$RELEASE_TAG_DEPLOY_KEY"
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MINOR_ALIAS="v$MAJOR.$MINOR"
+          MAJOR_ALIAS="v$MAJOR"
+
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$REPOSITORY/check-runs/$INTENT_ID" > "$RUNNER_TEMP/alias-rollback-check.json"
+          jq -er '.output.text | fromjson' "$RUNNER_TEMP/alias-rollback-check.json" \
+            > "$RUNNER_TEMP/alias-rollback-state.json"
+          jq -e --arg sha "$SHA" --arg version "$VERSION" \
+            --arg minor "$MINOR_ALIAS" --arg major "$MAJOR_ALIAS" '
+            (.state | IN("alias-planned","aliases-verified","final-planned")) and
+            .intent.mergeCommitSha == $sha and .intent.version == $version and
+            .intent.tag == ("v" + $version) and
+            .aliasPlan.version == $version and .aliasPlan.commit == $sha and
+            (.aliasPlan.aliases | length == 2) and
+            ([.aliasPlan.aliases[].name] | sort) == ([$minor,$major] | sort) and
+            all(.aliasPlan.aliases[];
+              .target == $sha and
+              ((.previousTarget == null) or (.previousTarget | test("^[0-9a-f]{40}$"))))
+          ' "$RUNNER_TEMP/alias-rollback-state.json" >/dev/null
+
+          MUTATION_REPO="$RUNNER_TEMP/release-alias-rollback-mutator"
+          KEY_PATH="$RUNNER_TEMP/release-tag-deploy-key"
+          KNOWN_HOSTS="$RUNNER_TEMP/release-tag-known-hosts"
+          cleanup() {
+            rm -f -- "$KEY_PATH" "$KNOWN_HOSTS"
+            rm -rf -- "$MUTATION_REPO"
+          }
+          trap cleanup EXIT
+
+          git init -q "$MUTATION_REPO"
+          git -C "$MUTATION_REPO" remote add source "https://github.com/$REPOSITORY.git"
+          git -C "$MUTATION_REPO" fetch --no-tags --filter=blob:none source \
+            refs/heads/main:refs/remotes/source/main
+          git -C "$MUTATION_REPO" cat-file -e "$SHA^{commit}"
+          git -C "$MUTATION_REPO" merge-base --is-ancestor "$SHA" refs/remotes/source/main
+          [[ "$(git ls-remote --refs --tags "https://github.com/$REPOSITORY.git" \
+            "refs/tags/v$VERSION" | awk 'NR == 1 {print $1} NR > 1 {exit 2}')" == "$SHA" ]]
+
+          printf '%s\n' "$RELEASE_TAG_DEPLOY_KEY" > "$KEY_PATH"
+          unset RELEASE_TAG_DEPLOY_KEY
+          chmod 600 "$KEY_PATH"
+          ssh-keygen -y -f "$KEY_PATH" >/dev/null
+          printf '%s\n' \
+            'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > "$KNOWN_HOSTS"
+          chmod 600 "$KNOWN_HOSTS"
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_SSH_COMMAND="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+          REMOTE="git@github.com:$REPOSITORY.git"
+          remote_target() {
+            git ls-remote --refs --tags "https://github.com/$REPOSITORY.git" \
+              "refs/tags/$1" | awk 'NR == 1 {print $1} NR > 1 {exit 2}'
+          }
+
+          # Fail before the first mutation unless every alias is still at its durable target or prior value.
+          jq -c '.aliasPlan.aliases[]' "$RUNNER_TEMP/alias-rollback-state.json" |
+          while IFS= read -r ALIAS; do
+            NAME=$(jq -er '.name' <<< "$ALIAS")
+            TARGET=$(jq -er '.target' <<< "$ALIAS")
+            PREVIOUS=$(jq -r '.previousTarget // ""' <<< "$ALIAS")
+            CURRENT=$(remote_target "$NAME")
+            [[ "$CURRENT" == "$TARGET" || "$CURRENT" == "$PREVIOUS" ]]
+          done
+
+          jq -c '.aliasPlan.aliases | reverse[]' "$RUNNER_TEMP/alias-rollback-state.json" |
           while IFS= read -r ALIAS; do
             NAME=$(jq -er '.name' <<< "$ALIAS")
             TARGET=$(jq -er '.target' <<< "$ALIAS")
             PREVIOUS=$(jq -r '.previousTarget // ""' <<< "$ALIAS")
             [[ "$TARGET" == "$SHA" ]]
-            CURRENT=$(old_target "$NAME")
+            CURRENT=$(remote_target "$NAME")
             if [[ -z "$PREVIOUS" && -z "$CURRENT" ]]; then
               continue
             fi
             if [[ -n "$PREVIOUS" && "$CURRENT" == "$PREVIOUS" ]]; then
               continue
             fi
-            jq -n --arg current "$CURRENT" --arg candidate "$TARGET" --arg previous "$PREVIOUS" '
-              {current:$current,candidate:$candidate,
-                previous:(if $previous == "" then null else $previous end)}
-            ' > "$RUNNER_TEMP/rollback-decision-input.json"
-            node tools/release/release-state.mjs alias-rollback \
-              "$RUNNER_TEMP/rollback-decision-input.json" \
-              > "$RUNNER_TEMP/rollback-decision.json"
-            ACTION=$(jq -er '.action' "$RUNNER_TEMP/rollback-decision.json")
-            if [[ "$ACTION" == restore ]]; then
-              git push origin "$PREVIOUS:refs/tags/$NAME" \
-                --force-with-lease="refs/tags/$NAME:$TARGET"
-            elif [[ "$ACTION" == delete ]]; then
-              git push origin ":refs/tags/$NAME" \
-                --force-with-lease="refs/tags/$NAME:$TARGET"
+            [[ "$CURRENT" == "$TARGET" ]]
+            if [[ -n "$PREVIOUS" ]]; then
+              git -C "$MUTATION_REPO" cat-file -e "$PREVIOUS^{commit}"
+              git -C "$MUTATION_REPO" push --no-verify "$REMOTE" \
+                "$PREVIOUS:refs/tags/$NAME" \
+                "--force-with-lease=refs/tags/$NAME:$TARGET"
             else
-              exit 1
+              git -C "$MUTATION_REPO" push --no-verify "$REMOTE" ":refs/tags/$NAME" \
+                "--force-with-lease=refs/tags/$NAME:$TARGET"
             fi
           done
 
-          jq -c '.aliasPlan.aliases[]' "$RUNNER_TEMP/release-state.json" |
+          jq -c '.aliasPlan.aliases[]' "$RUNNER_TEMP/alias-rollback-state.json" |
           while IFS= read -r ALIAS; do
             NAME=$(jq -er '.name' <<< "$ALIAS")
             PREVIOUS=$(jq -r '.previousTarget // ""' <<< "$ALIAS")
-            [[ "$(old_target "$NAME")" == "$PREVIOUS" ]]
+            [[ "$(remote_target "$NAME")" == "$PREVIOUS" ]]
           done

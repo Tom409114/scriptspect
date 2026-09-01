@@ -176,7 +176,7 @@ function shouldGateReplacement(matrix: ParseMatrix, finding: Finding): boolean {
 }
 
 interface CommandRoleSegment {
-  kind: 'sequence' | 'boolean' | 'pipeline' | 'group';
+  kind: 'sequence' | 'boolean' | 'pipeline' | 'group' | 'case' | 'compound';
   span: [number, number];
   index?: number;
   before?: { op: string; span: [number, number] };
@@ -231,8 +231,9 @@ function findCommandMatches(
   const matches: CommandMatch[] = [];
   node.parts.forEach((part, index) => {
     const beforeIndex = index - 1;
-    const beforeOp = beforeIndex >= 0 ? operatorAt(node, beforeIndex) : undefined;
-    const afterOp = operatorAt(node, index);
+    const hasOperators = node.kind !== 'case' && node.kind !== 'compound';
+    const beforeOp = hasOperators && beforeIndex >= 0 ? operatorAt(node, beforeIndex) : undefined;
+    const afterOp = hasOperators ? operatorAt(node, index) : undefined;
     matches.push(
       ...findCommandMatches(part, executableSpan, [
         ...role,
@@ -250,7 +251,10 @@ function findCommandMatches(
 }
 
 function operatorAt(
-  node: Exclude<ScriptNode, CommandNode | { kind: 'group' }>,
+  node: Exclude<
+    ScriptNode,
+    CommandNode | { kind: 'group' } | { kind: 'case' } | { kind: 'compound' }
+  >,
   index: number,
 ): { op: string; span: [number, number] } | undefined {
   const span = node.opSpans[index];

@@ -44,7 +44,7 @@ it('collects a monthly/manual read-only draft and only uploads an artifact', () 
   expect(Object.keys(workflow.jobs ?? {})).toEqual(['collect']);
 
   const job = workflow.jobs?.collect;
-  expect(job?.['timeout-minutes']).toBe(10);
+  expect(job?.['timeout-minutes']).toBe(15);
   expect(job?.permissions).toBeUndefined();
   const steps = job?.steps ?? [];
   const checkout = steps.find((step) => step.uses?.startsWith('actions/checkout@'));

@@ -522,9 +522,74 @@ jobs:
           gh api -X PATCH -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
 
+  create-protected-tag:
+    name: Create the exact immutable tag with the protected deploy credential
+    needs: [authorize, build-candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Create or verify the exact protected tag
+        env:
+          RELEASE_TAG_DEPLOY_KEY: ${{ secrets.RELEASE_TAG_DEPLOY_KEY }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ needs.authorize.outputs.sha }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+          TAG: ${{ needs.authorize.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$REPOSITORY" == "Tom409114/scriptspect" ]]
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$TAG" == "v$VERSION" ]]
+          test -n "$RELEASE_TAG_DEPLOY_KEY"
+
+          MUTATION_REPO="$RUNNER_TEMP/release-tag-mutator"
+          KEY_PATH="$RUNNER_TEMP/release-tag-deploy-key"
+          KNOWN_HOSTS="$RUNNER_TEMP/release-tag-known-hosts"
+          cleanup() {
+            rm -f -- "$KEY_PATH" "$KNOWN_HOSTS"
+            rm -rf -- "$MUTATION_REPO"
+          }
+          trap cleanup EXIT
+
+          git init -q "$MUTATION_REPO"
+          git -C "$MUTATION_REPO" remote add source "https://github.com/$REPOSITORY.git"
+          git -C "$MUTATION_REPO" fetch --no-tags --filter=blob:none source \
+            refs/heads/main:refs/remotes/source/main
+          git -C "$MUTATION_REPO" cat-file -e "$SHA^{commit}"
+          git -C "$MUTATION_REPO" merge-base --is-ancestor "$SHA" refs/remotes/source/main
+
+          CURRENT=$(git ls-remote --refs --tags "https://github.com/$REPOSITORY.git" \
+            "refs/tags/$TAG" | awk 'NR == 1 {print $1} NR > 1 {exit 2}')
+          if [[ -n "$CURRENT" ]]; then
+            [[ "$CURRENT" == "$SHA" ]]
+            exit 0
+          fi
+
+          printf '%s\n' "$RELEASE_TAG_DEPLOY_KEY" > "$KEY_PATH"
+          unset RELEASE_TAG_DEPLOY_KEY
+          chmod 600 "$KEY_PATH"
+          ssh-keygen -y -f "$KEY_PATH" >/dev/null
+          printf '%s\n' \
+            'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > "$KNOWN_HOSTS"
+          chmod 600 "$KNOWN_HOSTS"
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_SSH_COMMAND="ssh -i $KEY_PATH -o IdentitiesOnly=yes -o UserKnownHostsFile=$KNOWN_HOSTS -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+          git -C "$MUTATION_REPO" push --no-verify "git@github.com:$REPOSITORY.git" \
+            "$SHA:refs/tags/$TAG"
+          [[ "$(git ls-remote --refs --tags "https://github.com/$REPOSITORY.git" \
+            "refs/tags/$TAG" | awk 'NR == 1 {print $1} NR > 1 {exit 2}')" == "$SHA" ]]
+
   stage-release:
     name: Recover or stage the protected tag and authoritative draft
-    needs: [authorize, build-candidate]
+    needs: [authorize, build-candidate, create-protected-tag]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
@@ -595,21 +660,6 @@ jobs:
           CANDIDATE_DIGEST=$(node tools/release/release-state.mjs json-digest \
             "$RUNNER_TEMP/candidate/candidate-manifest.json" | jq -er '.digest')
           CURRENT_STATE=$(jq -er '.state' "$RUNNER_TEMP/release-state.json")
-          jq -n --arg ref "refs/tags/$TAG" --arg sha "$SHA" '{ref:$ref,sha:$sha}' \
-            > "$RUNNER_TEMP/create-tag.json"
-          HTTP_STATUS=$(curl --silent --show-error --output "$RUNNER_TEMP/create-tag-response.json" \
-            --write-out '%{http_code}' --request POST \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header 'Accept: application/vnd.github+json' \
-            --header 'X-GitHub-Api-Version: 2022-11-28' \
-            --data-binary @"$RUNNER_TEMP/create-tag.json" \
-            "https://api.github.com/repos/$REPOSITORY/git/refs")
-          if [[ "$HTTP_STATUS" == 201 ]]; then
-            [[ "$CURRENT_STATE" == retained-candidate ]]
-          elif [[ "$HTTP_STATUS" != 422 ]]; then
-            cat "$RUNNER_TEMP/create-tag-response.json" >&2
-            exit 1
-          fi
           gh api -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/tag-ref.json"
           jq -e --arg ref "refs/tags/$TAG" --arg sha "$SHA" \

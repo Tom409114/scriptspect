@@ -38,17 +38,21 @@ are pinned in [`comparison/toolchain.json`](../comparison/toolchain.json).
 | Package-manager neutral | npm / pnpm / Yarn / Bun |
 | Extensible rules | standalone rule modules with typed metadata + fixtures; new rules don't touch the parser |
 
-## Release gate
+## Reviewed shared-fixture result
 
-The executable [shared-corpus harness](../comparison/README.md) now captures both
-tools' commands and outputs under a pinned toolchain. Its adjudication rows are
-still pending human review. Therefore the competitive gate remains **OPEN** and
-no “finds more,” “fewer false positives,” or winner claim is published.
+The executable [shared-corpus harness](../comparison/README.md) captured both
+tools under the pinned Node and package toolchain. The versioned
+[2026-09-01 review](../comparison/evidence/2026-09-01/README.md) independently
+checked all 14 tool/fixture observations. On these seven fixed questions,
+ScriptSpect was correct on all seven: it identified command substitution,
+POSIX environment expansion, and target-specific separator semantics that the
+baseline missed, while avoiding false positives on quoted command text and an
+already-declared executable.
 
-The v0.1 bar remains: reviewed shared-corpus evidence must identify useful
-problems ScriptSpect catches without purchasing that coverage with more false
-positives. If that result is not established, the project improves or narrows
-scope rather than publishing a marketing conclusion.
+This satisfies the v0.1 specification's narrow shared-fixture differentiation
+bar without claiming ecosystem-wide superiority. Public-corpus precision is
+measured and reported separately, and future comparison changes must retain the
+same pinned-input, raw-output, and independent-review contract.
 
 ## Relationship to cross-env / shx / rimraf
 

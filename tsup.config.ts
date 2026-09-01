@@ -26,7 +26,7 @@ export default defineConfig([
     name: 'action',
     entry: { action: 'src/action.ts' },
     clean: ['!cli.mjs', '!cli.mjs.map'],
-    noExternal: ['fast-glob', 'yaml'],
+    noExternal: ['fast-glob', 'semver', 'yaml'],
     banner: {
       js: "#!/usr/bin/env node\nimport { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);",
     },

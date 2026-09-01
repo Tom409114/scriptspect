@@ -37,6 +37,2000 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/constants.js
+var require_constants = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/constants.js"(exports, module) {
+    "use strict";
+    var SEMVER_SPEC_VERSION = "2.0.0";
+    var MAX_LENGTH = 256;
+    var MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER || /* istanbul ignore next */
+    9007199254740991;
+    var MAX_SAFE_COMPONENT_LENGTH = 16;
+    var MAX_SAFE_BUILD_LENGTH = MAX_LENGTH - 6;
+    var RELEASE_TYPES = [
+      "major",
+      "premajor",
+      "minor",
+      "preminor",
+      "patch",
+      "prepatch",
+      "prerelease"
+    ];
+    module.exports = {
+      MAX_LENGTH,
+      MAX_SAFE_COMPONENT_LENGTH,
+      MAX_SAFE_BUILD_LENGTH,
+      MAX_SAFE_INTEGER,
+      RELEASE_TYPES,
+      SEMVER_SPEC_VERSION,
+      FLAG_INCLUDE_PRERELEASE: 1,
+      FLAG_LOOSE: 2
+    };
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/debug.js
+var require_debug = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/debug.js"(exports, module) {
+    "use strict";
+    var debug = typeof process === "object" && process.env && process.env.NODE_DEBUG && /\bsemver\b/i.test(process.env.NODE_DEBUG) ? (...args) => console.error("SEMVER", ...args) : () => {
+    };
+    module.exports = debug;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/re.js
+var require_re = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/re.js"(exports, module) {
+    "use strict";
+    var {
+      MAX_SAFE_COMPONENT_LENGTH,
+      MAX_SAFE_BUILD_LENGTH,
+      MAX_LENGTH
+    } = require_constants();
+    var debug = require_debug();
+    exports = module.exports = {};
+    var re = exports.re = [];
+    var safeRe = exports.safeRe = [];
+    var src = exports.src = [];
+    var safeSrc = exports.safeSrc = [];
+    var t = exports.t = {};
+    var R = 0;
+    var LETTERDASHNUMBER = "[a-zA-Z0-9-]";
+    var safeRegexReplacements = [
+      ["\\s", 1],
+      ["\\d", MAX_LENGTH],
+      [LETTERDASHNUMBER, MAX_SAFE_BUILD_LENGTH]
+    ];
+    var makeSafeRegex = (value) => {
+      for (const [token, max] of safeRegexReplacements) {
+        value = value.split(`${token}*`).join(`${token}{0,${max}}`).split(`${token}+`).join(`${token}{1,${max}}`);
+      }
+      return value;
+    };
+    var createToken = (name, value, isGlobal) => {
+      const safe = makeSafeRegex(value);
+      const index = R++;
+      debug(name, index, value);
+      t[name] = index;
+      src[index] = value;
+      safeSrc[index] = safe;
+      re[index] = new RegExp(value, isGlobal ? "g" : void 0);
+      safeRe[index] = new RegExp(safe, isGlobal ? "g" : void 0);
+    };
+    createToken("NUMERICIDENTIFIER", "0|[1-9]\\d*");
+    createToken("NUMERICIDENTIFIERLOOSE", "\\d+");
+    createToken("NONNUMERICIDENTIFIER", `\\d*[a-zA-Z-]${LETTERDASHNUMBER}*`);
+    createToken("MAINVERSION", `(${src[t.NUMERICIDENTIFIER]})\\.(${src[t.NUMERICIDENTIFIER]})\\.(${src[t.NUMERICIDENTIFIER]})`);
+    createToken("MAINVERSIONLOOSE", `(${src[t.NUMERICIDENTIFIERLOOSE]})\\.(${src[t.NUMERICIDENTIFIERLOOSE]})\\.(${src[t.NUMERICIDENTIFIERLOOSE]})`);
+    createToken("PRERELEASEIDENTIFIER", `(?:${src[t.NONNUMERICIDENTIFIER]}|${src[t.NUMERICIDENTIFIER]})`);
+    createToken("PRERELEASEIDENTIFIERLOOSE", `(?:${src[t.NONNUMERICIDENTIFIER]}|${src[t.NUMERICIDENTIFIERLOOSE]})`);
+    createToken("PRERELEASE", `(?:-(${src[t.PRERELEASEIDENTIFIER]}(?:\\.${src[t.PRERELEASEIDENTIFIER]})*))`);
+    createToken("PRERELEASELOOSE", `(?:-?(${src[t.PRERELEASEIDENTIFIERLOOSE]}(?:\\.${src[t.PRERELEASEIDENTIFIERLOOSE]})*))`);
+    createToken("BUILDIDENTIFIER", `${LETTERDASHNUMBER}+`);
+    createToken("BUILD", `(?:\\+(${src[t.BUILDIDENTIFIER]}(?:\\.${src[t.BUILDIDENTIFIER]})*))`);
+    createToken("FULLPLAIN", `v?${src[t.MAINVERSION]}${src[t.PRERELEASE]}?${src[t.BUILD]}?`);
+    createToken("FULL", `^${src[t.FULLPLAIN]}$`);
+    createToken("LOOSEPLAIN", `[v=\\s]*${src[t.MAINVERSIONLOOSE]}${src[t.PRERELEASELOOSE]}?${src[t.BUILD]}?`);
+    createToken("LOOSE", `^${src[t.LOOSEPLAIN]}$`);
+    createToken("GTLT", "((?:<|>)?=?)");
+    createToken("XRANGEIDENTIFIERLOOSE", `${src[t.NUMERICIDENTIFIERLOOSE]}|x|X|\\*`);
+    createToken("XRANGEIDENTIFIER", `${src[t.NUMERICIDENTIFIER]}|x|X|\\*`);
+    createToken("XRANGEPLAIN", `[v=\\s]*(${src[t.XRANGEIDENTIFIER]})(?:\\.(${src[t.XRANGEIDENTIFIER]})(?:\\.(${src[t.XRANGEIDENTIFIER]})(?:${src[t.PRERELEASE]})?${src[t.BUILD]}?)?)?`);
+    createToken("XRANGEPLAINLOOSE", `[v=\\s]*(${src[t.XRANGEIDENTIFIERLOOSE]})(?:\\.(${src[t.XRANGEIDENTIFIERLOOSE]})(?:\\.(${src[t.XRANGEIDENTIFIERLOOSE]})(?:${src[t.PRERELEASELOOSE]})?${src[t.BUILD]}?)?)?`);
+    createToken("XRANGE", `^${src[t.GTLT]}\\s*${src[t.XRANGEPLAIN]}$`);
+    createToken("XRANGELOOSE", `^${src[t.GTLT]}\\s*${src[t.XRANGEPLAINLOOSE]}$`);
+    createToken("COERCEPLAIN", `${"(^|[^\\d])(\\d{1,"}${MAX_SAFE_COMPONENT_LENGTH}})(?:\\.(\\d{1,${MAX_SAFE_COMPONENT_LENGTH}}))?(?:\\.(\\d{1,${MAX_SAFE_COMPONENT_LENGTH}}))?`);
+    createToken("COERCE", `${src[t.COERCEPLAIN]}(?:$|[^\\d])`);
+    createToken("COERCEFULL", src[t.COERCEPLAIN] + `(?:${src[t.PRERELEASE]})?(?:${src[t.BUILD]})?(?:$|[^\\d])`);
+    createToken("COERCERTL", src[t.COERCE], true);
+    createToken("COERCERTLFULL", src[t.COERCEFULL], true);
+    createToken("LONETILDE", "(?:~>?)");
+    createToken("TILDETRIM", `(\\s*)${src[t.LONETILDE]}\\s+`, true);
+    exports.tildeTrimReplace = "$1~";
+    createToken("TILDE", `^${src[t.LONETILDE]}${src[t.XRANGEPLAIN]}$`);
+    createToken("TILDELOOSE", `^${src[t.LONETILDE]}${src[t.XRANGEPLAINLOOSE]}$`);
+    createToken("LONECARET", "(?:\\^)");
+    createToken("CARETTRIM", `(\\s*)${src[t.LONECARET]}\\s+`, true);
+    exports.caretTrimReplace = "$1^";
+    createToken("CARET", `^${src[t.LONECARET]}${src[t.XRANGEPLAIN]}$`);
+    createToken("CARETLOOSE", `^${src[t.LONECARET]}${src[t.XRANGEPLAINLOOSE]}$`);
+    createToken("COMPARATORLOOSE", `^${src[t.GTLT]}\\s*(${src[t.LOOSEPLAIN]})$|^$`);
+    createToken("COMPARATOR", `^${src[t.GTLT]}\\s*(${src[t.FULLPLAIN]})$|^$`);
+    createToken("COMPARATORTRIM", `(\\s*)${src[t.GTLT]}\\s*(${src[t.LOOSEPLAIN]}|${src[t.XRANGEPLAIN]})`, true);
+    exports.comparatorTrimReplace = "$1$2$3";
+    createToken("HYPHENRANGE", `^\\s*(${src[t.XRANGEPLAIN]})\\s+-\\s+(${src[t.XRANGEPLAIN]})\\s*$`);
+    createToken("HYPHENRANGELOOSE", `^\\s*(${src[t.XRANGEPLAINLOOSE]})\\s+-\\s+(${src[t.XRANGEPLAINLOOSE]})\\s*$`);
+    createToken("STAR", "(<|>)?=?\\s*\\*");
+    createToken("GTE0", "^\\s*>=\\s*0\\.0\\.0\\s*$");
+    createToken("GTE0PRE", "^\\s*>=\\s*0\\.0\\.0-0\\s*$");
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/parse-options.js
+var require_parse_options = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/parse-options.js"(exports, module) {
+    "use strict";
+    var looseOption = Object.freeze({ loose: true });
+    var emptyOpts = Object.freeze({});
+    var parseOptions = (options) => {
+      if (!options) {
+        return emptyOpts;
+      }
+      if (typeof options !== "object") {
+        return looseOption;
+      }
+      return options;
+    };
+    module.exports = parseOptions;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/identifiers.js
+var require_identifiers = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/identifiers.js"(exports, module) {
+    "use strict";
+    var numeric = /^[0-9]+$/;
+    var compareIdentifiers = (a, b) => {
+      if (typeof a === "number" && typeof b === "number") {
+        return a === b ? 0 : a < b ? -1 : 1;
+      }
+      const anum = numeric.test(a);
+      const bnum = numeric.test(b);
+      if (anum && bnum) {
+        a = +a;
+        b = +b;
+      }
+      return a === b ? 0 : anum && !bnum ? -1 : bnum && !anum ? 1 : a < b ? -1 : 1;
+    };
+    var rcompareIdentifiers = (a, b) => compareIdentifiers(b, a);
+    module.exports = {
+      compareIdentifiers,
+      rcompareIdentifiers
+    };
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/classes/semver.js
+var require_semver = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/classes/semver.js"(exports, module) {
+    "use strict";
+    var debug = require_debug();
+    var { MAX_LENGTH, MAX_SAFE_INTEGER } = require_constants();
+    var { safeRe: re, t } = require_re();
+    var parseOptions = require_parse_options();
+    var { compareIdentifiers } = require_identifiers();
+    var isPrereleaseIdentifier = (prerelease, identifier) => {
+      const identifiers = identifier.split(".");
+      if (identifiers.length > prerelease.length) {
+        return false;
+      }
+      for (let i = 0; i < identifiers.length; i++) {
+        if (compareIdentifiers(prerelease[i], identifiers[i]) !== 0) {
+          return false;
+        }
+      }
+      return true;
+    };
+    var SemVer = class _SemVer {
+      constructor(version, options) {
+        options = parseOptions(options);
+        if (version instanceof _SemVer) {
+          if (version.loose === !!options.loose && version.includePrerelease === !!options.includePrerelease) {
+            return version;
+          } else {
+            version = version.version;
+          }
+        } else if (typeof version !== "string") {
+          throw new TypeError(`Invalid version. Must be a string. Got type "${typeof version}".`);
+        }
+        if (version.length > MAX_LENGTH) {
+          throw new TypeError(
+            `version is longer than ${MAX_LENGTH} characters`
+          );
+        }
+        debug("SemVer", version, options);
+        this.options = options;
+        this.loose = !!options.loose;
+        this.includePrerelease = !!options.includePrerelease;
+        const m = version.trim().match(options.loose ? re[t.LOOSE] : re[t.FULL]);
+        if (!m) {
+          throw new TypeError(`Invalid Version: ${version}`);
+        }
+        this.raw = version;
+        this.major = +m[1];
+        this.minor = +m[2];
+        this.patch = +m[3];
+        if (this.major > MAX_SAFE_INTEGER || this.major < 0) {
+          throw new TypeError("Invalid major version");
+        }
+        if (this.minor > MAX_SAFE_INTEGER || this.minor < 0) {
+          throw new TypeError("Invalid minor version");
+        }
+        if (this.patch > MAX_SAFE_INTEGER || this.patch < 0) {
+          throw new TypeError("Invalid patch version");
+        }
+        if (!m[4]) {
+          this.prerelease = [];
+        } else {
+          this.prerelease = m[4].split(".").map((id) => {
+            if (/^[0-9]+$/.test(id)) {
+              const num = +id;
+              if (num >= 0 && num < MAX_SAFE_INTEGER) {
+                return num;
+              }
+            }
+            return id;
+          });
+        }
+        this.build = m[5] ? m[5].split(".") : [];
+        this.format();
+      }
+      format() {
+        this.version = `${this.major}.${this.minor}.${this.patch}`;
+        if (this.prerelease.length) {
+          this.version += `-${this.prerelease.join(".")}`;
+        }
+        return this.version;
+      }
+      toString() {
+        return this.version;
+      }
+      compare(other) {
+        debug("SemVer.compare", this.version, this.options, other);
+        if (!(other instanceof _SemVer)) {
+          if (typeof other === "string" && other === this.version) {
+            return 0;
+          }
+          other = new _SemVer(other, this.options);
+        }
+        if (other.version === this.version) {
+          return 0;
+        }
+        return this.compareMain(other) || this.comparePre(other);
+      }
+      compareMain(other) {
+        if (!(other instanceof _SemVer)) {
+          other = new _SemVer(other, this.options);
+        }
+        if (this.major < other.major) {
+          return -1;
+        }
+        if (this.major > other.major) {
+          return 1;
+        }
+        if (this.minor < other.minor) {
+          return -1;
+        }
+        if (this.minor > other.minor) {
+          return 1;
+        }
+        if (this.patch < other.patch) {
+          return -1;
+        }
+        if (this.patch > other.patch) {
+          return 1;
+        }
+        return 0;
+      }
+      comparePre(other) {
+        if (!(other instanceof _SemVer)) {
+          other = new _SemVer(other, this.options);
+        }
+        if (this.prerelease.length && !other.prerelease.length) {
+          return -1;
+        } else if (!this.prerelease.length && other.prerelease.length) {
+          return 1;
+        } else if (!this.prerelease.length && !other.prerelease.length) {
+          return 0;
+        }
+        let i = 0;
+        do {
+          const a = this.prerelease[i];
+          const b = other.prerelease[i];
+          debug("prerelease compare", i, a, b);
+          if (a === void 0 && b === void 0) {
+            return 0;
+          } else if (b === void 0) {
+            return 1;
+          } else if (a === void 0) {
+            return -1;
+          } else if (a === b) {
+            continue;
+          } else {
+            return compareIdentifiers(a, b);
+          }
+        } while (++i);
+      }
+      compareBuild(other) {
+        if (!(other instanceof _SemVer)) {
+          other = new _SemVer(other, this.options);
+        }
+        let i = 0;
+        do {
+          const a = this.build[i];
+          const b = other.build[i];
+          debug("build compare", i, a, b);
+          if (a === void 0 && b === void 0) {
+            return 0;
+          } else if (b === void 0) {
+            return 1;
+          } else if (a === void 0) {
+            return -1;
+          } else if (a === b) {
+            continue;
+          } else {
+            return compareIdentifiers(a, b);
+          }
+        } while (++i);
+      }
+      // preminor will bump the version up to the next minor release, and immediately
+      // down to pre-release. premajor and prepatch work the same way.
+      inc(release, identifier, identifierBase) {
+        if (release.startsWith("pre")) {
+          if (!identifier && identifierBase === false) {
+            throw new Error("invalid increment argument: identifier is empty");
+          }
+          if (identifier) {
+            const match = `-${identifier}`.match(this.options.loose ? re[t.PRERELEASELOOSE] : re[t.PRERELEASE]);
+            if (!match || match[1] !== identifier) {
+              throw new Error(`invalid identifier: ${identifier}`);
+            }
+          }
+        }
+        switch (release) {
+          case "premajor":
+            this.prerelease.length = 0;
+            this.patch = 0;
+            this.minor = 0;
+            this.major++;
+            this.inc("pre", identifier, identifierBase);
+            break;
+          case "preminor":
+            this.prerelease.length = 0;
+            this.patch = 0;
+            this.minor++;
+            this.inc("pre", identifier, identifierBase);
+            break;
+          case "prepatch":
+            this.prerelease.length = 0;
+            this.inc("patch", identifier, identifierBase);
+            this.inc("pre", identifier, identifierBase);
+            break;
+          // If the input is a non-prerelease version, this acts the same as
+          // prepatch.
+          case "prerelease":
+            if (this.prerelease.length === 0) {
+              this.inc("patch", identifier, identifierBase);
+            }
+            this.inc("pre", identifier, identifierBase);
+            break;
+          case "release":
+            if (this.prerelease.length === 0) {
+              throw new Error(`version ${this.raw} is not a prerelease`);
+            }
+            this.prerelease.length = 0;
+            break;
+          case "major":
+            if (this.minor !== 0 || this.patch !== 0 || this.prerelease.length === 0) {
+              this.major++;
+            }
+            this.minor = 0;
+            this.patch = 0;
+            this.prerelease = [];
+            break;
+          case "minor":
+            if (this.patch !== 0 || this.prerelease.length === 0) {
+              this.minor++;
+            }
+            this.patch = 0;
+            this.prerelease = [];
+            break;
+          case "patch":
+            if (this.prerelease.length === 0) {
+              this.patch++;
+            }
+            this.prerelease = [];
+            break;
+          // This probably shouldn't be used publicly.
+          // 1.0.0 'pre' would become 1.0.0-0 which is the wrong direction.
+          case "pre": {
+            const base = Number(identifierBase) ? 1 : 0;
+            if (this.prerelease.length === 0) {
+              this.prerelease = [base];
+            } else {
+              let i = this.prerelease.length;
+              while (--i >= 0) {
+                if (typeof this.prerelease[i] === "number") {
+                  this.prerelease[i]++;
+                  i = -2;
+                }
+              }
+              if (i === -1) {
+                if (identifier === this.prerelease.join(".") && identifierBase === false) {
+                  throw new Error("invalid increment argument: identifier already exists");
+                }
+                this.prerelease.push(base);
+              }
+            }
+            if (identifier) {
+              let prerelease = [identifier, base];
+              if (identifierBase === false) {
+                prerelease = [identifier];
+              }
+              if (isPrereleaseIdentifier(this.prerelease, identifier)) {
+                const prereleaseBase = this.prerelease[identifier.split(".").length];
+                if (isNaN(prereleaseBase)) {
+                  this.prerelease = prerelease;
+                }
+              } else {
+                this.prerelease = prerelease;
+              }
+            }
+            break;
+          }
+          default:
+            throw new Error(`invalid increment argument: ${release}`);
+        }
+        this.raw = this.format();
+        if (this.build.length) {
+          this.raw += `+${this.build.join(".")}`;
+        }
+        return this;
+      }
+    };
+    module.exports = SemVer;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/parse.js
+var require_parse = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/parse.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var parse2 = (version, options, throwErrors = false) => {
+      if (version instanceof SemVer) {
+        return version;
+      }
+      try {
+        return new SemVer(version, options);
+      } catch (er) {
+        if (!throwErrors) {
+          return null;
+        }
+        throw er;
+      }
+    };
+    module.exports = parse2;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/valid.js
+var require_valid = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/valid.js"(exports, module) {
+    "use strict";
+    var parse2 = require_parse();
+    var valid2 = (version, options) => {
+      const v = parse2(version, options);
+      return v ? v.version : null;
+    };
+    module.exports = valid2;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/clean.js
+var require_clean = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/clean.js"(exports, module) {
+    "use strict";
+    var parse2 = require_parse();
+    var clean = (version, options) => {
+      const s = parse2(version.trim().replace(/^[=v]+/, ""), options);
+      return s ? s.version : null;
+    };
+    module.exports = clean;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/inc.js
+var require_inc = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/inc.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var inc = (version, release, options, identifier, identifierBase) => {
+      if (typeof options === "string") {
+        identifierBase = identifier;
+        identifier = options;
+        options = void 0;
+      }
+      try {
+        return new SemVer(
+          version instanceof SemVer ? version.version : version,
+          options
+        ).inc(release, identifier, identifierBase).version;
+      } catch (er) {
+        return null;
+      }
+    };
+    module.exports = inc;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/diff.js
+var require_diff = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/diff.js"(exports, module) {
+    "use strict";
+    var parse2 = require_parse();
+    var diff = (version1, version2) => {
+      const v1 = parse2(version1, null, true);
+      const v2 = parse2(version2, null, true);
+      const comparison = v1.compare(v2);
+      if (comparison === 0) {
+        return null;
+      }
+      const v1Higher = comparison > 0;
+      const highVersion = v1Higher ? v1 : v2;
+      const lowVersion = v1Higher ? v2 : v1;
+      const highHasPre = !!highVersion.prerelease.length;
+      const lowHasPre = !!lowVersion.prerelease.length;
+      if (lowHasPre && !highHasPre) {
+        if (!lowVersion.patch && !lowVersion.minor) {
+          return "major";
+        }
+        if (lowVersion.compareMain(highVersion) === 0) {
+          if (lowVersion.minor && !lowVersion.patch) {
+            return "minor";
+          }
+          return "patch";
+        }
+      }
+      const prefix = highHasPre ? "pre" : "";
+      if (v1.major !== v2.major) {
+        return prefix + "major";
+      }
+      if (v1.minor !== v2.minor) {
+        return prefix + "minor";
+      }
+      if (v1.patch !== v2.patch) {
+        return prefix + "patch";
+      }
+      return "prerelease";
+    };
+    module.exports = diff;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/major.js
+var require_major = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/major.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var major = (a, loose) => new SemVer(a, loose).major;
+    module.exports = major;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/minor.js
+var require_minor = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/minor.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var minor = (a, loose) => new SemVer(a, loose).minor;
+    module.exports = minor;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/patch.js
+var require_patch = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/patch.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var patch = (a, loose) => new SemVer(a, loose).patch;
+    module.exports = patch;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/prerelease.js
+var require_prerelease = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/prerelease.js"(exports, module) {
+    "use strict";
+    var parse2 = require_parse();
+    var prerelease = (version, options) => {
+      const parsed = parse2(version, options);
+      return parsed && parsed.prerelease.length ? parsed.prerelease : null;
+    };
+    module.exports = prerelease;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/compare.js
+var require_compare = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/compare.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var compare = (a, b, loose) => new SemVer(a, loose).compare(new SemVer(b, loose));
+    module.exports = compare;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/rcompare.js
+var require_rcompare = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/rcompare.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var rcompare = (a, b, loose) => compare(b, a, loose);
+    module.exports = rcompare;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/compare-loose.js
+var require_compare_loose = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/compare-loose.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var compareLoose = (a, b) => compare(a, b, true);
+    module.exports = compareLoose;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/compare-build.js
+var require_compare_build = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/compare-build.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var compareBuild = (a, b, loose) => {
+      const versionA = new SemVer(a, loose);
+      const versionB = new SemVer(b, loose);
+      return versionA.compare(versionB) || versionA.compareBuild(versionB);
+    };
+    module.exports = compareBuild;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/sort.js
+var require_sort = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/sort.js"(exports, module) {
+    "use strict";
+    var compareBuild = require_compare_build();
+    var sort = (list, loose) => list.sort((a, b) => compareBuild(a, b, loose));
+    module.exports = sort;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/rsort.js
+var require_rsort = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/rsort.js"(exports, module) {
+    "use strict";
+    var compareBuild = require_compare_build();
+    var rsort = (list, loose) => list.sort((a, b) => compareBuild(b, a, loose));
+    module.exports = rsort;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/gt.js
+var require_gt = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/gt.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var gt = (a, b, loose) => compare(a, b, loose) > 0;
+    module.exports = gt;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/lt.js
+var require_lt = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/lt.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var lt = (a, b, loose) => compare(a, b, loose) < 0;
+    module.exports = lt;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/eq.js
+var require_eq = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/eq.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var eq = (a, b, loose) => compare(a, b, loose) === 0;
+    module.exports = eq;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/neq.js
+var require_neq = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/neq.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var neq = (a, b, loose) => compare(a, b, loose) !== 0;
+    module.exports = neq;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/gte.js
+var require_gte = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/gte.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var gte = (a, b, loose) => compare(a, b, loose) >= 0;
+    module.exports = gte;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/lte.js
+var require_lte = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/lte.js"(exports, module) {
+    "use strict";
+    var compare = require_compare();
+    var lte = (a, b, loose) => compare(a, b, loose) <= 0;
+    module.exports = lte;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/cmp.js
+var require_cmp = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/cmp.js"(exports, module) {
+    "use strict";
+    var eq = require_eq();
+    var neq = require_neq();
+    var gt = require_gt();
+    var gte = require_gte();
+    var lt = require_lt();
+    var lte = require_lte();
+    var cmp = (a, op, b, loose) => {
+      switch (op) {
+        case "===":
+          if (typeof a === "object") {
+            a = a.version;
+          }
+          if (typeof b === "object") {
+            b = b.version;
+          }
+          return a === b;
+        case "!==":
+          if (typeof a === "object") {
+            a = a.version;
+          }
+          if (typeof b === "object") {
+            b = b.version;
+          }
+          return a !== b;
+        case "":
+        case "=":
+        case "==":
+          return eq(a, b, loose);
+        case "!=":
+          return neq(a, b, loose);
+        case ">":
+          return gt(a, b, loose);
+        case ">=":
+          return gte(a, b, loose);
+        case "<":
+          return lt(a, b, loose);
+        case "<=":
+          return lte(a, b, loose);
+        default:
+          throw new TypeError(`Invalid operator: ${op}`);
+      }
+    };
+    module.exports = cmp;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/coerce.js
+var require_coerce = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/coerce.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var parse2 = require_parse();
+    var { safeRe: re, t } = require_re();
+    var coerce = (version, options) => {
+      if (version instanceof SemVer) {
+        return version;
+      }
+      if (typeof version === "number") {
+        version = String(version);
+      }
+      if (typeof version !== "string") {
+        return null;
+      }
+      options = options || {};
+      let match = null;
+      if (!options.rtl) {
+        match = version.match(options.includePrerelease ? re[t.COERCEFULL] : re[t.COERCE]);
+      } else {
+        const coerceRtlRegex = options.includePrerelease ? re[t.COERCERTLFULL] : re[t.COERCERTL];
+        let next;
+        while ((next = coerceRtlRegex.exec(version)) && (!match || match.index + match[0].length !== version.length)) {
+          if (!match || next.index + next[0].length !== match.index + match[0].length) {
+            match = next;
+          }
+          coerceRtlRegex.lastIndex = next.index + next[1].length + next[2].length;
+        }
+        coerceRtlRegex.lastIndex = -1;
+      }
+      if (match === null) {
+        return null;
+      }
+      const major = match[2];
+      const minor = match[3] || "0";
+      const patch = match[4] || "0";
+      const prerelease = options.includePrerelease && match[5] ? `-${match[5]}` : "";
+      const build = options.includePrerelease && match[6] ? `+${match[6]}` : "";
+      return parse2(`${major}.${minor}.${patch}${prerelease}${build}`, options);
+    };
+    module.exports = coerce;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/truncate.js
+var require_truncate = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/truncate.js"(exports, module) {
+    "use strict";
+    var parse2 = require_parse();
+    var constants = require_constants();
+    var SemVer = require_semver();
+    var truncate = (version, truncation, options) => {
+      if (!constants.RELEASE_TYPES.includes(truncation)) {
+        return null;
+      }
+      const clonedVersion = cloneInputVersion(version, options);
+      return clonedVersion && doTruncation(clonedVersion, truncation);
+    };
+    var cloneInputVersion = (version, options) => {
+      const versionStringToParse = version instanceof SemVer ? version.version : version;
+      return parse2(versionStringToParse, options);
+    };
+    var doTruncation = (version, truncation) => {
+      if (isPrerelease(truncation)) {
+        return version.version;
+      }
+      version.prerelease = [];
+      switch (truncation) {
+        case "major":
+          version.minor = 0;
+          version.patch = 0;
+          break;
+        case "minor":
+          version.patch = 0;
+          break;
+      }
+      return version.format();
+    };
+    var isPrerelease = (type) => {
+      return type.startsWith("pre");
+    };
+    module.exports = truncate;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/lrucache.js
+var require_lrucache = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/internal/lrucache.js"(exports, module) {
+    "use strict";
+    var LRUCache = class {
+      constructor() {
+        this.max = 1e3;
+        this.map = /* @__PURE__ */ new Map();
+      }
+      get(key) {
+        const value = this.map.get(key);
+        if (value === void 0) {
+          return void 0;
+        } else {
+          this.map.delete(key);
+          this.map.set(key, value);
+          return value;
+        }
+      }
+      delete(key) {
+        return this.map.delete(key);
+      }
+      set(key, value) {
+        const deleted = this.delete(key);
+        if (!deleted && value !== void 0) {
+          if (this.map.size >= this.max) {
+            const firstKey = this.map.keys().next().value;
+            this.delete(firstKey);
+          }
+          this.map.set(key, value);
+        }
+        return this;
+      }
+    };
+    module.exports = LRUCache;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/classes/range.js
+var require_range = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/classes/range.js"(exports, module) {
+    "use strict";
+    var SPACE_CHARACTERS = /\s+/g;
+    var Range = class _Range {
+      constructor(range, options) {
+        options = parseOptions(options);
+        if (range instanceof _Range) {
+          if (range.loose === !!options.loose && range.includePrerelease === !!options.includePrerelease) {
+            return range;
+          } else {
+            return new _Range(range.raw, options);
+          }
+        }
+        if (range instanceof Comparator) {
+          this.raw = range.value;
+          this.set = [[range]];
+          this.formatted = void 0;
+          return this;
+        }
+        this.options = options;
+        this.loose = !!options.loose;
+        this.includePrerelease = !!options.includePrerelease;
+        this.raw = range.trim().replace(SPACE_CHARACTERS, " ");
+        this.set = this.raw.split("||").map((r) => this.parseRange(r.trim())).filter((c) => c.length);
+        if (!this.set.length) {
+          throw new TypeError(`Invalid SemVer Range: ${this.raw}`);
+        }
+        if (this.set.length > 1) {
+          const first = this.set[0];
+          this.set = this.set.filter((c) => !isNullSet(c[0]));
+          if (this.set.length === 0) {
+            this.set = [first];
+          } else if (this.set.length > 1) {
+            for (const c of this.set) {
+              if (c.length === 1 && isAny(c[0])) {
+                this.set = [c];
+                break;
+              }
+            }
+          }
+        }
+        this.formatted = void 0;
+      }
+      get range() {
+        if (this.formatted === void 0) {
+          this.formatted = "";
+          for (let i = 0; i < this.set.length; i++) {
+            if (i > 0) {
+              this.formatted += "||";
+            }
+            const comps = this.set[i];
+            for (let k = 0; k < comps.length; k++) {
+              if (k > 0) {
+                this.formatted += " ";
+              }
+              this.formatted += comps[k].toString().trim();
+            }
+          }
+        }
+        return this.formatted;
+      }
+      format() {
+        return this.range;
+      }
+      toString() {
+        return this.range;
+      }
+      parseRange(range) {
+        range = range.replace(BUILDSTRIPRE, "");
+        const memoOpts = (this.options.includePrerelease && FLAG_INCLUDE_PRERELEASE) | (this.options.loose && FLAG_LOOSE);
+        const memoKey = memoOpts + ":" + range;
+        const cached = cache.get(memoKey);
+        if (cached) {
+          return cached;
+        }
+        const loose = this.options.loose;
+        const hr = loose ? re[t.HYPHENRANGELOOSE] : re[t.HYPHENRANGE];
+        range = range.replace(hr, hyphenReplace(this.options.includePrerelease));
+        debug("hyphen replace", range);
+        range = range.replace(re[t.COMPARATORTRIM], comparatorTrimReplace);
+        debug("comparator trim", range);
+        range = range.replace(re[t.TILDETRIM], tildeTrimReplace);
+        debug("tilde trim", range);
+        range = range.replace(re[t.CARETTRIM], caretTrimReplace);
+        debug("caret trim", range);
+        let rangeList = range.split(" ").map((comp) => parseComparator(comp, this.options)).join(" ").split(/\s+/).map((comp) => replaceGTE0(comp, this.options));
+        if (loose) {
+          rangeList = rangeList.filter((comp) => {
+            debug("loose invalid filter", comp, this.options);
+            return !!comp.match(re[t.COMPARATORLOOSE]);
+          });
+        }
+        debug("range list", rangeList);
+        const rangeMap = /* @__PURE__ */ new Map();
+        const comparators = rangeList.map((comp) => new Comparator(comp, this.options));
+        for (const comp of comparators) {
+          if (isNullSet(comp)) {
+            return [comp];
+          }
+          rangeMap.set(comp.value, comp);
+        }
+        if (rangeMap.size > 1 && rangeMap.has("")) {
+          rangeMap.delete("");
+        }
+        const result = [...rangeMap.values()];
+        cache.set(memoKey, result);
+        return result;
+      }
+      intersects(range, options) {
+        if (!(range instanceof _Range)) {
+          throw new TypeError("a Range is required");
+        }
+        return this.set.some((thisComparators) => {
+          return isSatisfiable(thisComparators, options) && range.set.some((rangeComparators) => {
+            return isSatisfiable(rangeComparators, options) && thisComparators.every((thisComparator) => {
+              return rangeComparators.every((rangeComparator) => {
+                return thisComparator.intersects(rangeComparator, options);
+              });
+            });
+          });
+        });
+      }
+      // if ANY of the sets match ALL of its comparators, then pass
+      test(version) {
+        if (!version) {
+          return false;
+        }
+        if (typeof version === "string") {
+          try {
+            version = new SemVer(version, this.options);
+          } catch (er) {
+            return false;
+          }
+        }
+        for (let i = 0; i < this.set.length; i++) {
+          if (testSet(this.set[i], version, this.options)) {
+            return true;
+          }
+        }
+        return false;
+      }
+    };
+    module.exports = Range;
+    var LRU = require_lrucache();
+    var cache = new LRU();
+    var parseOptions = require_parse_options();
+    var Comparator = require_comparator();
+    var debug = require_debug();
+    var SemVer = require_semver();
+    var {
+      safeRe: re,
+      src,
+      t,
+      comparatorTrimReplace,
+      tildeTrimReplace,
+      caretTrimReplace
+    } = require_re();
+    var { FLAG_INCLUDE_PRERELEASE, FLAG_LOOSE } = require_constants();
+    var BUILDSTRIPRE = new RegExp(src[t.BUILD], "g");
+    var isNullSet = (c) => c.value === "<0.0.0-0";
+    var isAny = (c) => c.value === "";
+    var isSatisfiable = (comparators, options) => {
+      let result = true;
+      const remainingComparators = comparators.slice();
+      let testComparator = remainingComparators.pop();
+      while (result && remainingComparators.length) {
+        result = remainingComparators.every((otherComparator) => {
+          return testComparator.intersects(otherComparator, options);
+        });
+        testComparator = remainingComparators.pop();
+      }
+      return result;
+    };
+    var parseComparator = (comp, options) => {
+      comp = comp.replace(re[t.BUILD], "");
+      debug("comp", comp, options);
+      comp = replaceCarets(comp, options);
+      debug("caret", comp);
+      comp = replaceTildes(comp, options);
+      debug("tildes", comp);
+      comp = replaceXRanges(comp, options);
+      debug("xrange", comp);
+      comp = replaceStars(comp, options);
+      debug("stars", comp);
+      return comp;
+    };
+    var isX = (id) => !id || id.toLowerCase() === "x" || id === "*";
+    var invalidXRangeOrder = (M, m, p) => isX(M) && !isX(m) || isX(m) && p && !isX(p);
+    var replaceTildes = (comp, options) => {
+      return comp.trim().split(/\s+/).map((c) => replaceTilde(c, options)).join(" ");
+    };
+    var replaceTilde = (comp, options) => {
+      const r = options.loose ? re[t.TILDELOOSE] : re[t.TILDE];
+      const z = options.includePrerelease ? "-0" : "";
+      return comp.replace(r, (_, M, m, p, pr) => {
+        debug("tilde", comp, _, M, m, p, pr);
+        let ret;
+        if (isX(M)) {
+          ret = "";
+        } else if (isX(m)) {
+          ret = `>=${M}.0.0${z} <${+M + 1}.0.0-0`;
+        } else if (isX(p)) {
+          ret = `>=${M}.${m}.0${z} <${M}.${+m + 1}.0-0`;
+        } else if (pr) {
+          debug("replaceTilde pr", pr);
+          ret = `>=${M}.${m}.${p}-${pr} <${M}.${+m + 1}.0-0`;
+        } else {
+          ret = `>=${M}.${m}.${p} <${M}.${+m + 1}.0-0`;
+        }
+        debug("tilde return", ret);
+        return ret;
+      });
+    };
+    var replaceCarets = (comp, options) => {
+      return comp.trim().split(/\s+/).map((c) => replaceCaret(c, options)).join(" ");
+    };
+    var replaceCaret = (comp, options) => {
+      debug("caret", comp, options);
+      const r = options.loose ? re[t.CARETLOOSE] : re[t.CARET];
+      const z = options.includePrerelease ? "-0" : "";
+      return comp.replace(r, (_, M, m, p, pr) => {
+        debug("caret", comp, _, M, m, p, pr);
+        let ret;
+        if (isX(M)) {
+          ret = "";
+        } else if (isX(m)) {
+          ret = `>=${M}.0.0${z} <${+M + 1}.0.0-0`;
+        } else if (isX(p)) {
+          if (M === "0") {
+            ret = `>=${M}.${m}.0${z} <${M}.${+m + 1}.0-0`;
+          } else {
+            ret = `>=${M}.${m}.0${z} <${+M + 1}.0.0-0`;
+          }
+        } else if (pr) {
+          debug("replaceCaret pr", pr);
+          if (M === "0") {
+            if (m === "0") {
+              ret = `>=${M}.${m}.${p}-${pr} <${M}.${m}.${+p + 1}-0`;
+            } else {
+              ret = `>=${M}.${m}.${p}-${pr} <${M}.${+m + 1}.0-0`;
+            }
+          } else {
+            ret = `>=${M}.${m}.${p}-${pr} <${+M + 1}.0.0-0`;
+          }
+        } else {
+          debug("no pr");
+          if (M === "0") {
+            if (m === "0") {
+              ret = `>=${M}.${m}.${p} <${M}.${m}.${+p + 1}-0`;
+            } else {
+              ret = `>=${M}.${m}.${p} <${M}.${+m + 1}.0-0`;
+            }
+          } else {
+            ret = `>=${M}.${m}.${p} <${+M + 1}.0.0-0`;
+          }
+        }
+        debug("caret return", ret);
+        return ret;
+      });
+    };
+    var replaceXRanges = (comp, options) => {
+      debug("replaceXRanges", comp, options);
+      return comp.split(/\s+/).map((c) => replaceXRange(c, options)).join(" ");
+    };
+    var replaceXRange = (comp, options) => {
+      comp = comp.trim();
+      const r = options.loose ? re[t.XRANGELOOSE] : re[t.XRANGE];
+      return comp.replace(r, (ret, gtlt, M, m, p, pr) => {
+        debug("xRange", comp, ret, gtlt, M, m, p, pr);
+        if (invalidXRangeOrder(M, m, p)) {
+          return comp;
+        }
+        const xM = isX(M);
+        const xm = xM || isX(m);
+        const xp = xm || isX(p);
+        const anyX = xp;
+        if (gtlt === "=" && anyX) {
+          gtlt = "";
+        }
+        pr = options.includePrerelease ? "-0" : "";
+        if (xM) {
+          if (gtlt === ">" || gtlt === "<") {
+            ret = "<0.0.0-0";
+          } else {
+            ret = "*";
+          }
+        } else if (gtlt && anyX) {
+          if (xm) {
+            m = 0;
+          }
+          p = 0;
+          if (gtlt === ">") {
+            gtlt = ">=";
+            if (xm) {
+              M = +M + 1;
+              m = 0;
+              p = 0;
+            } else {
+              m = +m + 1;
+              p = 0;
+            }
+          } else if (gtlt === "<=") {
+            gtlt = "<";
+            if (xm) {
+              M = +M + 1;
+            } else {
+              m = +m + 1;
+            }
+          }
+          if (gtlt === "<") {
+            pr = "-0";
+          }
+          ret = `${gtlt + M}.${m}.${p}${pr}`;
+        } else if (xm) {
+          ret = `>=${M}.0.0${pr} <${+M + 1}.0.0-0`;
+        } else if (xp) {
+          ret = `>=${M}.${m}.0${pr} <${M}.${+m + 1}.0-0`;
+        }
+        debug("xRange return", ret);
+        return ret;
+      });
+    };
+    var replaceStars = (comp, options) => {
+      debug("replaceStars", comp, options);
+      return comp.trim().replace(re[t.STAR], "");
+    };
+    var replaceGTE0 = (comp, options) => {
+      debug("replaceGTE0", comp, options);
+      return comp.trim().replace(re[options.includePrerelease ? t.GTE0PRE : t.GTE0], "");
+    };
+    var hyphenReplace = (incPr) => ($0, from, fM, fm, fp, fpr, fb, to, tM, tm, tp, tpr) => {
+      if (isX(fM)) {
+        from = "";
+      } else if (isX(fm)) {
+        from = `>=${fM}.0.0${incPr ? "-0" : ""}`;
+      } else if (isX(fp)) {
+        from = `>=${fM}.${fm}.0${incPr ? "-0" : ""}`;
+      } else if (fpr) {
+        from = `>=${from}`;
+      } else {
+        from = `>=${from}${incPr ? "-0" : ""}`;
+      }
+      if (isX(tM)) {
+        to = "";
+      } else if (isX(tm)) {
+        to = `<${+tM + 1}.0.0-0`;
+      } else if (isX(tp)) {
+        to = `<${tM}.${+tm + 1}.0-0`;
+      } else if (tpr) {
+        to = `<=${tM}.${tm}.${tp}-${tpr}`;
+      } else if (incPr) {
+        to = `<${tM}.${tm}.${+tp + 1}-0`;
+      } else {
+        to = `<=${to}`;
+      }
+      return `${from} ${to}`.trim();
+    };
+    var testSet = (set, version, options) => {
+      for (let i = 0; i < set.length; i++) {
+        if (!set[i].test(version)) {
+          return false;
+        }
+      }
+      if (version.prerelease.length && !options.includePrerelease) {
+        for (let i = 0; i < set.length; i++) {
+          debug(set[i].semver);
+          if (set[i].semver === Comparator.ANY) {
+            continue;
+          }
+          if (set[i].semver.prerelease.length > 0) {
+            const allowed = set[i].semver;
+            if (allowed.major === version.major && allowed.minor === version.minor && allowed.patch === version.patch) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+      return true;
+    };
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/classes/comparator.js
+var require_comparator = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/classes/comparator.js"(exports, module) {
+    "use strict";
+    var ANY = /* @__PURE__ */ Symbol("SemVer ANY");
+    var Comparator = class _Comparator {
+      static get ANY() {
+        return ANY;
+      }
+      constructor(comp, options) {
+        options = parseOptions(options);
+        if (comp instanceof _Comparator) {
+          if (comp.loose === !!options.loose) {
+            return comp;
+          } else {
+            comp = comp.value;
+          }
+        }
+        comp = comp.trim().split(/\s+/).join(" ");
+        debug("comparator", comp, options);
+        this.options = options;
+        this.loose = !!options.loose;
+        this.parse(comp);
+        if (this.semver === ANY) {
+          this.value = "";
+        } else {
+          this.value = this.operator + this.semver.version;
+        }
+        debug("comp", this);
+      }
+      parse(comp) {
+        const r = this.options.loose ? re[t.COMPARATORLOOSE] : re[t.COMPARATOR];
+        const m = comp.match(r);
+        if (!m) {
+          throw new TypeError(`Invalid comparator: ${comp}`);
+        }
+        this.operator = m[1] !== void 0 ? m[1] : "";
+        if (this.operator === "=") {
+          this.operator = "";
+        }
+        if (!m[2]) {
+          this.semver = ANY;
+        } else {
+          this.semver = new SemVer(m[2], this.options.loose);
+        }
+      }
+      toString() {
+        return this.value;
+      }
+      test(version) {
+        debug("Comparator.test", version, this.options.loose);
+        if (this.semver === ANY || version === ANY) {
+          return true;
+        }
+        if (typeof version === "string") {
+          try {
+            version = new SemVer(version, this.options);
+          } catch (er) {
+            return false;
+          }
+        }
+        return cmp(version, this.operator, this.semver, this.options);
+      }
+      intersects(comp, options) {
+        if (!(comp instanceof _Comparator)) {
+          throw new TypeError("a Comparator is required");
+        }
+        if (this.operator === "") {
+          if (this.value === "") {
+            return true;
+          }
+          return new Range(comp.value, options).test(this.value);
+        } else if (comp.operator === "") {
+          if (comp.value === "") {
+            return true;
+          }
+          return new Range(this.value, options).test(comp.semver);
+        }
+        options = parseOptions(options);
+        if (options.includePrerelease && (this.value === "<0.0.0-0" || comp.value === "<0.0.0-0")) {
+          return false;
+        }
+        if (!options.includePrerelease && (this.value.startsWith("<0.0.0") || comp.value.startsWith("<0.0.0"))) {
+          return false;
+        }
+        if (this.operator.startsWith(">") && comp.operator.startsWith(">")) {
+          return true;
+        }
+        if (this.operator.startsWith("<") && comp.operator.startsWith("<")) {
+          return true;
+        }
+        if (this.semver.version === comp.semver.version && this.operator.includes("=") && comp.operator.includes("=")) {
+          return true;
+        }
+        if (cmp(this.semver, "<", comp.semver, options) && this.operator.startsWith(">") && comp.operator.startsWith("<")) {
+          return true;
+        }
+        if (cmp(this.semver, ">", comp.semver, options) && this.operator.startsWith("<") && comp.operator.startsWith(">")) {
+          return true;
+        }
+        return false;
+      }
+    };
+    module.exports = Comparator;
+    var parseOptions = require_parse_options();
+    var { safeRe: re, t } = require_re();
+    var cmp = require_cmp();
+    var debug = require_debug();
+    var SemVer = require_semver();
+    var Range = require_range();
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/satisfies.js
+var require_satisfies = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/functions/satisfies.js"(exports, module) {
+    "use strict";
+    var Range = require_range();
+    var satisfies2 = (version, range, options) => {
+      try {
+        range = new Range(range, options);
+      } catch (er) {
+        return false;
+      }
+      return range.test(version);
+    };
+    module.exports = satisfies2;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/to-comparators.js
+var require_to_comparators = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/to-comparators.js"(exports, module) {
+    "use strict";
+    var Range = require_range();
+    var toComparators = (range, options) => new Range(range, options).set.map((comp) => comp.map((c) => c.value).join(" ").trim().split(" "));
+    module.exports = toComparators;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/max-satisfying.js
+var require_max_satisfying = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/max-satisfying.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var Range = require_range();
+    var maxSatisfying = (versions, range, options) => {
+      let max = null;
+      let maxSV = null;
+      let rangeObj = null;
+      try {
+        rangeObj = new Range(range, options);
+      } catch (er) {
+        return null;
+      }
+      versions.forEach((v) => {
+        if (rangeObj.test(v)) {
+          if (!max || maxSV.compare(v) === -1) {
+            max = v;
+            maxSV = new SemVer(max, options);
+          }
+        }
+      });
+      return max;
+    };
+    module.exports = maxSatisfying;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/min-satisfying.js
+var require_min_satisfying = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/min-satisfying.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var Range = require_range();
+    var minSatisfying = (versions, range, options) => {
+      let min = null;
+      let minSV = null;
+      let rangeObj = null;
+      try {
+        rangeObj = new Range(range, options);
+      } catch (er) {
+        return null;
+      }
+      versions.forEach((v) => {
+        if (rangeObj.test(v)) {
+          if (!min || minSV.compare(v) === 1) {
+            min = v;
+            minSV = new SemVer(min, options);
+          }
+        }
+      });
+      return min;
+    };
+    module.exports = minSatisfying;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/min-version.js
+var require_min_version = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/min-version.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var Range = require_range();
+    var gt = require_gt();
+    var minVersion = (range, loose) => {
+      range = new Range(range, loose);
+      let minver = new SemVer("0.0.0");
+      if (range.test(minver)) {
+        return minver;
+      }
+      minver = new SemVer("0.0.0-0");
+      if (range.test(minver)) {
+        return minver;
+      }
+      minver = null;
+      for (let i = 0; i < range.set.length; ++i) {
+        const comparators = range.set[i];
+        let setMin = null;
+        comparators.forEach((comparator) => {
+          const compver = new SemVer(comparator.semver.version);
+          switch (comparator.operator) {
+            case ">":
+              if (compver.prerelease.length === 0) {
+                compver.patch++;
+              } else {
+                compver.prerelease.push(0);
+              }
+              compver.raw = compver.format();
+            /* fallthrough */
+            case "":
+            case ">=":
+              if (!setMin || gt(compver, setMin)) {
+                setMin = compver;
+              }
+              break;
+            case "<":
+            case "<=":
+              break;
+            /* istanbul ignore next */
+            default:
+              throw new Error(`Unexpected operation: ${comparator.operator}`);
+          }
+        });
+        if (setMin && (!minver || gt(minver, setMin))) {
+          minver = setMin;
+        }
+      }
+      if (minver && range.test(minver)) {
+        return minver;
+      }
+      return null;
+    };
+    module.exports = minVersion;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/valid.js
+var require_valid2 = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/valid.js"(exports, module) {
+    "use strict";
+    var Range = require_range();
+    var validRange2 = (range, options) => {
+      try {
+        return new Range(range, options).range || "*";
+      } catch (er) {
+        return null;
+      }
+    };
+    module.exports = validRange2;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/outside.js
+var require_outside = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/outside.js"(exports, module) {
+    "use strict";
+    var SemVer = require_semver();
+    var Comparator = require_comparator();
+    var { ANY } = Comparator;
+    var Range = require_range();
+    var satisfies2 = require_satisfies();
+    var gt = require_gt();
+    var lt = require_lt();
+    var lte = require_lte();
+    var gte = require_gte();
+    var outside = (version, range, hilo, options) => {
+      version = new SemVer(version, options);
+      range = new Range(range, options);
+      let gtfn, ltefn, ltfn, comp, ecomp;
+      switch (hilo) {
+        case ">":
+          gtfn = gt;
+          ltefn = lte;
+          ltfn = lt;
+          comp = ">";
+          ecomp = ">=";
+          break;
+        case "<":
+          gtfn = lt;
+          ltefn = gte;
+          ltfn = gt;
+          comp = "<";
+          ecomp = "<=";
+          break;
+        default:
+          throw new TypeError('Must provide a hilo val of "<" or ">"');
+      }
+      if (satisfies2(version, range, options)) {
+        return false;
+      }
+      for (let i = 0; i < range.set.length; ++i) {
+        const comparators = range.set[i];
+        let high = null;
+        let low = null;
+        comparators.forEach((comparator) => {
+          if (comparator.semver === ANY) {
+            comparator = new Comparator(">=0.0.0");
+          }
+          high = high || comparator;
+          low = low || comparator;
+          if (gtfn(comparator.semver, high.semver, options)) {
+            high = comparator;
+          } else if (ltfn(comparator.semver, low.semver, options)) {
+            low = comparator;
+          }
+        });
+        if (high.operator === comp || high.operator === ecomp) {
+          return false;
+        }
+        if ((!low.operator || low.operator === comp) && ltefn(version, low.semver)) {
+          return false;
+        } else if (low.operator === ecomp && ltfn(version, low.semver)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    module.exports = outside;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/gtr.js
+var require_gtr = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/gtr.js"(exports, module) {
+    "use strict";
+    var outside = require_outside();
+    var gtr = (version, range, options) => outside(version, range, ">", options);
+    module.exports = gtr;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/ltr.js
+var require_ltr = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/ltr.js"(exports, module) {
+    "use strict";
+    var outside = require_outside();
+    var ltr = (version, range, options) => outside(version, range, "<", options);
+    module.exports = ltr;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/intersects.js
+var require_intersects = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/intersects.js"(exports, module) {
+    "use strict";
+    var Range = require_range();
+    var intersects = (r1, r2, options) => {
+      r1 = new Range(r1, options);
+      r2 = new Range(r2, options);
+      return r1.intersects(r2, options);
+    };
+    module.exports = intersects;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/simplify.js
+var require_simplify = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/simplify.js"(exports, module) {
+    "use strict";
+    var satisfies2 = require_satisfies();
+    var compare = require_compare();
+    module.exports = (versions, range, options) => {
+      const set = [];
+      let first = null;
+      let prev = null;
+      const v = versions.sort((a, b) => compare(a, b, options));
+      for (const version of v) {
+        const included = satisfies2(version, range, options);
+        if (included) {
+          prev = version;
+          if (!first) {
+            first = version;
+          }
+        } else {
+          if (prev) {
+            set.push([first, prev]);
+          }
+          prev = null;
+          first = null;
+        }
+      }
+      if (first) {
+        set.push([first, null]);
+      }
+      const ranges = [];
+      for (const [min, max] of set) {
+        if (min === max) {
+          ranges.push(min);
+        } else if (!max && min === v[0]) {
+          ranges.push("*");
+        } else if (!max) {
+          ranges.push(`>=${min}`);
+        } else if (min === v[0]) {
+          ranges.push(`<=${max}`);
+        } else {
+          ranges.push(`${min} - ${max}`);
+        }
+      }
+      const simplified = ranges.join(" || ");
+      const original = typeof range.raw === "string" ? range.raw : String(range);
+      return simplified.length < original.length ? simplified : range;
+    };
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/subset.js
+var require_subset = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/ranges/subset.js"(exports, module) {
+    "use strict";
+    var Range = require_range();
+    var Comparator = require_comparator();
+    var { ANY } = Comparator;
+    var satisfies2 = require_satisfies();
+    var compare = require_compare();
+    var subset = (sub, dom, options = {}) => {
+      if (sub === dom) {
+        return true;
+      }
+      sub = new Range(sub, options);
+      dom = new Range(dom, options);
+      let sawNonNull = false;
+      OUTER: for (const simpleSub of sub.set) {
+        for (const simpleDom of dom.set) {
+          const isSub = simpleSubset(simpleSub, simpleDom, options);
+          sawNonNull = sawNonNull || isSub !== null;
+          if (isSub) {
+            continue OUTER;
+          }
+        }
+        if (sawNonNull) {
+          return false;
+        }
+      }
+      return true;
+    };
+    var minimumVersionWithPreRelease = [new Comparator(">=0.0.0-0")];
+    var minimumVersion = [new Comparator(">=0.0.0")];
+    var simpleSubset = (sub, dom, options) => {
+      if (sub === dom) {
+        return true;
+      }
+      if (sub.length === 1 && sub[0].semver === ANY) {
+        if (dom.length === 1 && dom[0].semver === ANY) {
+          return true;
+        } else if (options.includePrerelease) {
+          sub = minimumVersionWithPreRelease;
+        } else {
+          sub = minimumVersion;
+        }
+      }
+      if (dom.length === 1 && dom[0].semver === ANY) {
+        if (options.includePrerelease) {
+          return true;
+        } else {
+          dom = minimumVersion;
+        }
+      }
+      const eqSet = /* @__PURE__ */ new Set();
+      let gt, lt;
+      for (const c of sub) {
+        if (c.operator === ">" || c.operator === ">=") {
+          gt = higherGT(gt, c, options);
+        } else if (c.operator === "<" || c.operator === "<=") {
+          lt = lowerLT(lt, c, options);
+        } else {
+          eqSet.add(c.semver);
+        }
+      }
+      if (eqSet.size > 1) {
+        return null;
+      }
+      let gtltComp;
+      if (gt && lt) {
+        gtltComp = compare(gt.semver, lt.semver, options);
+        if (gtltComp > 0) {
+          return null;
+        } else if (gtltComp === 0 && (gt.operator !== ">=" || lt.operator !== "<=")) {
+          return null;
+        }
+      }
+      for (const eq of eqSet) {
+        if (gt && !satisfies2(eq, String(gt), options)) {
+          return null;
+        }
+        if (lt && !satisfies2(eq, String(lt), options)) {
+          return null;
+        }
+        for (const c of dom) {
+          if (!satisfies2(eq, String(c), options)) {
+            return false;
+          }
+        }
+        return true;
+      }
+      let higher, lower;
+      let hasDomLT, hasDomGT;
+      let needDomLTPre = lt && !options.includePrerelease && lt.semver.prerelease.length ? lt.semver : false;
+      let needDomGTPre = gt && !options.includePrerelease && gt.semver.prerelease.length ? gt.semver : false;
+      if (needDomLTPre && needDomLTPre.prerelease.length === 1 && lt.operator === "<" && needDomLTPre.prerelease[0] === 0) {
+        needDomLTPre = false;
+      }
+      for (const c of dom) {
+        hasDomGT = hasDomGT || c.operator === ">" || c.operator === ">=";
+        hasDomLT = hasDomLT || c.operator === "<" || c.operator === "<=";
+        if (gt) {
+          if (needDomGTPre) {
+            if (c.semver.prerelease && c.semver.prerelease.length && c.semver.major === needDomGTPre.major && c.semver.minor === needDomGTPre.minor && c.semver.patch === needDomGTPre.patch) {
+              needDomGTPre = false;
+            }
+          }
+          if (c.operator === ">" || c.operator === ">=") {
+            higher = higherGT(gt, c, options);
+            if (higher === c && higher !== gt) {
+              return false;
+            }
+          } else if (gt.operator === ">=" && !c.test(gt.semver)) {
+            return false;
+          }
+        }
+        if (lt) {
+          if (needDomLTPre) {
+            if (c.semver.prerelease && c.semver.prerelease.length && c.semver.major === needDomLTPre.major && c.semver.minor === needDomLTPre.minor && c.semver.patch === needDomLTPre.patch) {
+              needDomLTPre = false;
+            }
+          }
+          if (c.operator === "<" || c.operator === "<=") {
+            lower = lowerLT(lt, c, options);
+            if (lower === c && lower !== lt) {
+              return false;
+            }
+          } else if (lt.operator === "<=" && !c.test(lt.semver)) {
+            return false;
+          }
+        }
+        if (!c.operator && (lt || gt) && gtltComp !== 0) {
+          return false;
+        }
+      }
+      if (gt && hasDomLT && !lt && gtltComp !== 0) {
+        return false;
+      }
+      if (lt && hasDomGT && !gt && gtltComp !== 0) {
+        return false;
+      }
+      if (needDomGTPre || needDomLTPre) {
+        return false;
+      }
+      return true;
+    };
+    var higherGT = (a, b, options) => {
+      if (!a) {
+        return b;
+      }
+      const comp = compare(a.semver, b.semver, options);
+      return comp > 0 ? a : comp < 0 ? b : b.operator === ">" && a.operator === ">=" ? b : a;
+    };
+    var lowerLT = (a, b, options) => {
+      if (!a) {
+        return b;
+      }
+      const comp = compare(a.semver, b.semver, options);
+      return comp < 0 ? a : comp > 0 ? b : b.operator === "<" && a.operator === "<=" ? b : a;
+    };
+    module.exports = subset;
+  }
+});
+
+// node_modules/.pnpm/semver@7.8.5/node_modules/semver/index.js
+var require_semver2 = __commonJS({
+  "node_modules/.pnpm/semver@7.8.5/node_modules/semver/index.js"(exports, module) {
+    "use strict";
+    var internalRe = require_re();
+    var constants = require_constants();
+    var SemVer = require_semver();
+    var identifiers = require_identifiers();
+    var parse2 = require_parse();
+    var valid2 = require_valid();
+    var clean = require_clean();
+    var inc = require_inc();
+    var diff = require_diff();
+    var major = require_major();
+    var minor = require_minor();
+    var patch = require_patch();
+    var prerelease = require_prerelease();
+    var compare = require_compare();
+    var rcompare = require_rcompare();
+    var compareLoose = require_compare_loose();
+    var compareBuild = require_compare_build();
+    var sort = require_sort();
+    var rsort = require_rsort();
+    var gt = require_gt();
+    var lt = require_lt();
+    var eq = require_eq();
+    var neq = require_neq();
+    var gte = require_gte();
+    var lte = require_lte();
+    var cmp = require_cmp();
+    var coerce = require_coerce();
+    var truncate = require_truncate();
+    var Comparator = require_comparator();
+    var Range = require_range();
+    var satisfies2 = require_satisfies();
+    var toComparators = require_to_comparators();
+    var maxSatisfying = require_max_satisfying();
+    var minSatisfying = require_min_satisfying();
+    var minVersion = require_min_version();
+    var validRange2 = require_valid2();
+    var outside = require_outside();
+    var gtr = require_gtr();
+    var ltr = require_ltr();
+    var intersects = require_intersects();
+    var simplifyRange = require_simplify();
+    var subset = require_subset();
+    module.exports = {
+      parse: parse2,
+      valid: valid2,
+      clean,
+      inc,
+      diff,
+      major,
+      minor,
+      patch,
+      prerelease,
+      compare,
+      rcompare,
+      compareLoose,
+      compareBuild,
+      sort,
+      rsort,
+      gt,
+      lt,
+      eq,
+      neq,
+      gte,
+      lte,
+      cmp,
+      coerce,
+      truncate,
+      Comparator,
+      Range,
+      satisfies: satisfies2,
+      toComparators,
+      maxSatisfying,
+      minSatisfying,
+      minVersion,
+      validRange: validRange2,
+      outside,
+      gtr,
+      ltr,
+      intersects,
+      simplifyRange,
+      subset,
+      SemVer,
+      re: internalRe.re,
+      src: internalRe.src,
+      tokens: internalRe.t,
+      SEMVER_SPEC_VERSION: constants.SEMVER_SPEC_VERSION,
+      RELEASE_TYPES: constants.RELEASE_TYPES,
+      compareIdentifiers: identifiers.compareIdentifiers,
+      rcompareIdentifiers: identifiers.rcompareIdentifiers
+    };
+  }
+});
+
 // node_modules/.pnpm/fast-glob@3.3.3/node_modules/fast-glob/out/utils/array.js
 var require_array = __commonJS({
   "node_modules/.pnpm/fast-glob@3.3.3/node_modules/fast-glob/out/utils/array.js"(exports) {
@@ -611,10 +2605,10 @@ var require_to_regex_range = __commonJS({
       let result = [];
       for (let ele of arr) {
         let { string } = ele;
-        if (!intersection && !contains(comparison, "string", string)) {
+        if (!intersection && !contains2(comparison, "string", string)) {
           result.push(prefix + string);
         }
-        if (intersection && contains(comparison, "string", string)) {
+        if (intersection && contains2(comparison, "string", string)) {
           result.push(prefix + string);
         }
       }
@@ -628,7 +2622,7 @@ var require_to_regex_range = __commonJS({
     function compare(a, b) {
       return a > b ? 1 : b > a ? -1 : 0;
     }
-    function contains(arr, key, val) {
+    function contains2(arr, key, val) {
       return arr.some((ele) => ele[key] === val);
     }
     function countNines(min, len) {
@@ -1015,7 +3009,7 @@ var require_expand = __commonJS({
 });
 
 // node_modules/.pnpm/braces@3.0.3/node_modules/braces/lib/constants.js
-var require_constants = __commonJS({
+var require_constants2 = __commonJS({
   "node_modules/.pnpm/braces@3.0.3/node_modules/braces/lib/constants.js"(exports, module) {
     "use strict";
     module.exports = {
@@ -1116,7 +3110,7 @@ var require_constants = __commonJS({
 });
 
 // node_modules/.pnpm/braces@3.0.3/node_modules/braces/lib/parse.js
-var require_parse = __commonJS({
+var require_parse2 = __commonJS({
   "node_modules/.pnpm/braces@3.0.3/node_modules/braces/lib/parse.js"(exports, module) {
     "use strict";
     var stringify = require_stringify();
@@ -1148,7 +3142,7 @@ var require_parse = __commonJS({
       /* ' */
       CHAR_NO_BREAK_SPACE,
       CHAR_ZERO_WIDTH_NOBREAK_SPACE
-    } = require_constants();
+    } = require_constants2();
     var parse2 = (input2, options = {}) => {
       if (typeof input2 !== "string") {
         throw new TypeError("Expected a string");
@@ -1360,7 +3354,7 @@ var require_braces = __commonJS({
     var stringify = require_stringify();
     var compile = require_compile();
     var expand = require_expand();
-    var parse2 = require_parse();
+    var parse2 = require_parse2();
     var braces = (input2, options = {}) => {
       let output = [];
       if (Array.isArray(input2)) {
@@ -1417,7 +3411,7 @@ var require_braces = __commonJS({
 });
 
 // node_modules/.pnpm/picomatch@2.3.2/node_modules/picomatch/lib/constants.js
-var require_constants2 = __commonJS({
+var require_constants3 = __commonJS({
   "node_modules/.pnpm/picomatch@2.3.2/node_modules/picomatch/lib/constants.js"(exports, module) {
     "use strict";
     var path = __require("path");
@@ -1628,7 +3622,7 @@ var require_utils2 = __commonJS({
       REGEX_REMOVE_BACKSLASH,
       REGEX_SPECIAL_CHARS,
       REGEX_SPECIAL_CHARS_GLOBAL
-    } = require_constants2();
+    } = require_constants3();
     exports.isObject = (val) => val !== null && typeof val === "object" && !Array.isArray(val);
     exports.hasRegexChars = (str) => REGEX_SPECIAL_CHARS.test(str);
     exports.isRegexChar = (str) => str.length === 1 && exports.hasRegexChars(str);
@@ -1714,7 +3708,7 @@ var require_scan = __commonJS({
       /* ) */
       CHAR_RIGHT_SQUARE_BRACKET
       /* ] */
-    } = require_constants2();
+    } = require_constants3();
     var isPathSeparator = (code) => {
       return code === CHAR_FORWARD_SLASH || code === CHAR_BACKWARD_SLASH;
     };
@@ -2009,10 +4003,10 @@ var require_scan = __commonJS({
 });
 
 // node_modules/.pnpm/picomatch@2.3.2/node_modules/picomatch/lib/parse.js
-var require_parse2 = __commonJS({
+var require_parse3 = __commonJS({
   "node_modules/.pnpm/picomatch@2.3.2/node_modules/picomatch/lib/parse.js"(exports, module) {
     "use strict";
-    var constants = require_constants2();
+    var constants = require_constants3();
     var utils = require_utils2();
     var {
       MAX_LENGTH,
@@ -3016,9 +5010,9 @@ var require_picomatch = __commonJS({
     "use strict";
     var path = __require("path");
     var scan = require_scan();
-    var parse2 = require_parse2();
+    var parse2 = require_parse3();
     var utils = require_utils2();
-    var constants = require_constants2();
+    var constants = require_constants3();
     var isObject = (val) => val && typeof val === "object" && !Array.isArray(val);
     var picomatch = (glob, options, returnState = false) => {
       if (Array.isArray(glob)) {
@@ -3973,7 +5967,7 @@ var require_run_parallel = __commonJS({
 });
 
 // node_modules/.pnpm/@nodelib+fs.scandir@2.1.5/node_modules/@nodelib/fs.scandir/out/constants.js
-var require_constants3 = __commonJS({
+var require_constants4 = __commonJS({
   "node_modules/.pnpm/@nodelib+fs.scandir@2.1.5/node_modules/@nodelib/fs.scandir/out/constants.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -4052,7 +6046,7 @@ var require_async2 = __commonJS({
     exports.readdir = exports.readdirWithFileTypes = exports.read = void 0;
     var fsStat = require_out();
     var rpl = require_run_parallel();
-    var constants_1 = require_constants3();
+    var constants_1 = require_constants4();
     var utils = require_utils4();
     var common = require_common();
     function read(directory, settings, callback) {
@@ -4161,7 +6155,7 @@ var require_sync2 = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.readdir = exports.readdirWithFileTypes = exports.read = void 0;
     var fsStat = require_out();
-    var constants_1 = require_constants3();
+    var constants_1 = require_constants4();
     var utils = require_utils4();
     var common = require_common();
     function read(directory, settings) {
@@ -13314,6 +15308,8 @@ function* walkCommands(node) {
     case "sequence":
     case "boolean":
     case "pipeline":
+    case "case":
+    case "compound":
       for (const part of node.parts) yield* walkCommands(part);
       return;
   }
@@ -13690,11 +15686,22 @@ function requiredEvidenceTargets(activeTargets, selectedRules) {
 function parseForTarget(src, target) {
   const diagnostics = lexicalDiagnostics(src, target);
   const tokens = tokenizeForTarget(src, target);
-  diagnostics.push(...groupDiagnostics(tokens));
+  const caseSyntax = target === "posix-sh" ? posixCaseSyntax(tokens) : emptyPosixCaseSyntax();
+  if (target === "posix-sh") diagnostics.push(...caseSyntax.diagnostics);
+  diagnostics.push(
+    ...groupDiagnostics(tokens, target === "posix-sh" ? caseSyntax.patternClosers : void 0)
+  );
   if (target === "powershell") diagnostics.push(...powershellSubsetDiagnostics(src, tokens));
-  diagnostics.push(...syntaxDiagnostics(tokens, target));
+  diagnostics.push(
+    ...syntaxDiagnostics(
+      tokens,
+      target,
+      target === "posix-sh" ? caseSyntax.armTerminators : void 0
+    )
+  );
   const [node] = parseSequence(tokens, 0, tokens.length, target);
-  const root = node ?? emptyCommand();
+  let root = node ?? emptyCommand();
+  if (target === "posix-sh") root = addSupplementalCaseNodes(root, tokens, caseSyntax.matches);
   for (const cmd of walkCommands(root)) {
     cmd.raw = src.slice(cmd.span[0], cmd.span[1]);
     const wrapper = detectWrapper(cmd, src, diagnostics);
@@ -13791,11 +15798,24 @@ function parsePipeline(tokens, start, end, target) {
 function parseUnary(tokens, start, end, target) {
   const tok = tokens[start];
   if (tok === void 0) return [emptyCommand(), start];
+  if (target === "posix-sh" && isReservedWord(tok, "case")) {
+    const scanned = scanPosixCaseAt(tokens, start, end);
+    if (scanned.match !== null) {
+      return [buildCaseNode(tokens, scanned.match), scanned.match.next];
+    }
+  }
   if (tok.kind === "lparen") {
     let depth = 0;
     let i = start;
     for (; i < end; i += 1) {
       const t = tokens[i];
+      if (target === "posix-sh" && i > start && isPosixCaseStart(tokens, i)) {
+        const nestedCase = scanPosixCaseAt(tokens, i, end);
+        if (nestedCase.match !== null) {
+          i = nestedCase.match.next - 1;
+          continue;
+        }
+      }
       if (t.kind === "lparen") depth += 1;
       else if (t.kind === "rparen") {
         depth -= 1;
@@ -14066,12 +16086,13 @@ function lexicalDiagnostics(source, target) {
   }
   return diagnostics;
 }
-function syntaxDiagnostics(tokens, target) {
+function syntaxDiagnostics(tokens, target, ignoredControlStarts = /* @__PURE__ */ new Set()) {
   const diagnostics = [];
   let needsCommand = true;
   for (const token of tokens) {
     const isControl = token.kind === "operator" && token.op !== void 0 && (token.op === "&&" || token.op === "||" || token.op === "|" || token.op === ";" || token.op === "&" || token.op === "\n");
     if (isControl) {
+      if (ignoredControlStarts.has(token.span[0])) continue;
       if (needsCommand && token.op !== "\n") {
         diagnostics.push({
           code: "missing-command",
@@ -14142,13 +16163,14 @@ function syntaxDiagnostics(tokens, target) {
   }
   return diagnostics;
 }
-function groupDiagnostics(tokens) {
+function groupDiagnostics(tokens, ignoredClosingStarts = /* @__PURE__ */ new Set()) {
   const diagnostics = [];
   const openings = [];
   for (const token of tokens) {
     if (token.kind === "lparen") {
       openings.push(token);
     } else if (token.kind === "rparen") {
+      if (ignoredClosingStarts.has(token.span[0])) continue;
       const opening = openings.pop();
       if (opening === void 0) {
         diagnostics.push({
@@ -14169,6 +16191,348 @@ function groupDiagnostics(tokens) {
     });
   }
   return diagnostics;
+}
+function posixCaseSyntax(tokens) {
+  const patternClosers = /* @__PURE__ */ new Set();
+  const armTerminators = /* @__PURE__ */ new Set();
+  const matches = [];
+  const diagnostics = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (!isPosixCaseStart(tokens, index)) continue;
+    const scanned = scanPosixCaseAt(tokens, index, tokens.length);
+    for (const start of scanned.patternClosers) patternClosers.add(start);
+    for (const start of scanned.armTerminators) armTerminators.add(start);
+    diagnostics.push(...scanned.diagnostics);
+    if (scanned.match !== null) {
+      matches.push(scanned.match);
+      if (!isDirectCaseContext(tokens, index)) {
+        const token = tokens[index];
+        diagnostics.push({
+          code: "unsupported-subset",
+          message: "POSIX case inside this compound context is only partially modeled",
+          span: token.span,
+          severity: "advisory"
+        });
+      }
+    }
+    index = Math.max(index, scanned.next - 1);
+  }
+  return { patternClosers, armTerminators, matches, diagnostics };
+}
+function emptyPosixCaseSyntax() {
+  return {
+    patternClosers: /* @__PURE__ */ new Set(),
+    armTerminators: /* @__PURE__ */ new Set(),
+    matches: [],
+    diagnostics: []
+  };
+}
+function isPosixCaseStart(tokens, index) {
+  const token = tokens[index];
+  return isReservedWord(token, "case") && isCommandBoundary(tokens, index);
+}
+function isReservedWord(token, value) {
+  return token?.kind === "word" && token.value === value && token.raw === value;
+}
+function isCommandBoundary(tokens, index) {
+  const previous = tokens[index - 1];
+  if (previous === void 0) return true;
+  if (previous.kind === "lparen" || previous.kind === "rparen") return true;
+  if (previous.kind === "operator") return !REDIRECT_OPS.has(previous.op ?? "");
+  return previous.kind === "word" && (previous.value === "{" || previous.value === "then" || previous.value === "do" || previous.value === "else" || previous.value === "elif" || previous.value === "if" || previous.value === "while" || previous.value === "until" || previous.value === "!") && previous.raw === previous.value;
+}
+function isDirectCaseContext(tokens, index) {
+  const previous = tokens[index - 1];
+  if (previous === void 0) return true;
+  if (previous.kind === "lparen" || previous.kind === "rparen") return true;
+  if (previous.kind === "operator") return !REDIRECT_OPS.has(previous.op ?? "");
+  return previous.kind === "word" && previous.raw === previous.value && (previous.value === "{" || previous.value === "then" || previous.value === "do" || previous.value === "else" || previous.value === "elif");
+}
+function scanPosixCaseAt(tokens, start, end) {
+  const patternClosers = /* @__PURE__ */ new Set();
+  const armTerminators = /* @__PURE__ */ new Set();
+  const diagnostics = [];
+  const arms = [];
+  const startToken = tokens[start];
+  if (!isReservedWord(startToken, "case")) {
+    return { match: null, next: start + 1, patternClosers, armTerminators, diagnostics };
+  }
+  let cursor = start + 1;
+  const expression = tokens[cursor];
+  if (expression?.kind !== "word") {
+    diagnostics.push(malformedCaseDiagnostic(expression ?? startToken));
+    return {
+      match: null,
+      next: Math.max(cursor + 1, start + 1),
+      patternClosers,
+      armTerminators,
+      diagnostics
+    };
+  }
+  cursor = skipNewlines(tokens, cursor + 1, end);
+  const inToken = tokens[cursor];
+  if (!isReservedWord(inToken, "in")) {
+    diagnostics.push(malformedCaseDiagnostic(inToken ?? expression));
+    return {
+      match: null,
+      next: Math.max(cursor + 1, start + 1),
+      patternClosers,
+      armTerminators,
+      diagnostics
+    };
+  }
+  cursor += 1;
+  while (cursor < end) {
+    cursor = skipNewlines(tokens, cursor, end);
+    const armStart = tokens[cursor];
+    if (isReservedWord(armStart, "esac")) {
+      return successfulCaseScan(
+        start,
+        cursor + 1,
+        startToken,
+        armStart,
+        arms,
+        patternClosers,
+        armTerminators,
+        diagnostics
+      );
+    }
+    const hasOpening = armStart?.kind === "lparen";
+    if (hasOpening) cursor += 1;
+    const firstPattern = tokens[cursor];
+    if (firstPattern?.kind !== "word") {
+      diagnostics.push(malformedCaseDiagnostic(firstPattern ?? armStart ?? startToken));
+      return {
+        match: null,
+        next: Math.max(cursor + 1, start + 1),
+        patternClosers,
+        armTerminators,
+        diagnostics
+      };
+    }
+    cursor += 1;
+    while (tokens[cursor]?.kind === "operator" && tokens[cursor]?.op === "|") {
+      const alternative = tokens[cursor + 1];
+      if (alternative?.kind !== "word") {
+        diagnostics.push(malformedCaseDiagnostic(alternative ?? tokens[cursor] ?? firstPattern));
+        return { match: null, next: cursor + 1, patternClosers, armTerminators, diagnostics };
+      }
+      cursor += 2;
+    }
+    const closer = tokens[cursor];
+    if (closer?.kind !== "rparen") {
+      diagnostics.push(malformedCaseDiagnostic(closer ?? firstPattern));
+      return {
+        match: null,
+        next: Math.max(cursor + 1, start + 1),
+        patternClosers,
+        armTerminators,
+        diagnostics
+      };
+    }
+    if (!hasOpening) patternClosers.add(closer.span[0]);
+    cursor += 1;
+    const bodyStart = skipNewlines(tokens, cursor, end);
+    while (cursor < end) {
+      const terminatorWidth = caseArmTerminatorWidth(tokens, cursor);
+      if (terminatorWidth > 0) {
+        for (let offset = 0; offset < terminatorWidth; offset += 1) {
+          const terminator = tokens[cursor + offset];
+          armTerminators.add(terminator.span[0]);
+        }
+        const bodyEnd = trimTrailingNewlines(tokens, bodyStart, cursor);
+        if (bodyStart < bodyEnd) arms.push({ bodyStart, bodyEnd });
+        cursor += terminatorWidth;
+        break;
+      }
+      if (isReservedWord(tokens[cursor], "esac") && isCommandBoundary(tokens, cursor)) {
+        const esac = tokens[cursor];
+        const bodyEnd = trimTrailingNewlines(tokens, bodyStart, cursor);
+        if (bodyStart < bodyEnd) arms.push({ bodyStart, bodyEnd });
+        return successfulCaseScan(
+          start,
+          cursor + 1,
+          startToken,
+          esac,
+          arms,
+          patternClosers,
+          armTerminators,
+          diagnostics
+        );
+      }
+      if (isPosixCaseStart(tokens, cursor)) {
+        const nested = scanPosixCaseAt(tokens, cursor, end);
+        for (const ignored of nested.patternClosers) patternClosers.add(ignored);
+        for (const ignored of nested.armTerminators) armTerminators.add(ignored);
+        diagnostics.push(...nested.diagnostics);
+        if (nested.match !== null) {
+          cursor = nested.next;
+          continue;
+        }
+      }
+      cursor += 1;
+    }
+  }
+  const final = tokens[Math.max(start, end - 1)] ?? startToken;
+  diagnostics.push({
+    code: "unterminated-case",
+    message: "POSIX case statement is missing a closing `esac`",
+    span: [startToken.span[0], final.span[1]],
+    severity: "error"
+  });
+  return { match: null, next: end, patternClosers, armTerminators, diagnostics };
+}
+function successfulCaseScan(start, next, caseToken, esac, arms, patternClosers, armTerminators, diagnostics) {
+  return {
+    match: {
+      start,
+      next,
+      span: [caseToken.span[0], esac.span[1]],
+      arms: [...arms]
+    },
+    next,
+    patternClosers,
+    armTerminators,
+    diagnostics
+  };
+}
+function malformedCaseDiagnostic(token) {
+  return {
+    code: "malformed-case",
+    message: "Malformed POSIX case statement",
+    span: token.span,
+    severity: "error"
+  };
+}
+function skipNewlines(tokens, start, end) {
+  let cursor = start;
+  while (cursor < end && tokens[cursor]?.kind === "operator" && tokens[cursor]?.op === "\n") {
+    cursor += 1;
+  }
+  return cursor;
+}
+function trimTrailingNewlines(tokens, start, end) {
+  let cursor = end;
+  while (cursor > start && tokens[cursor - 1]?.kind === "operator" && tokens[cursor - 1]?.op === "\n") {
+    cursor -= 1;
+  }
+  return cursor;
+}
+function buildCaseNode(tokens, match) {
+  const parts = [];
+  for (const arm of match.arms) {
+    const [body] = parseSequence(tokens, arm.bodyStart, arm.bodyEnd, "posix-sh");
+    parts.push(body);
+  }
+  return { kind: "case", parts, span: match.span };
+}
+function addSupplementalCaseNodes(root, tokens, matches) {
+  const knownCommandSpans = new Set([...walkCommands(root)].map(commandSpanKey));
+  const supplemental = [];
+  for (const match of matches) {
+    const node = buildCaseNode(tokens, match);
+    const missingParts = node.parts.filter(
+      (part) => [...walkCommands(part)].some((command) => !knownCommandSpans.has(commandSpanKey(command)))
+    );
+    if (missingParts.length === 0) continue;
+    const missingNode = { ...node, parts: missingParts };
+    supplemental.push(missingNode);
+    for (const command of walkCommands(missingNode)) knownCommandSpans.add(commandSpanKey(command));
+    let tailStart = match.next;
+    while (tokens[tailStart]?.kind === "operator" && !REDIRECT_OPS.has(tokens[tailStart]?.op ?? "")) {
+      tailStart += 1;
+    }
+    if (tailStart >= tokens.length) continue;
+    const [tail] = parseSequence(tokens, tailStart, tokens.length, "posix-sh");
+    for (const parsedCommand of walkCommands(tail)) {
+      const command = recoverSupplementalTailCommand(parsedCommand, tokens);
+      if (command === null) continue;
+      const key = commandSpanKey(command);
+      if (knownCommandSpans.has(key)) continue;
+      supplemental.push(command);
+      knownCommandSpans.add(key);
+    }
+  }
+  if (supplemental.length === 0) return root;
+  const parts = [root, ...supplemental];
+  return {
+    kind: "compound",
+    parts,
+    span: [
+      Math.min(...parts.map((part) => part.span[0])),
+      Math.max(...parts.map((part) => part.span[1]))
+    ]
+  };
+}
+function commandSpanKey(command) {
+  return `${command.span[0]}:${command.span[1]}`;
+}
+function recoverSupplementalTailCommand(command, tokens) {
+  const executable = command.argv[0];
+  if (executable === void 0) return null;
+  if (executable.raw !== executable.value || !POSIX_COMPOUND_WORDS.has(executable.value)) {
+    return command;
+  }
+  if (!POSIX_TAIL_COMMAND_PREFIX_WORDS.has(executable.value)) return null;
+  let argvIndex = 0;
+  while (argvIndex < command.argv.length) {
+    const token = command.argv[argvIndex];
+    if (token === void 0 || token.raw !== token.value || !POSIX_TAIL_COMMAND_PREFIX_WORDS.has(token.value)) {
+      break;
+    }
+    argvIndex += 1;
+  }
+  const commandStart = command.argv[argvIndex];
+  if (commandStart === void 0) return null;
+  const tokenIndex = tokens.indexOf(commandStart);
+  if (tokenIndex === -1) return null;
+  const [reparsed] = parseCommand(tokens, tokenIndex, tokens.length, "posix-sh");
+  if (reparsed.kind !== "command") return null;
+  const recoveredExecutable = reparsed.argv[0];
+  if (recoveredExecutable === void 0 || recoveredExecutable.raw === recoveredExecutable.value && POSIX_COMPOUND_WORDS.has(recoveredExecutable.value)) {
+    return null;
+  }
+  return reparsed;
+}
+var POSIX_TAIL_COMMAND_PREFIX_WORDS = /* @__PURE__ */ new Set([
+  "do",
+  "elif",
+  "else",
+  "if",
+  "then",
+  "until",
+  "while",
+  "{"
+]);
+var POSIX_COMPOUND_WORDS = /* @__PURE__ */ new Set([
+  "case",
+  "do",
+  "done",
+  "elif",
+  "else",
+  "esac",
+  "fi",
+  "for",
+  "if",
+  "in",
+  "then",
+  "until",
+  "while",
+  "{",
+  "}"
+]);
+function caseArmTerminatorWidth(tokens, index) {
+  const operators = tokens.slice(index, index + 3);
+  const adjacent = (left, right) => left !== void 0 && right !== void 0 && left.span[1] === right.span[0];
+  const first = operators[0];
+  const second = operators[1];
+  const third = operators[2];
+  if (first?.kind !== "operator" || first.op !== ";" || !adjacent(first, second)) return 0;
+  if (second?.kind !== "operator") return 0;
+  if (second.op === ";" && third?.kind === "operator" && third.op === "&" && adjacent(second, third)) {
+    return 3;
+  }
+  return second.op === ";" || second.op === "&" ? 2 : 0;
 }
 function powershellSubsetDiagnostics(source, tokens) {
   const diagnostics = [];
@@ -14260,6 +16624,10 @@ function translateNode(node, offset) {
     case "boolean":
     case "pipeline":
       node.opSpans = node.opSpans.map((span) => translateSpan(span, offset));
+      for (const part of node.parts) translateNode(part, offset);
+      return;
+    case "case":
+    case "compound":
       for (const part of node.parts) translateNode(part, offset);
       return;
   }
@@ -15378,16 +17746,19 @@ var PS026 = {
     const findings = [];
     for (const target of ["cmd", "powershell"]) {
       if (!matrix.activeTargets.has(target)) continue;
+      const containerPaths = findContainerPathEvidence(matrix, target);
       for (const cmd of commandsOf(matrix, target)) {
         for (const tok of cmd.argv) {
           const value = tok.value;
-          const hit = UNIX_PATH_PREFIXES.find((p) => value === p || value.startsWith(`${p}/`));
-          if (hit === void 0) continue;
+          const directPath = unixPathPrefix(value);
+          const hostPath = containerPaths.hostPaths.get(spanKey(tok.span));
+          if (directPath === void 0 && hostPath === void 0) continue;
+          if (containerPaths.internalSpans.some((span) => contains(span, tok.span))) continue;
           const finding = makeFinding(
             this,
             { ...ctx, targets: [target] },
             {
-              message: `\`${value}\` assumes a Unix filesystem layout`,
+              message: `\`${directPath === void 0 ? hostPath : value}\` assumes a Unix filesystem layout`,
               span: tok.span,
               fix: {
                 ruleId: this.id,
@@ -15403,6 +17774,576 @@ var PS026 = {
     return findings;
   }
 };
+var CONTAINER_EXECUTABLES = /* @__PURE__ */ new Map([
+  ["docker", { engine: "docker", frontend: "engine" }],
+  ["docker.exe", { engine: "docker", frontend: "engine" }],
+  ["docker-compose", { engine: "docker", frontend: "compose" }],
+  ["docker-compose.exe", { engine: "docker", frontend: "compose" }],
+  ["podman", { engine: "podman", frontend: "engine" }],
+  ["podman.exe", { engine: "podman", frontend: "engine" }],
+  ["podman-compose", { engine: "podman", frontend: "compose" }],
+  ["podman-compose.exe", { engine: "podman", frontend: "compose" }]
+]);
+var SUDO_EXECUTABLES = /* @__PURE__ */ new Set(["sudo", "sudo.exe"]);
+var CONTAINER_SUBCOMMANDS = /* @__PURE__ */ new Set(["exec", "run"]);
+var GLOBAL_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "--config",
+  "--connection",
+  "--context",
+  "--host",
+  "--identity",
+  "--log-level",
+  "--url",
+  "-H",
+  "-l"
+]);
+var GLOBAL_SWITCH_OPTIONS = /* @__PURE__ */ new Set(["-D", "--debug", "--remote", "--tls", "--tlsverify"]);
+var ENGINE_GLOBAL_SWITCH_OPTIONS = {
+  docker: /* @__PURE__ */ new Set(),
+  podman: /* @__PURE__ */ new Set()
+};
+var COMPOSE_GLOBAL_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "--ansi",
+  "--env-file",
+  "--file",
+  "--parallel",
+  "--profile",
+  "--progress",
+  "--project-directory",
+  "--project-name",
+  "-f",
+  "-p"
+]);
+var COMPOSE_GLOBAL_SWITCH_OPTIONS = /* @__PURE__ */ new Set([
+  "--all-resources",
+  "--compatibility",
+  "--dry-run",
+  "--help",
+  "--version"
+]);
+var SUDO_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "--chdir",
+  "--chroot",
+  "--close-from",
+  "--command-timeout",
+  "--group",
+  "--host",
+  "--prompt",
+  "--role",
+  "--type",
+  "--user",
+  "-C",
+  "-D",
+  "-g",
+  "-h",
+  "-p",
+  "-R",
+  "-r",
+  "-T",
+  "-t",
+  "-u"
+]);
+var SUDO_SWITCH_OPTIONS = /* @__PURE__ */ new Set([
+  "--askpass",
+  "--background",
+  "--help",
+  "--non-interactive",
+  "--preserve-env",
+  "--remove-timestamp",
+  "--reset-timestamp",
+  "--set-home",
+  "--stdin",
+  "--validate",
+  "--version",
+  "-A",
+  "-b",
+  "-E",
+  "-H",
+  "-K",
+  "-k",
+  "-n",
+  "-S",
+  "-v",
+  "-V"
+]);
+var SUDO_SHORT_SWITCHES = /* @__PURE__ */ new Set(["A", "b", "E", "H", "K", "k", "n", "S", "v", "V"]);
+var CONTAINER_RUN_INTERNAL_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "-w",
+  "--workdir",
+  "--entrypoint",
+  "--tmpfs"
+]);
+var CONTAINER_RUN_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "--add-host",
+  "--annotation",
+  "--attach",
+  "--blkio-weight",
+  "--cap-add",
+  "--cap-drop",
+  "--cgroup-parent",
+  "--cgroupns",
+  "--cidfile",
+  "--cpu-period",
+  "--cpu-quota",
+  "--cpu-rt-period",
+  "--cpu-rt-runtime",
+  "--cpu-shares",
+  "--cpus",
+  "--cpuset-cpus",
+  "--cpuset-mems",
+  "--detach-keys",
+  "--device",
+  "--device-cgroup-rule",
+  "--dns",
+  "--dns-option",
+  "--dns-search",
+  "--domainname",
+  "--entrypoint",
+  "--env",
+  "--env-file",
+  "--expose",
+  "--gpus",
+  "--group-add",
+  "--health-cmd",
+  "--health-interval",
+  "--health-retries",
+  "--health-start-interval",
+  "--health-start-period",
+  "--health-timeout",
+  "--hostname",
+  "--ipc",
+  "--isolation",
+  "--label",
+  "--label-file",
+  "--link",
+  "--log-driver",
+  "--log-opt",
+  "--mac-address",
+  "--memory",
+  "--memory-reservation",
+  "--memory-swap",
+  "--memory-swappiness",
+  "--mount",
+  "--name",
+  "--network",
+  "--network-alias",
+  "--oom-score-adj",
+  "--pid",
+  "--pids-limit",
+  "--platform",
+  "--publish",
+  "--pull",
+  "--restart",
+  "--runtime",
+  "--security-opt",
+  "--shm-size",
+  "--stop-signal",
+  "--stop-timeout",
+  "--storage-opt",
+  "--sysctl",
+  "--tmpfs",
+  "--ulimit",
+  "--user",
+  "--userns",
+  "--volume",
+  "--volumes-from",
+  "--workdir",
+  "-a",
+  "-e",
+  "-h",
+  "-m",
+  "-p",
+  "-u",
+  "-v",
+  "-w"
+]);
+var CONTAINER_RUN_SWITCH_OPTIONS = /* @__PURE__ */ new Set([
+  "-d",
+  "-i",
+  "-P",
+  "-t",
+  "--detach",
+  "--disable-content-trust",
+  "--help",
+  "--tty",
+  "--init",
+  "--interactive",
+  "--no-healthcheck",
+  "--no-hosts",
+  "--oom-kill-disable",
+  "--publish-all",
+  "--privileged",
+  "--read-only",
+  "--rm",
+  "--sig-proxy"
+]);
+var ENGINE_CONTAINER_RUN_SWITCH_OPTIONS = {
+  docker: /* @__PURE__ */ new Set(["--use-api-socket"]),
+  podman: /* @__PURE__ */ new Set(["--no-hostname", "--replace", "--tls-verify"])
+};
+var CONTAINER_RUN_SHORT_SWITCHES = /* @__PURE__ */ new Set(["d", "i", "P", "t"]);
+var CONTAINER_EXEC_INTERNAL_VALUE_OPTIONS = /* @__PURE__ */ new Set(["--workdir", "-w"]);
+var CONTAINER_EXEC_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "--detach-keys",
+  "--env",
+  "--env-file",
+  "--user",
+  "--workdir",
+  "-e",
+  "-u",
+  "-w"
+]);
+var CONTAINER_EXEC_SWITCH_OPTIONS = /* @__PURE__ */ new Set([
+  "--detach",
+  "--interactive",
+  "--privileged",
+  "--tty",
+  "-d",
+  "-i",
+  "-t"
+]);
+var ENGINE_CONTAINER_EXEC_SWITCH_OPTIONS = {
+  docker: /* @__PURE__ */ new Set(),
+  podman: /* @__PURE__ */ new Set(["--latest", "-l"])
+};
+var CONTAINER_EXEC_SHORT_SWITCHES = /* @__PURE__ */ new Set(["d", "i", "t"]);
+var COMPOSE_RUN_INTERNAL_VALUE_OPTIONS = /* @__PURE__ */ new Set(["--entrypoint", "--workdir", "-w"]);
+var COMPOSE_RUN_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "--cap-add",
+  "--cap-drop",
+  "--entrypoint",
+  "--env",
+  "--env-from-file",
+  "--label",
+  "--name",
+  "--publish",
+  "--pull",
+  "--user",
+  "--volume",
+  "--workdir",
+  "-e",
+  "-l",
+  "-p",
+  "-u",
+  "-v",
+  "-w"
+]);
+var COMPOSE_RUN_SWITCH_OPTIONS = /* @__PURE__ */ new Set([
+  "--build",
+  "--detach",
+  "--interactive",
+  "--no-deps",
+  "--no-tty",
+  "--quiet",
+  "--quiet-build",
+  "--quiet-pull",
+  "--remove-orphans",
+  "--rm",
+  "--service-ports",
+  "--use-aliases",
+  "-d",
+  "-i",
+  "-P",
+  "-q",
+  "-T"
+]);
+var COMPOSE_RUN_SHORT_SWITCHES = /* @__PURE__ */ new Set(["d", "i", "P", "q", "T"]);
+var COMPOSE_EXEC_INTERNAL_VALUE_OPTIONS = /* @__PURE__ */ new Set(["--workdir", "-w"]);
+var COMPOSE_EXEC_VALUE_OPTIONS = /* @__PURE__ */ new Set([
+  "--env",
+  "--index",
+  "--user",
+  "--workdir",
+  "-e",
+  "-u",
+  "-w"
+]);
+var COMPOSE_EXEC_SWITCH_OPTIONS = /* @__PURE__ */ new Set([
+  "--detach",
+  "--interactive",
+  "--no-tty",
+  "--privileged",
+  "-d",
+  "-i",
+  "-T"
+]);
+var COMPOSE_EXEC_SHORT_SWITCHES = /* @__PURE__ */ new Set(["d", "i", "T"]);
+var EMPTY_OPTIONS = /* @__PURE__ */ new Set();
+function findContainerPathEvidence(matrix, target) {
+  const evidence = { internalSpans: [], hostPaths: /* @__PURE__ */ new Map() };
+  for (const command of commandsOf(matrix, target)) {
+    const invocation = findContainerInvocation(command.argv, evidence);
+    if (invocation === null) continue;
+    const supported = findSupportedContainerCommand(command.argv, invocation, evidence);
+    if (supported === null) continue;
+    const boundary = findContainerBoundary(
+      command.argv,
+      supported.subcommandIndex + 1,
+      supported,
+      evidence
+    );
+    if (boundary === -1) continue;
+    const commandStart = command.argv[boundary + 1];
+    const commandEnd = command.argv.at(-1);
+    if (commandStart !== void 0 && commandEnd !== void 0) {
+      evidence.internalSpans.push([commandStart.span[0], commandEnd.span[1]]);
+    }
+  }
+  return evidence;
+}
+function findContainerInvocation(argv, evidence) {
+  let executableIndex = 0;
+  const first = argv[0]?.value.toLowerCase();
+  if (first !== void 0 && SUDO_EXECUTABLES.has(first)) {
+    executableIndex = findSudoPayload(argv, 1, evidence);
+    if (executableIndex === -1) return null;
+  }
+  const executable = argv[executableIndex]?.value.toLowerCase();
+  const container = executable === void 0 ? void 0 : CONTAINER_EXECUTABLES.get(executable);
+  return container === void 0 ? null : { ...container, executableIndex };
+}
+function findSudoPayload(argv, start, evidence) {
+  let index = start;
+  while (index < argv.length) {
+    const option = argv[index];
+    if (option === void 0) return -1;
+    if (option.value === "--") return index + 1 < argv.length ? index + 1 : -1;
+    if (!option.value.startsWith("-")) return index;
+    const width = optionWidth(
+      option.value,
+      SUDO_VALUE_OPTIONS,
+      SUDO_SWITCH_OPTIONS,
+      EMPTY_OPTIONS,
+      SUDO_SHORT_SWITCHES
+    );
+    if (width === null) {
+      recordPotentialHostPathOptions(argv, index + 1, evidence);
+      return -1;
+    }
+    index += width;
+  }
+  return -1;
+}
+function findSupportedContainerCommand(argv, invocation, evidence) {
+  if (invocation.frontend === "compose") {
+    const subcommandIndex = findComposeSubcommand(argv, invocation.executableIndex + 1, evidence);
+    const subcommand = containerSubcommandAt(argv, subcommandIndex);
+    return subcommand === null ? null : { ...invocation, subcommand, subcommandIndex };
+  }
+  return findEngineSubcommand(argv, invocation.executableIndex + 1, invocation.engine, evidence);
+}
+function findEngineSubcommand(argv, start, engine, evidence) {
+  let index = start;
+  while (index < argv.length) {
+    const option = argv[index];
+    if (option === void 0) return null;
+    if (option.value === "--") return classifyEngineCommand(argv, index + 1, engine, evidence);
+    if (!option.value.startsWith("-")) return classifyEngineCommand(argv, index, engine, evidence);
+    const width = optionWidth(
+      option.value,
+      GLOBAL_VALUE_OPTIONS,
+      GLOBAL_SWITCH_OPTIONS,
+      ENGINE_GLOBAL_SWITCH_OPTIONS[engine]
+    );
+    if (width === null) {
+      recordPotentialHostPathOptions(argv, index + 1, evidence);
+      return null;
+    }
+    index += width;
+  }
+  return null;
+}
+function classifyEngineCommand(argv, index, engine, evidence) {
+  const command = argv[index]?.value.toLowerCase();
+  if (command === void 0) return null;
+  const directSubcommand = containerSubcommandAt(argv, index);
+  if (directSubcommand !== null) {
+    return {
+      engine,
+      frontend: "engine",
+      subcommand: directSubcommand,
+      subcommandIndex: index
+    };
+  }
+  if (command === "container") {
+    const subcommandIndex = findNamespacedContainerSubcommand(argv, index + 1, evidence);
+    const subcommand = containerSubcommandAt(argv, subcommandIndex);
+    return subcommand === null ? null : { engine, frontend: "engine", subcommand, subcommandIndex };
+  }
+  if (command === "compose") {
+    const subcommandIndex = findComposeSubcommand(argv, index + 1, evidence);
+    const subcommand = containerSubcommandAt(argv, subcommandIndex);
+    return subcommand === null ? null : { engine, frontend: "compose", subcommand, subcommandIndex };
+  }
+  return null;
+}
+function containerSubcommandAt(argv, index) {
+  const value = argv[index]?.value.toLowerCase();
+  return value === "exec" || value === "run" ? value : null;
+}
+function findNamespacedContainerSubcommand(argv, start, evidence) {
+  return findSimpleSubcommand(argv, start, EMPTY_OPTIONS, EMPTY_OPTIONS, EMPTY_OPTIONS, evidence);
+}
+function findComposeSubcommand(argv, start, evidence) {
+  return findSimpleSubcommand(
+    argv,
+    start,
+    COMPOSE_GLOBAL_VALUE_OPTIONS,
+    COMPOSE_GLOBAL_SWITCH_OPTIONS,
+    EMPTY_OPTIONS,
+    evidence,
+    true
+  );
+}
+function findSimpleSubcommand(argv, start, valueOptions, switchOptions, shortSwitches, evidence, recordHostPaths = false) {
+  let index = start;
+  while (index < argv.length) {
+    const option = argv[index];
+    if (option === void 0) return -1;
+    if (option.value === "--") {
+      const candidate = argv[index + 1]?.value.toLowerCase();
+      return candidate !== void 0 && CONTAINER_SUBCOMMANDS.has(candidate) ? index + 1 : -1;
+    }
+    if (!option.value.startsWith("-")) {
+      return CONTAINER_SUBCOMMANDS.has(option.value.toLowerCase()) ? index : -1;
+    }
+    const width = optionWidth(
+      option.value,
+      valueOptions,
+      switchOptions,
+      EMPTY_OPTIONS,
+      shortSwitches
+    );
+    if (width === null) {
+      recordPotentialHostPathOptions(argv, index + 1, evidence);
+      return -1;
+    }
+    const operand = width === 2 ? argv[index + 1] : void 0;
+    if (recordHostPaths) recordContainerOptionPath(option, operand, evidence);
+    index += width;
+  }
+  return -1;
+}
+function findContainerBoundary(argv, start, command, evidence) {
+  const grammar = containerOptionGrammar(command);
+  let index = start;
+  while (index < argv.length) {
+    const option = argv[index];
+    if (option === void 0) return -1;
+    if (option.value === "--") return index + 1 < argv.length ? index + 1 : -1;
+    if (!option.value.startsWith("-")) return index;
+    const width = optionWidth(
+      option.value,
+      grammar.valueOptions,
+      grammar.switchOptions,
+      grammar.engineSwitchOptions,
+      grammar.shortSwitches
+    );
+    if (width === null) {
+      recordPotentialHostPathOptions(argv, index + 1, evidence);
+      return -1;
+    }
+    const operand = width === 2 ? argv[index + 1] : void 0;
+    const optionName = option.value.split("=", 1)[0];
+    if (grammar.internalValueOptions.has(optionName) && operand !== void 0) {
+      evidence.internalSpans.push(operand.span);
+    }
+    recordContainerOptionPath(option, operand, evidence);
+    index += width;
+  }
+  return -1;
+}
+function containerOptionGrammar(command) {
+  if (command.frontend === "compose") {
+    return command.subcommand === "run" ? {
+      engineSwitchOptions: EMPTY_OPTIONS,
+      internalValueOptions: COMPOSE_RUN_INTERNAL_VALUE_OPTIONS,
+      shortSwitches: COMPOSE_RUN_SHORT_SWITCHES,
+      switchOptions: COMPOSE_RUN_SWITCH_OPTIONS,
+      valueOptions: COMPOSE_RUN_VALUE_OPTIONS
+    } : {
+      engineSwitchOptions: EMPTY_OPTIONS,
+      internalValueOptions: COMPOSE_EXEC_INTERNAL_VALUE_OPTIONS,
+      shortSwitches: COMPOSE_EXEC_SHORT_SWITCHES,
+      switchOptions: COMPOSE_EXEC_SWITCH_OPTIONS,
+      valueOptions: COMPOSE_EXEC_VALUE_OPTIONS
+    };
+  }
+  return command.subcommand === "run" ? {
+    engineSwitchOptions: ENGINE_CONTAINER_RUN_SWITCH_OPTIONS[command.engine],
+    internalValueOptions: CONTAINER_RUN_INTERNAL_VALUE_OPTIONS,
+    shortSwitches: CONTAINER_RUN_SHORT_SWITCHES,
+    switchOptions: CONTAINER_RUN_SWITCH_OPTIONS,
+    valueOptions: CONTAINER_RUN_VALUE_OPTIONS
+  } : {
+    engineSwitchOptions: ENGINE_CONTAINER_EXEC_SWITCH_OPTIONS[command.engine],
+    internalValueOptions: CONTAINER_EXEC_INTERNAL_VALUE_OPTIONS,
+    shortSwitches: CONTAINER_EXEC_SHORT_SWITCHES,
+    switchOptions: CONTAINER_EXEC_SWITCH_OPTIONS,
+    valueOptions: CONTAINER_EXEC_VALUE_OPTIONS
+  };
+}
+function recordContainerOptionPath(option, operand, evidence, recordInternal = true) {
+  const equals = option.value.indexOf("=");
+  const name = equals === -1 ? option.value : option.value.slice(0, equals);
+  const value = equals === -1 ? operand?.value : option.value.slice(equals + 1);
+  const span = equals === -1 ? operand?.span : option.span;
+  if (value === void 0 || span === void 0) return;
+  let hostPath;
+  if (name === "--mount") hostPath = bindMountSource(value);
+  else if (name === "-v" || name === "--volume") {
+    const volumeFields = value.split(":");
+    if (recordInternal && volumeFields.length === 1) evidence.internalSpans.push(span);
+    else hostPath = volumeFields[0];
+  } else if (name === "--env-file" || name === "--env-from-file") hostPath = value;
+  if (hostPath !== void 0 && unixPathPrefix(hostPath) !== void 0) {
+    evidence.hostPaths.set(spanKey(span), hostPath);
+  }
+}
+function recordPotentialHostPathOptions(argv, start, evidence) {
+  for (let index = start; index < argv.length; index += 1) {
+    const option = argv[index];
+    if (option === void 0) continue;
+    const equals = option.value.indexOf("=");
+    const name = equals === -1 ? option.value : option.value.slice(0, equals);
+    if (name !== "--mount" && name !== "-v" && name !== "--volume" && name !== "--env-file" && name !== "--env-from-file") {
+      continue;
+    }
+    const operand = equals === -1 ? argv[index + 1] : void 0;
+    recordContainerOptionPath(option, operand, evidence, false);
+    if (equals === -1 && operand !== void 0) index += 1;
+  }
+}
+function bindMountSource(value) {
+  const fields = new Map(
+    value.split(",").map((field) => {
+      const equals = field.indexOf("=");
+      return equals === -1 ? [field, ""] : [field.slice(0, equals), field.slice(equals + 1)];
+    })
+  );
+  if (fields.get("type") !== "bind") return void 0;
+  return fields.get("source") ?? fields.get("src");
+}
+function unixPathPrefix(value) {
+  return UNIX_PATH_PREFIXES.find((prefix) => value === prefix || value.startsWith(`${prefix}/`));
+}
+function spanKey(span) {
+  return `${span[0]}:${span[1]}`;
+}
+function optionWidth(value, valueOptions, commonSwitches, engineSwitches, shortSwitches = EMPTY_OPTIONS) {
+  if (value.includes("=")) return 1;
+  if (commonSwitches.has(value) || engineSwitches.has(value) || isShortSwitchBundle(value, shortSwitches)) {
+    return 1;
+  }
+  if (valueOptions.has(value)) return 2;
+  return null;
+}
+function isShortSwitchBundle(value, switches) {
+  return value.length > 2 && /^-[A-Za-z]+$/.test(value) && [...value.slice(1)].every((char) => switches.has(char));
+}
+function contains(outer, inner) {
+  return outer[0] <= inner[0] && inner[1] <= outer[1];
+}
 
 // src/rules/PS030.ts
 var SH_FAMILY = /* @__PURE__ */ new Set(["bash", "sh", "zsh", "dash", "ksh", "ash"]);
@@ -15493,6 +18434,10 @@ var PS032 = availabilityRule(
 );
 
 // src/rules/known-tools.ts
+var KNOWN_TOOL_PROVIDER_ALIASES = {
+  gatsby: ["gatsby"],
+  playwright: ["playwright"]
+};
 var KNOWN_TOOLS = new Map(
   Object.entries({
     tsc: "typescript",
@@ -15561,7 +18506,9 @@ var KNOWN_TOOLS = new Map(
     "npm-check-updates": "npm-check-updates",
     ncu: "npm-check-updates",
     "pkg-pr-new": "pkg-pr-new"
-  })
+  }).map(
+    ([bin, primaryProvider]) => [bin, [primaryProvider, ...KNOWN_TOOL_PROVIDER_ALIASES[bin] ?? []]]
+  )
 );
 var SYSTEM_AND_TOOLCHAIN = /* @__PURE__ */ new Set([
   // npm ecosystem runners (present when scripts run)
@@ -15610,16 +18557,28 @@ var PS040 = {
   affectedTargets: ["posix-sh", "cmd", "powershell"],
   badExamples: ["vite build  (vite not in dependencies)", "jest  (jest not installed)"],
   goodExamples: ["vite build  (vite in devDependencies)", "my-workspace-tool  (workspace bin)"],
-  falsePositiveNotes: "Only commands in the known-tool registry are checked \u2014 arbitrary words are never flagged. Declared dependencies and workspace package bins count as present.",
+  falsePositiveNotes: "Only commands in the known-tool registry are checked \u2014 arbitrary words are never flagged. Dependency aliases are resolved to their provider, workspace packages must expose a real bin through a compatible dependency, and root toolchains count only for deterministically identified npm/pnpm or non-PnP Yarn Classic workspaces.",
   fixSafety: "conditional",
   provenance: [
     {
-      source: "https://docs.npmjs.com/cli/v10/using-npm/scripts",
-      claim: "npm adds node_modules/.bin to PATH for script execution; an undeclared tool is not there."
+      source: "https://github.com/npm/run-script/blob/main/lib/set-path.js",
+      claim: "npm run-script walks from the script cwd to the filesystem root and adds each ancestor node_modules/.bin to PATH."
     },
     {
-      source: "https://pnpm.io/workspaces",
-      claim: "Workspace packages expose their bin field to sibling scripts."
+      source: "https://pnpm.io/cli/run",
+      claim: "pnpm run explicitly adds the workspace-root node_modules/.bin to every workspace package script PATH."
+    },
+    {
+      source: "https://classic.yarnpkg.com/lang/en/docs/workspaces/",
+      claim: "Yarn Classic hoists compatible workspace dependencies to the root node_modules tree, while version-mismatched dependencies come from the registry."
+    },
+    {
+      source: "https://yarnpkg.com/features/pnp#shared-binaries",
+      claim: "Yarn PnP keeps a root binary root-only; each workspace using the binary must declare its provider."
+    },
+    {
+      source: "https://bun.sh/docs/pm/isolated-installs",
+      claim: "New Bun workspaces default to isolated installs, where packages are expected to access only explicitly declared dependencies."
     }
   ],
   check(matrix, ctx) {
@@ -15629,22 +18588,25 @@ var PS040 = {
         const first = cmd.argv[0];
         if (first === void 0) continue;
         const name = first.value;
-        const pkg = KNOWN_TOOLS.get(name);
-        if (pkg === void 0) continue;
+        const providers = KNOWN_TOOLS.get(name);
+        if (providers === void 0) continue;
         if (SYSTEM_AND_TOOLCHAIN.has(name)) continue;
-        const hasIt = ctx.dependencies.has(pkg) || ctx.dependencies.has(name) || ctx.workspaceBins.has(name);
+        const primaryProvider = providers[0];
+        if (primaryProvider === void 0) continue;
+        const hasIt = providers.some((provider) => ctx.dependencies.has(provider)) || ctx.workspaceBins.has(name);
         if (hasIt) continue;
+        const providerDescription = providers.length === 1 ? `\`${primaryProvider}\`` : `one of ${providers.map((provider) => `\`${provider}\``).join(", ")}`;
         const finding = makeFinding(
           this,
           { ...ctx, targets: [target] },
           {
-            message: `\`${name}\` is not declared as a dependency (provided by \`${pkg}\`)`,
+            message: `\`${name}\` is not declared as a dependency (provided by ${providerDescription})`,
             span: first.span,
             fix: {
               ruleId: this.id,
               safety: "conditional",
-              description: `add \`${pkg}\` to devDependencies (never auto-installed by scriptspect)`,
-              requiresDependency: pkg
+              description: `add \`${primaryProvider}\` to devDependencies (never auto-installed by scriptspect)`,
+              requiresDependency: primaryProvider
             }
           }
         );
@@ -15784,6 +18746,9 @@ function collectGraphFeatures(node, target, features = []) {
       node.opSpans.forEach((span) => {
         features.push({ role: "pipeline:|", span });
       });
+      break;
+    case "case":
+    case "compound":
       break;
   }
   for (const part of node.parts) collectGraphFeatures(part, target, features);
@@ -16022,8 +18987,9 @@ function findCommandMatches(node, executableSpan, role = []) {
   const matches = [];
   node.parts.forEach((part, index) => {
     const beforeIndex = index - 1;
-    const beforeOp = beforeIndex >= 0 ? operatorAt(node, beforeIndex) : void 0;
-    const afterOp = operatorAt(node, index);
+    const hasOperators = node.kind !== "case" && node.kind !== "compound";
+    const beforeOp = hasOperators && beforeIndex >= 0 ? operatorAt(node, beforeIndex) : void 0;
+    const afterOp = hasOperators ? operatorAt(node, index) : void 0;
     matches.push(
       ...findCommandMatches(part, executableSpan, [
         ...role,
@@ -16310,13 +19276,15 @@ function isIgnored(config, packagePath, scriptName, ruleId) {
 }
 
 // src/core/analyze.ts
-import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
 import { dirname, isAbsolute as isAbsolute4, join as join4, relative as relative5, resolve as resolve4, sep as sep4 } from "path";
-import { TextDecoder as TextDecoder2 } from "util";
+import { TextDecoder as TextDecoder3 } from "util";
 
 // src/workspaces/discover.ts
-import { lstatSync as lstatSync2 } from "fs";
+var import_semver = __toESM(require_semver2(), 1);
+import { lstatSync as lstatSync2, readFileSync as readFileSync3 } from "fs";
 import { join as join3, relative as relative4, resolve as resolve3 } from "path";
+import { TextDecoder as TextDecoder2 } from "util";
 
 // src/core/errors.ts
 var AnalyzeError = class extends Error {
@@ -16447,11 +19415,29 @@ var import_yaml = __toESM(require_dist(), 1);
 import { readFileSync as readFileSync2 } from "fs";
 import { TextDecoder } from "util";
 function pnpmWorkspaceGlobs(file) {
+  const doc = readPnpmWorkspaceDocument(file);
+  if (doc === void 0) return [];
+  const packages = doc.packages;
+  if (packages === void 0) return [];
+  if (!Array.isArray(packages) || packages.some((workspace) => typeof workspace !== "string" || workspace.trim() === "")) {
+    throw new AnalyzeError(`${file}: "packages" must be an array of non-empty strings`);
+  }
+  return assertSafeWorkspaceGlobs(packages, file);
+}
+function pnpmLinksWorkspacePackagesByRange(workspaceFile, npmrcFile) {
+  if (workspaceFile !== void 0) {
+    const doc = readPnpmWorkspaceDocument(workspaceFile);
+    const setting = doc?.linkWorkspacePackages;
+    if (setting !== void 0) return setting === true || setting === "deep";
+  }
+  return npmrcFile === void 0 ? false : legacyNpmrcLinksWorkspacePackages(npmrcFile);
+}
+function readPnpmWorkspaceDocument(file) {
   let bytes;
   try {
     bytes = readFileSync2(file);
   } catch (error) {
-    if (isErrno2(error, "ENOENT")) return [];
+    if (isErrno2(error, "ENOENT")) return void 0;
     throw new AnalyzeError(`${file}: cannot be read (${errorMessage(error)})`);
   }
   let text;
@@ -16472,12 +19458,32 @@ function pnpmWorkspaceGlobs(file) {
   if (!isPlainRecord(doc)) {
     throw new AnalyzeError(`${file}: workspace manifest root must be a plain mapping object`);
   }
-  const packages = doc.packages;
-  if (packages === void 0) return [];
-  if (!Array.isArray(packages) || packages.some((workspace) => typeof workspace !== "string" || workspace.trim() === "")) {
-    throw new AnalyzeError(`${file}: "packages" must be an array of non-empty strings`);
+  return doc;
+}
+function legacyNpmrcLinksWorkspacePackages(file) {
+  let bytes;
+  try {
+    bytes = readFileSync2(file);
+  } catch (error) {
+    if (isErrno2(error, "ENOENT")) return false;
+    throw new AnalyzeError(`${file}: cannot be read (${errorMessage(error)})`);
   }
-  return assertSafeWorkspaceGlobs(packages, file);
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new AnalyzeError(`${file}: npm config must be valid UTF-8`);
+  }
+  let value;
+  for (const sourceLine of text.split(/\r?\n/u)) {
+    const line = sourceLine.trim();
+    if (line === "" || line.startsWith("#") || line.startsWith(";")) continue;
+    const equals = line.indexOf("=");
+    if (equals === -1) continue;
+    if (line.slice(0, equals).trim().toLowerCase() !== "link-workspace-packages") continue;
+    value = line.slice(equals + 1).trim().toLowerCase();
+  }
+  return value === "true" || value === "deep";
 }
 function isErrno2(error, code) {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
@@ -16499,6 +19505,12 @@ var EXCLUDED_DIRS = [
   "**/.yarn/**",
   "**/coverage/**"
 ];
+var MANAGER_LOCKFILES = {
+  npm: ["package-lock.json", "npm-shrinkwrap.json"],
+  pnpm: ["pnpm-lock.yaml"],
+  yarn: ["yarn.lock"],
+  bun: ["bun.lock", "bun.lockb"]
+};
 function discoverPackages(root) {
   const notes = [];
   const rootReal = canonicalRoot(root);
@@ -16507,8 +19519,10 @@ function discoverPackages(root) {
   const globs = /* @__PURE__ */ new Set();
   for (const g of npmWorkspaceGlobs(rootUnit.manifest.workspaces)) globs.add(g);
   const logicalPnpmWorkspace = join3(rootReal, "pnpm-workspace.yaml");
+  let pnpmWorkspaceFile;
   if (manifestExists(logicalPnpmWorkspace)) {
     const pnpmWorkspace = containedPath(rootReal, logicalPnpmWorkspace, "pnpm workspace manifest");
+    pnpmWorkspaceFile = pnpmWorkspace;
     for (const g of pnpmWorkspaceGlobs(pnpmWorkspace)) globs.add(g);
   }
   const units = [rootUnit];
@@ -16546,7 +19560,84 @@ function discoverPackages(root) {
       units.push(packageUnit(real, rootReal, relPath, realFile));
     }
   }
-  return { packages: units, notes };
+  const packageManager = detectWorkspacePackageManager(rootReal, rootUnit.manifest);
+  const logicalNpmrc = join3(rootReal, ".npmrc");
+  const npmrcFile = packageManager === "pnpm" && pathEntryExists(logicalNpmrc) ? containedPath(rootReal, logicalNpmrc, "project npm config") : void 0;
+  return {
+    packages: units,
+    packageManager,
+    rootToolchainBinsReachLeaves: packageManager === "npm" || packageManager === "pnpm" || packageManager === "yarn" && yarnClassicUsesRootBins(rootReal, rootUnit.manifest),
+    ordinaryWorkspaceRangesResolveLocally: packageManager === "pnpm" ? pnpmLinksWorkspacePackagesByRange(pnpmWorkspaceFile, npmrcFile) : packageManager !== "unknown",
+    notes
+  };
+}
+function yarnClassicUsesRootBins(root, manifest) {
+  if (yarnPnpEnabled(root, manifest)) return false;
+  const declared = manifest.packageManager;
+  const lockKind = yarnLockKind(root);
+  if (typeof declared === "string" && declared.startsWith("yarn@")) {
+    const major = /^yarn@(\d+)(?:\.|$)/u.exec(declared)?.[1];
+    if (major !== "1") return false;
+    return lockKind !== "modern";
+  }
+  return lockKind === "classic";
+}
+function yarnPnpEnabled(root, manifest) {
+  const installConfig = manifest.installConfig;
+  if (typeof installConfig === "object" && installConfig !== null && !Array.isArray(installConfig) && installConfig.pnp === true) {
+    return true;
+  }
+  return pathEntryExists(join3(root, ".pnp.js")) || pathEntryExists(join3(root, ".pnp.cjs")) || yarnClassicRcEnablesPnp(root);
+}
+function yarnClassicRcEnablesPnp(root) {
+  const logicalFile = join3(root, ".yarnrc");
+  if (!pathEntryExists(logicalFile)) return false;
+  const file = containedPath(root, logicalFile, "Yarn Classic config");
+  let bytes;
+  try {
+    bytes = readFileSync3(file);
+  } catch (error) {
+    throw new AnalyzeError(
+      `${file}: cannot read Yarn Classic config (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+  let source;
+  try {
+    source = new TextDecoder2("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new AnalyzeError(`${file}: Yarn Classic config must be valid UTF-8`);
+  }
+  return /^\s*--enable-pnp(?:\s+|=)(?:true|1)\s*(?:#.*)?$/mu.test(source);
+}
+function yarnLockKind(root) {
+  const logicalFile = join3(root, "yarn.lock");
+  if (!pathEntryExists(logicalFile)) return "absent";
+  const file = containedPath(root, logicalFile, "Yarn lockfile");
+  let source;
+  try {
+    source = readFileSync3(file, "utf8");
+  } catch {
+    throw new AnalyzeError(`${file}: cannot inspect Yarn lockfile format`);
+  }
+  if (/^# yarn lockfile v1\s*$/mu.test(source)) return "classic";
+  if (/^__metadata:\s*$/mu.test(source)) return "modern";
+  return "unknown";
+}
+function detectWorkspacePackageManager(root, manifest) {
+  const declaredValue = manifest.packageManager;
+  let declared;
+  if (declaredValue !== void 0) {
+    if (typeof declaredValue !== "string") return "unknown";
+    const match = /^(npm|pnpm|yarn|bun)@\S+$/.exec(declaredValue);
+    if (match === null) return "unknown";
+    declared = match[1];
+  }
+  const signals = /* @__PURE__ */ new Set();
+  if (declared !== void 0) signals.add(declared);
+  for (const [manager, lockfiles] of Object.entries(MANAGER_LOCKFILES)) {
+    if (lockfiles.some((file) => regularFileExists(join3(root, file)))) signals.add(manager);
+  }
+  return signals.size === 1 ? [...signals][0] ?? "unknown" : "unknown";
 }
 function packageUnit(absDir, root, relPath, manifestFile) {
   const manifest = readManifest(manifestFile);
@@ -16598,18 +19689,125 @@ function manifestBinNames(manifest) {
   for (const binName of Object.keys(bin)) names.add(binName);
   return names;
 }
-function visibleWorkspaceBins(caller, packages) {
-  const declared = /* @__PURE__ */ new Set([
-    ...Object.keys(caller.manifest.dependencies ?? {}),
-    ...Object.keys(caller.manifest.devDependencies ?? {})
-  ]);
+function dependencyProviderNames(caller, packages, ordinaryWorkspaceRangesResolveLocally = true) {
+  const workspaceUnits = uniqueWorkspaceUnitsByName(packages);
+  const providers = /* @__PURE__ */ new Set();
+  for (const [declaredName, spec] of executableDependencyEntries(caller.manifest)) {
+    const aliasTarget = npmAliasTarget(spec);
+    if (aliasTarget !== void 0) {
+      providers.add(aliasTarget);
+      continue;
+    }
+    if (workspaceDependencyTarget(
+      declaredName,
+      spec,
+      workspaceUnits,
+      ordinaryWorkspaceRangesResolveLocally
+    ) !== void 0) {
+      continue;
+    }
+    if (registrySpecKeepsPackageIdentity(spec)) providers.add(declaredName);
+  }
+  return providers;
+}
+function visibleWorkspaceBins(caller, packages, ordinaryWorkspaceRangesResolveLocally = true) {
+  const workspaceUnits = uniqueWorkspaceUnitsByName(packages);
+  const declaredWorkspaceTargets = /* @__PURE__ */ new Set();
+  for (const [declaredName, spec] of executableDependencyEntries(caller.manifest)) {
+    const target = workspaceDependencyTarget(
+      declaredName,
+      spec,
+      workspaceUnits,
+      ordinaryWorkspaceRangesResolveLocally
+    );
+    if (target !== void 0) declaredWorkspaceTargets.add(target);
+  }
   const names = /* @__PURE__ */ new Set();
   for (const unit of packages) {
     const packageName = unit.manifest.name;
-    if (packageName === void 0 || !declared.has(packageName)) continue;
+    if (packageName === void 0 || !declaredWorkspaceTargets.has(packageName)) continue;
     for (const name of manifestBinNames(unit.manifest)) names.add(name);
   }
   return names;
+}
+function executableDependencyEntries(manifest) {
+  const entries = [];
+  for (const block of [manifest.dependencies, manifest.devDependencies]) {
+    if (block === void 0) continue;
+    for (const [name, spec] of Object.entries(block)) {
+      if (typeof spec === "string") entries.push([name, spec.trim()]);
+    }
+  }
+  return entries;
+}
+function workspaceDependencyTarget(declaredName, spec, workspaceUnits, ordinaryWorkspaceRangesResolveLocally) {
+  if (npmAliasTarget(spec) !== void 0) return void 0;
+  if (spec.startsWith("workspace:")) {
+    const workspaceSpec = spec.slice("workspace:".length);
+    const target = workspaceSpec === "" || /^(?:[*^~<>=]|v?\d)/.test(workspaceSpec) ? declaredName : packageNameBeforeRange(workspaceSpec);
+    return target !== void 0 && workspaceUnits.get(target) !== null && workspaceUnits.has(target) ? target : void 0;
+  }
+  if (!ordinaryWorkspaceRangesResolveLocally || !registrySpecKeepsPackageIdentity(spec)) {
+    return void 0;
+  }
+  const unit = workspaceUnits.get(declaredName);
+  if (unit === void 0 || unit === null) return void 0;
+  const version = unit.manifest.version;
+  const range = spec === "" ? "*" : spec;
+  if (typeof version !== "string" || (0, import_semver.valid)(version) === null || (0, import_semver.validRange)(range) === null) {
+    return void 0;
+  }
+  return (0, import_semver.satisfies)(version, range) ? declaredName : void 0;
+}
+function uniqueWorkspaceUnitsByName(packages) {
+  const units = /* @__PURE__ */ new Map();
+  for (const unit of packages) {
+    const name = unit.manifest.name;
+    if (name === void 0) continue;
+    units.set(name, units.has(name) ? null : unit);
+  }
+  return units;
+}
+function npmAliasTarget(spec) {
+  if (!spec.startsWith("npm:")) return void 0;
+  return packageNameBeforeRange(spec.slice("npm:".length));
+}
+function packageNameBeforeRange(spec) {
+  if (spec.startsWith("@")) {
+    const slash = spec.indexOf("/");
+    if (slash <= 1) return void 0;
+    const rangeAt2 = spec.indexOf("@", slash + 1);
+    const name2 = rangeAt2 === -1 ? spec : spec.slice(0, rangeAt2);
+    return /^@[^@/\s]+\/[^@/\s]+$/.test(name2) ? name2 : void 0;
+  }
+  const rangeAt = spec.indexOf("@");
+  const name = rangeAt === -1 ? spec : spec.slice(0, rangeAt);
+  return /^[^@/\s]+$/.test(name) && name !== "" ? name : void 0;
+}
+function registrySpecKeepsPackageIdentity(spec) {
+  if (spec === "") return true;
+  if (spec.startsWith("catalog:")) return true;
+  if (/^[A-Za-z][A-Za-z\d+.-]*:/.test(spec)) return false;
+  if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("\\")) return false;
+  if (spec.includes("/") || /\.(?:tgz|tar\.gz)(?:#.*)?$/i.test(spec)) return false;
+  return true;
+}
+function regularFileExists(file) {
+  try {
+    return lstatSync2(file).isFile();
+  } catch (error) {
+    if (isErrno3(error, "ENOENT")) return false;
+    throw new AnalyzeError(`${file}: cannot inspect package-manager signal`);
+  }
+}
+function pathEntryExists(file) {
+  try {
+    lstatSync2(file);
+    return true;
+  } catch (error) {
+    if (isErrno3(error, "ENOENT")) return false;
+    throw new AnalyzeError(`${file}: cannot inspect package-manager signal`);
+  }
 }
 
 // src/core/package-json-source.ts
@@ -16731,28 +19929,20 @@ function assertUnambiguousRootScripts(text) {
 }
 
 // src/core/analyze.ts
-function dependencyNames(manifest) {
-  const names = /* @__PURE__ */ new Set();
-  for (const block of [manifest.dependencies, manifest.devDependencies]) {
-    if (block === void 0) continue;
-    for (const name of Object.keys(block)) names.add(name);
-  }
-  return names;
-}
 function toPosix(p) {
   return sep4 === "\\" ? p.replace(/\\/g, "/") : p;
 }
 function readManifest(file) {
   let bytes;
   try {
-    bytes = readFileSync3(file);
+    bytes = readFileSync4(file);
   } catch (err) {
     throw new AnalyzeError(`${file}: ${err instanceof Error ? err.message : String(err)}`);
   }
   const hasBom = bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191;
   let text;
   try {
-    text = new TextDecoder2("utf-8", { fatal: true }).decode(hasBom ? bytes.subarray(3) : bytes);
+    text = new TextDecoder3("utf-8", { fatal: true }).decode(hasBom ? bytes.subarray(3) : bytes);
   } catch {
     throw new AnalyzeError(`${file}: package.json must be valid UTF-8`);
   }
@@ -16810,11 +20000,28 @@ function resolveRoot(startDir, stopDir) {
 function analyze(root, options) {
   const discovery = discoverPackages(root);
   const packages = discovery.packages;
+  const rootUnit = packages.find((unit) => unit.relPath === "package.json");
+  const ordinaryWorkspaceRangesResolveLocally = discovery.ordinaryWorkspaceRangesResolveLocally;
+  const rootDependencies = rootUnit === void 0 ? /* @__PURE__ */ new Set() : dependencyProviderNames(rootUnit, packages, ordinaryWorkspaceRangesResolveLocally);
+  const rootWorkspaceBins = rootUnit === void 0 ? /* @__PURE__ */ new Set() : visibleWorkspaceBins(rootUnit, packages, ordinaryWorkspaceRangesResolveLocally);
+  const rootBinsReachLeaves = discovery.rootToolchainBinsReachLeaves;
   const findings = [];
   let scriptsScanned = 0;
   for (const unit of packages) {
-    const dependencies = dependencyNames(unit.manifest);
-    const workspaceBins = visibleWorkspaceBins(unit, packages);
+    const dependencies = dependencyProviderNames(
+      unit,
+      packages,
+      ordinaryWorkspaceRangesResolveLocally
+    );
+    const workspaceBins = visibleWorkspaceBins(
+      unit,
+      packages,
+      ordinaryWorkspaceRangesResolveLocally
+    );
+    if (rootBinsReachLeaves && unit !== rootUnit) {
+      for (const name of rootDependencies) dependencies.add(name);
+      for (const name of rootWorkspaceBins) workspaceBins.add(name);
+    }
     const scripts = unit.manifest.scripts ?? {};
     for (const [scriptName, script] of Object.entries(scripts)) {
       if (typeof script !== "string") continue;
