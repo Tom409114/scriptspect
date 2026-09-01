@@ -162,12 +162,14 @@ jobs:
           DISPATCH_TAG: ${{ inputs.tag }}
           NPM_BOOTSTRAP_ENABLED: ${{ vars.NPM_BOOTSTRAP_ENABLED }}
           NPM_TRUSTED_PUBLISHING_READY: ${{ vars.NPM_TRUSTED_PUBLISHING_READY }}
+          RELEASE_TAG_POLICY_READY: ${{ vars.RELEASE_TAG_POLICY_READY }}
           RELEASE_PR_ACTORS: ${{ vars.RELEASE_PR_ACTORS || 'github-actions[bot]' }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$NPM_BOOTSTRAP_ENABLED" != true ]]
+          [[ "$NPM_BOOTSTRAP_ENABLED" == false ]]
           [[ "$NPM_TRUSTED_PUBLISHING_READY" == true ]]
+          [[ "$RELEASE_TAG_POLICY_READY" == true ]]
           if [[ "$EVENT_NAME" == workflow_run ]]; then
             CONCLUSION=$(jq -r '.workflow_run.conclusion' "$GITHUB_EVENT_PATH")
             RUN_EVENT=$(jq -r '.workflow_run.event' "$GITHUB_EVENT_PATH")
@@ -299,21 +301,12 @@ jobs:
 
           INTEGRITY_CONTRACT=docs/release/npm-integrity-contract.json
           test -f "$INTEGRITY_CONTRACT"
-          jq -e '
-            .schemaVersion == 1 and
-            .package == "scriptspect" and
-            (.bootstrapVersion | test("^0\\.0\\.0-bootstrap\\.[0-9]+$")) and
-            (.sourceCommit | test("^[0-9a-f]{40}$")) and
-            (.integrityMode == "exact-bytes" or .integrityMode == "canonical-tree-v1") and
-            .comparatorAlgorithm == "scriptspect-canonical-tree/v1" and
-            (.comparatorAlgorithmDigest | test("^[0-9a-f]{64}$")) and
-            .latestUnchanged == true and
-            (.reviewedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T"))
-          ' "$INTEGRITY_CONTRACT" >/dev/null
-          INTEGRITY_MODE=$(jq -er '.integrityMode' "$INTEGRITY_CONTRACT")
+          node tools/release/verify-package-integrity.mjs \
+            --contract-only "$INTEGRITY_CONTRACT" \
+            > "$RUNNER_TEMP/verified-integrity-contract.json"
+          INTEGRITY_MODE=$(jq -er '.integrityMode' "$RUNNER_TEMP/verified-integrity-contract.json")
           INTEGRITY_CONTRACT_HASH=$(sha256sum "$INTEGRITY_CONTRACT" | cut -d' ' -f1)
-          COMPARATOR_ALGORITHM_DIGEST=$(jq -er '.comparatorAlgorithmDigest' "$INTEGRITY_CONTRACT")
-          [[ "$COMPARATOR_ALGORITHM_DIGEST" == "$(node tools/release/canonical-tree.mjs algorithm-digest | jq -er '.algorithmDigest')" ]]
+          COMPARATOR_ALGORITHM_DIGEST=$(jq -er '.comparatorAlgorithmDigest' "$RUNNER_TEMP/verified-integrity-contract.json")
 
           {
             echo "intent-id=$INTENT_ID"

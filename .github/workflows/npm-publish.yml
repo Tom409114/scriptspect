@@ -116,11 +116,17 @@ jobs:
           DISPATCH_TAG: ${{ inputs.tag }}
           DISPATCH_SHA: ${{ inputs.sha }}
           RELEASE_PR_ACTORS: ${{ vars.RELEASE_PR_ACTORS || 'github-actions[bot]' }}
+          NPM_BOOTSTRAP_ENABLED: ${{ vars.NPM_BOOTSTRAP_ENABLED }}
+          NPM_TRUSTED_PUBLISHING_READY: ${{ vars.NPM_TRUSTED_PUBLISHING_READY }}
+          RELEASE_TAG_POLICY_READY: ${{ vars.RELEASE_TAG_POLICY_READY }}
           NPM_CONFIG_PROVENANCE: true
           NPM_CONFIG_USERCONFIG: /dev/null
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$NPM_BOOTSTRAP_ENABLED" == false ]]
+          [[ "$NPM_TRUSTED_PUBLISHING_READY" == true ]]
+          [[ "$RELEASE_TAG_POLICY_READY" == true ]]
           TAG=${GITHUB_REF#refs/tags/}
           SHA=$GITHUB_SHA
           [[ "$GITHUB_REF" == "refs/tags/$TAG" ]]

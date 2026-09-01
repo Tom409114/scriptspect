@@ -168,6 +168,85 @@ function runIntegrityVerifier(
   );
 }
 
+function releasePullRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    base: { ref: 'main', repo: { full_name: 'Tom409114/scriptspect' } },
+    head: {
+      ref: 'release-please--branches--main--components--scriptspect',
+      repo: { full_name: 'Tom409114/scriptspect', fork: false },
+    },
+    title: 'chore(main): release 0.1.0',
+    user: { login: 'github-actions[bot]' },
+    labels: [{ name: 'autorelease: pending' }],
+    ...overrides,
+  };
+}
+
+function runReleaseReadiness(options: {
+  pullRequest: Record<string, unknown>;
+  contract?: Record<string, unknown>;
+  bootstrap?: string;
+  trusted?: string;
+  tagPolicy?: string;
+  actors?: string;
+  writeContract?: boolean;
+  omitFlag?: string;
+  extraArgs?: string[];
+}) {
+  const directory = temporaryDirectory('release-readiness');
+  const eventPath = join(directory, 'event.json');
+  const contractPath = join(directory, 'contract.json');
+  writeFileSync(eventPath, `${JSON.stringify({ pull_request: options.pullRequest })}\n`);
+  if (options.writeContract !== false) {
+    writeFileSync(
+      contractPath,
+      `${JSON.stringify(options.contract ?? integrityContract('exact-bytes'))}\n`,
+    );
+  }
+  const arguments_ = [
+    '--event',
+    eventPath,
+    '--contract',
+    contractPath,
+    '--repository',
+    'Tom409114/scriptspect',
+    '--release-pr-actors',
+    options.actors ?? 'github-actions[bot]',
+    '--npm-bootstrap-enabled',
+    options.bootstrap ?? 'false',
+    '--npm-trusted-publishing-ready',
+    options.trusted ?? 'true',
+    '--release-tag-policy-ready',
+    options.tagPolicy ?? 'true',
+  ];
+  if (options.omitFlag !== undefined) {
+    const index = arguments_.indexOf(`--${options.omitFlag}`);
+    if (index === -1) throw new Error(`test attempted to omit unknown flag ${options.omitFlag}`);
+    arguments_.splice(index, 2);
+  }
+  arguments_.push(...(options.extraArgs ?? []));
+  return spawnSync(
+    process.execPath,
+    [join(root, 'tools', 'release', 'release-pr-readiness.mjs'), ...arguments_],
+    { encoding: 'utf8' },
+  );
+}
+
+function runContractOnly(contract: Record<string, unknown>) {
+  const directory = temporaryDirectory('contract-only');
+  const contractPath = join(directory, 'contract.json');
+  writeFileSync(contractPath, `${JSON.stringify(contract)}\n`);
+  return spawnSync(
+    process.execPath,
+    [
+      join(root, 'tools', 'release', 'verify-package-integrity.mjs'),
+      '--contract-only',
+      contractPath,
+    ],
+    { encoding: 'utf8' },
+  );
+}
+
 describe('release pull requests and exact release intent', () => {
   it('configures release-please to update only a release PR', () => {
     const config = json('release-please-config.json');
@@ -305,13 +384,231 @@ describe('release coordinator trust and recovery', () => {
     const authorize = jobSource('release.yml', 'authorize');
     expect(authorize).toContain('docs/release/npm-integrity-contract.json');
     expect(authorize).toContain('integrityMode');
-    expect(authorize).toContain('bootstrapVersion');
+    expect(authorize).toContain('--contract-only');
+    expect(
+      readFileSync(join(root, 'tools', 'release', 'verify-package-integrity.mjs'), 'utf8'),
+    ).toContain('bootstrapVersion');
 
     const verify = jobSource('npm-publish.yml', 'publish');
     expect(verify).toContain('verify-package-integrity.mjs');
     expect(source('release.yml')).not.toContain('vars.NPM_INTEGRITY_MODE');
     expect(authorize).toContain('NPM_BOOTSTRAP_ENABLED');
     expect(authorize).toContain('NPM_TRUSTED_PUBLISHING_READY');
+  });
+
+  it('keeps the release PR blocked until every external publication control is ready', () => {
+    const readiness = workflow('release-readiness.yml');
+    expect(readiness.on).toMatchObject({
+      pull_request_target: { branches: ['main'] },
+    });
+    expect(readiness.permissions).toEqual({ contents: 'read' });
+    expect(readiness.jobs).toHaveProperty('release-pr-readiness');
+
+    const gate = jobSource('release-readiness.yml', 'release-pr-readiness');
+    for (const predicate of [
+      'release-pr-readiness.mjs',
+      'docs/release/npm-integrity-contract.json',
+    ]) {
+      expect(gate).toContain(predicate);
+    }
+    const readinessSource = source('release-readiness.yml');
+    expect(readinessSource).toContain('github.event.pull_request.base.sha');
+    expect(readinessSource).not.toContain('github.event.pull_request.head.sha');
+    expect(readinessSource).not.toContain('github.event.pull_request.head.ref');
+    expect(readinessSource).toContain('node-version: 22');
+
+    const authorize = jobSource('release.yml', 'authorize');
+    expect(authorize).toContain('[[ "$NPM_BOOTSTRAP_ENABLED" == false ]]');
+    expect(authorize).toContain('RELEASE_TAG_POLICY_READY');
+    expect(authorize).toContain('[[ "$RELEASE_TAG_POLICY_READY" == true ]]');
+
+    const publish = jobSource('npm-publish.yml', 'publish');
+    expect(publish).toContain('[[ "$NPM_BOOTSTRAP_ENABLED" == false ]]');
+    expect(publish).toContain('[[ "$NPM_TRUSTED_PUBLISHING_READY" == true ]]');
+    expect(publish).toContain('[[ "$RELEASE_TAG_POLICY_READY" == true ]]');
+  });
+
+  it('executes the release readiness decision across identity and external-control boundaries', () => {
+    const ready = runReleaseReadiness({ pullRequest: releasePullRequest() });
+    expect(ready.status, ready.stderr).toBe(0);
+    expect(JSON.parse(ready.stdout)).toMatchObject({ applicable: true, ready: true });
+
+    const ordinary = runReleaseReadiness({
+      pullRequest: releasePullRequest({
+        head: {
+          ref: 'feat/ordinary-change',
+          repo: { full_name: 'Tom409114/scriptspect', fork: false },
+        },
+        title: 'feat: ordinary change',
+        user: { login: 'contributor' },
+        labels: [],
+      }),
+      bootstrap: '',
+      trusted: '',
+      tagPolicy: '',
+      writeContract: false,
+    });
+    expect(ordinary.status, ordinary.stderr).toBe(0);
+    expect(JSON.parse(ordinary.stdout)).toMatchObject({ applicable: false, ready: true });
+
+    const missingContract = runReleaseReadiness({
+      pullRequest: releasePullRequest(),
+      writeContract: false,
+    });
+    expect(missingContract.status).toBe(1);
+    expect(missingContract.stderr).toMatch(/integrity contract.*read/i);
+
+    const blockedCases: Array<[string, ReturnType<typeof runReleaseReadiness>, RegExp]> = [
+      [
+        'unset bootstrap switch',
+        runReleaseReadiness({ pullRequest: releasePullRequest(), bootstrap: '' }),
+        /NPM_BOOTSTRAP_ENABLED/,
+      ],
+      [
+        'enabled bootstrap switch',
+        runReleaseReadiness({ pullRequest: releasePullRequest(), bootstrap: 'true' }),
+        /NPM_BOOTSTRAP_ENABLED/,
+      ],
+      [
+        'unready trusted publishing',
+        runReleaseReadiness({ pullRequest: releasePullRequest(), trusted: 'false' }),
+        /NPM_TRUSTED_PUBLISHING_READY/,
+      ],
+      [
+        'unready tag policy',
+        runReleaseReadiness({ pullRequest: releasePullRequest(), tagPolicy: 'false' }),
+        /RELEASE_TAG_POLICY_READY/,
+      ],
+      [
+        'unapproved actor',
+        runReleaseReadiness({
+          pullRequest: releasePullRequest({ user: { login: 'attacker' } }),
+        }),
+        /actor is not in/,
+      ],
+      [
+        'renamed branch',
+        runReleaseReadiness({
+          pullRequest: releasePullRequest({
+            head: {
+              ref: 'release-tool-renamed-branch',
+              repo: { full_name: 'Tom409114/scriptspect', fork: false },
+            },
+          }),
+        }),
+        /head branch must start/,
+      ],
+      [
+        'noncanonical title',
+        runReleaseReadiness({
+          pullRequest: releasePullRequest({ title: 'release 0.1.0' }),
+        }),
+        /canonical release-please title/,
+      ],
+      [
+        'missing release label',
+        runReleaseReadiness({ pullRequest: releasePullRequest({ labels: [] }) }),
+        /label autorelease: pending is missing/,
+      ],
+      [
+        'wrong base ref',
+        runReleaseReadiness({
+          pullRequest: releasePullRequest({
+            base: { ref: 'develop', repo: { full_name: 'Tom409114/scriptspect' } },
+          }),
+        }),
+        /base ref must be main/,
+      ],
+      [
+        'wrong base repository',
+        runReleaseReadiness({
+          pullRequest: releasePullRequest({
+            base: { ref: 'main', repo: { full_name: 'attacker/fork' } },
+          }),
+        }),
+        /base repository does not match/,
+      ],
+      [
+        'wrong head repository',
+        runReleaseReadiness({
+          pullRequest: releasePullRequest({
+            head: {
+              ref: 'release-please--branches--main--components--scriptspect',
+              repo: { full_name: 'attacker/fork', fork: false },
+            },
+          }),
+        }),
+        /head must be a non-fork branch/,
+      ],
+      [
+        'forked head repository',
+        runReleaseReadiness({
+          pullRequest: releasePullRequest({
+            head: {
+              ref: 'release-please--branches--main--components--scriptspect',
+              repo: { full_name: 'Tom409114/scriptspect', fork: true },
+            },
+          }),
+        }),
+        /head must be a non-fork branch/,
+      ],
+    ];
+    for (const [description, blocked, message] of blockedCases) {
+      expect(blocked.status, description).toBe(1);
+      expect(blocked.stderr, description).toMatch(message);
+    }
+  });
+
+  it('uses the publisher contract parser for pre-merge readiness', () => {
+    const valid = runContractOnly(integrityContract('exact-bytes'));
+    expect(valid.status, valid.stderr).toBe(0);
+    expect(JSON.parse(valid.stdout)).toMatchObject({
+      package: 'scriptspect',
+      integrityMode: 'exact-bytes',
+    });
+
+    const missingRegistryIntegrity = integrityContract('exact-bytes');
+    delete (missingRegistryIntegrity as Record<string, unknown>).registryIntegrity;
+    const contractOnlyMissing = runContractOnly(missingRegistryIntegrity);
+    expect(contractOnlyMissing.status).toBe(1);
+    expect(contractOnlyMissing.stderr).toContain('registryIntegrity');
+
+    const missing = runReleaseReadiness({
+      pullRequest: releasePullRequest(),
+      contract: missingRegistryIntegrity,
+    });
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain('registryIntegrity');
+
+    const wrongDigest = runReleaseReadiness({
+      pullRequest: releasePullRequest(),
+      contract: integrityContract('exact-bytes', 'f'.repeat(64)),
+    });
+    expect(wrongDigest.status).toBe(1);
+    expect(wrongDigest.stderr).toMatch(/comparator.*digest/i);
+  });
+
+  it('rejects missing, duplicate, and unknown readiness CLI flags', () => {
+    const malformed = [
+      runReleaseReadiness({
+        pullRequest: releasePullRequest(),
+        omitFlag: 'release-tag-policy-ready',
+      }),
+      runReleaseReadiness({
+        pullRequest: releasePullRequest(),
+        extraArgs: ['--repository', 'Tom409114/scriptspect'],
+      }),
+      runReleaseReadiness({
+        pullRequest: releasePullRequest(),
+        extraArgs: ['--unexpected', 'true'],
+      }),
+    ];
+    expect(malformed[0]?.status).toBe(1);
+    expect(malformed[0]?.stderr).toContain('missing --release-tag-policy-ready');
+    expect(malformed[1]?.status).toBe(1);
+    expect(malformed[1]?.stderr).toContain('duplicate --repository');
+    expect(malformed[2]?.status).toBe(1);
+    expect(malformed[2]?.stderr).toContain('unknown --unexpected');
   });
 
   it('enforces exact bytes and both calculated and registry SRI in exact-bytes mode', () => {
