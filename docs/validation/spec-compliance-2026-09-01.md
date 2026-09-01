@@ -410,7 +410,7 @@
 - npm Trusted Publisher 的准确绑定已改为：`Tom409114/scriptspect`、workflow `npm-publish.yml`、environment `release`、allowed action `npm publish`。旧的 `release.yml` 绑定建议已经过时，因为 steady-state OIDC 必须绑定实际执行 publish 的 exact-tag workflow。
 - 在 npm provenance、Release assets/checksum、immutable `v0.1.0` 和 tagged Action consumer 全部通过前，不更新 `v0.1`/`v0`，也不创建 `v1`。
 - comparison harness 已固定 `scripts-doctor@1.0.0` 并捕获同 fixture outputs，但人工 adjudication 尚未完成，不能宣称胜出。
-- corpus workflow 可选择恰好 100 个 immutable commits 并生成 100-finding draft；draft 不等于人工 precision 证明，也不等于真实 adoption。
+- corpus workflow 默认选择 100 个 immutable commits，也可由人工请求 1–1,000 个；它生成的 100-finding draft 不等于人工 precision 证明，也不等于真实 adoption。
 - 外部 issue/反馈、首次用户 onboarding、downstream、downloads、stars 和 30/60/90/180 天 KPI 均保持真实、可核验但未完成。
 
 ### 后续审计结论
@@ -446,3 +446,40 @@
 ### 远程落地结论
 
 截至本次核验，hardening、修复 PR、准确 `main` hosted CI、主分支保护、immutable version tag update/delete 保护、environments/variables、Action SHA pinning 与 Dependabot 修复均已有远程落地证据；PR #66 也有准确 head 上 16/16 全绿且 CLEAN 的候选证据。但 npm 仍为 E404、tag/release 均为 0，bootstrap/Trusted Publisher、floating alias coordinator bypass 与 M8 外部/时间证据仍未关闭。因此当前判定仍是 **NOT RELEASE READY**，不得表述为“v0.1 已发布”“全部 DoD PASS”或“M0–M8 已完成”。
+
+## 最终首页与安全审计补充（2026-09-01，追加）
+
+本节继续采用 append-only 方式，不回写前述修复前基线或早期远程快照。它记录在首页/发布证据升级与 CodeQL 跟进合并后的最新实现证据，并明确 release-please PR 后续前进造成的状态变化。
+
+### 新增闭合项
+
+| 项目 | 状态 | 权威证据 |
+|---|---|---|
+| 双语 GitHub 首页 | `CLOSED` | [PR #78](https://github.com/Tom409114/scriptspect/pull/78) 合并响应式品牌 hero、中英切换、真实 before/result/patch/after、托管 Action annotations/summary 证据，以及 honest pre-release/released 状态渲染。README 不展示不存在的 npm quick start 或 Action tag。 |
+| npm 包内 README 与 schema | `SOURCE CLOSED / PUBLICATION OPEN` | PR #78 通过隔离 staging 生成英文与中文 package README，并在候选 tarball 中验证 package/version/repository、两份 schema、Action bundle 与 published-state 文案；真实 registry/unpkg 消费仍需首次发布后验证。 |
+| 发布证据与凭据隔离 | `SOURCE CLOSED / ADMIN OPEN` | PR #78 加入 fail-closed release receipt/remote verifier，并把 bootstrap 拆为无 secret prepare、fresh publisher 与 public verify 三个隔离 jobs；唯一 token step 不 checkout 或执行候选源码。npm ownership、OIDC 与真实 provenance 仍未发生。 |
+| CodeQL 与漏洞入口 | `CLOSED` | [PR #79](https://github.com/Tom409114/scriptspect/pull/79) 修复 scoped package purl 的不完整编码；准确 `main` run [`33476006926`](https://github.com/Tom409114/scriptspect/actions/runs/33476006926) 的 CodeQL job success，`refs/heads/main` 当前无 open code-scanning alerts，Private vulnerability reporting 已启用。 |
+| 最新实现快照 | `CLOSED` | PR #78 合并为 `e98b418db1d7d7dfd897a489e1fe7f295b46f206`，PR #79 合并为 `50d02d44abdbfb3489516f39f4251481dfec1548`；远端与本地 `main` 在核验时一致，准确 SHA 的 push CI completed/success。 |
+
+### 当前 release PR 与外部边界
+
+- [PR #66](https://github.com/Tom409114/scriptspect/pull/66) 仍为 OPEN/BLOCKED；核验时 base 为 `50d02d44abdbfb3489516f39f4251481dfec1548`，head 为 `390d7ccd61c79bedee182557bf4b6dc2bfbc7376`。其最新 run [`33476042317`](https://github.com/Tom409114/scriptspect/actions/runs/33476042317) 为 `action_required` 且没有 jobs，符合 `RELEASE_PR_CI_MODE=manual-approval` 的人工门控；旧 head 的绿色运行不能冒充当前候选证据。
+- 仓库变量保持安全关闭：`NPM_BOOTSTRAP_ENABLED=false`、`NPM_TRUSTED_PUBLISHING_READY=false`、`RELEASE_TAG_POLICY_READY=false`、`RELEASE_PR_CI_MODE=manual-approval`、`RELEASE_PR_ACTORS=github-actions[bot]`。
+- npm registry 仍为 404，仓库仍为 0 tags / 0 releases。没有真实 `v0.1.0`、`v0.1`/`v0` alias、npm provenance、checksum assets 或 fresh released Action consumer。
+- semantic-version tag ruleset 仍只禁止已存在的 `v*.*.*` update/deletion；tag creation actor 与 floating `v0`/`v0.*` 单调更新 policy 仍为管理员门。
+- M8 的 ≥100 人工裁决、shared-corpus comparison、独立试用/反馈、首次 onboarding、真实 downstream 与时间型 KPI 仍为 `EXTERNAL + TIME OPEN`，不能由代码、README 或绿色 CI 代替。
+
+### 当前判定
+
+在 PR #78/#79 快照形成时，已知的仓库内高/中优先级项均已闭合；随后更深一轮终审又发现 workspace glob 在 containment 前枚举，以及 corpus resolver 被硬限制为 100 的两个缺口。下节记录其候选修复，避免把旧快照误写成对后续发现的预证明。总体仍是 **NOT RELEASE READY**，因为当前 release PR 尚未通过人工 workflow approval/准确 head CI，且 npm/tag/release 与 M8 真实外部证据尚未产生。
+
+## 最后终审候选补充（2026-09-01，待 hosted 合并证据）
+
+| 项目 | 候选状态 | 当前证据与边界 |
+|---|---|---|
+| workspace glob 枚举边界 | `LOCAL PASS / HOSTED PENDING` | npm/pnpm glob 在调用 `fast-glob` 前 fail closed；拒绝 parent traversal、POSIX absolute、Windows drive/UNC、negation 与 brace/extglob 隐藏分支，同时保留合法 nested/brace/negation。Action 的向上 root discovery 也被限制在 `GITHUB_WORKSPACE`，CLI 语义不变。 |
+| 500–1,000 public-repository 能力 | `LOCAL PASS / HOSTED PENDING` | corpus collector/resolver/scanner 支持 1–1,000，默认仍为 100；新 v2 snapshot 保存逐页哈希、请求与 rate-limit evidence，并兼容 v1 replay。真实只读 API probe 证明 page 10 可读、page 11 按 GitHub ceiling 返回 422；这不冒充一次已经完成的 1,000-repository hosted scan。 |
+| 月度 evidence draft | `SOURCE PASS / REVIEWED RUN OPEN` | 新 workflow 仅以 read 权限访问 GitHub/npm 公共 API并上传 artifact，不 commit；404、分页、transport/JSON failure 都保留为 `missing/partial + null`。本地真实 smoke 对当前 npm 404 得到 missing/null；真实 hosted artifact 与人工 reviewer approval 尚未发生。 |
+| 组合回归 | `LOCAL PASS / HOSTED PENDING` | 稳定共享树上 69 个 test files：`1,074 passed / 8 skipped`；90% parser/rule coverage floor、typecheck、改动文件 Biome、Actionlint、README parity、生成物与 diff check 均通过。PR 与准确 merge-SHA 的 GitHub-hosted checks 仍需随后产生。 |
+
+该候选关闭了本轮新发现的仓库可修高/中项，但在其 PR 和准确 `main` SHA 的 hosted checks 成功前，不得把 `LOCAL PASS` 提升为 `HOSTED PASS`。M8 的 ≥100 人工裁决、shared-corpus adjudication、真实外部兴趣/onboarding/downstream 与时间型 KPI 继续保持 `EXTERNAL + TIME OPEN`。

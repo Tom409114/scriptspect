@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const injected = vi.hoisted(() => ({
   lstatErrorCode: undefined as string | undefined,
   lstatFailureSuffix: '/pnpm-workspace.yaml',
+  lstatPaths: [] as string[],
   realpathFailureSuffix: undefined as string | undefined,
 }));
 
@@ -31,6 +32,7 @@ vi.mock('node:fs', async (importOriginal) => {
       path: Parameters<typeof actual.lstatSync>[0],
       options?: Parameters<typeof actual.lstatSync>[1],
     ) {
+      injected.lstatPaths.push(normalized(path));
       if (
         injected.lstatErrorCode !== undefined &&
         normalized(path).endsWith(injected.lstatFailureSuffix)
@@ -58,6 +60,7 @@ import type { CliIo } from '../../src/cli/index';
 import { runCli } from '../../src/cli/index';
 import { AnalyzeError } from '../../src/core/analyze';
 import { discoverPackages } from '../../src/workspaces/discover';
+import { workspaceGlobEngine } from '../../src/workspaces/glob';
 
 let root: string;
 let output: string[];
@@ -73,6 +76,7 @@ beforeEach(() => {
   writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages: []\n');
   injected.lstatErrorCode = undefined;
   injected.lstatFailureSuffix = '/pnpm-workspace.yaml';
+  injected.lstatPaths.length = 0;
   injected.realpathFailureSuffix = undefined;
   output = [];
   errors = [];
@@ -81,6 +85,7 @@ beforeEach(() => {
 afterEach(() => {
   injected.lstatErrorCode = undefined;
   injected.lstatFailureSuffix = '/pnpm-workspace.yaml';
+  injected.lstatPaths.length = 0;
   injected.realpathFailureSuffix = undefined;
   rmSync(root, { recursive: true, force: true });
 });
@@ -137,5 +142,60 @@ describe('workspace manifest filesystem failures', () => {
 
     expect(() => discoverPackages(root)).toThrow(AnalyzeError);
     expect(() => discoverPackages(root)).toThrow(/packages[/\\]app.*EACCES/i);
+  });
+
+  it('rejects an escaping static glob base before probing an outside package manifest', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'ss-workspace-outside-'));
+    mkdirSync(join(root, 'packages'), { recursive: true });
+    mkdirSync(join(outside, 'secret'), { recursive: true });
+    writeFileSync(join(root, 'package.json'), packageJson({ workspaces: ['packages/link/*'] }));
+    writeFileSync(join(outside, 'secret', 'package.json'), packageJson());
+    symlinkSync(
+      outside,
+      join(root, 'packages', 'link'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    try {
+      let caught: unknown;
+      try {
+        discoverPackages(root);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(injected.lstatPaths).not.toContain(
+        join(root, 'packages', 'link', 'secret', 'package.json').replace(/\\/g, '/'),
+      );
+      expect(caught).toBeInstanceOf(AnalyzeError);
+      expect(String(caught)).toMatch(/outside the project root|escapes/i);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('canonicalizes a dynamic glob match before probing its package manifest', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'ss-workspace-dynamic-outside-'));
+    mkdirSync(join(root, 'packages'), { recursive: true });
+    writeFileSync(join(root, 'package.json'), packageJson({ workspaces: ['packages/*'] }));
+    writeFileSync(join(outside, 'package.json'), packageJson());
+    symlinkSync(
+      outside,
+      join(root, 'packages', 'link'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const globSync = vi.spyOn(workspaceGlobEngine, 'sync').mockReturnValue(['packages/link']);
+
+    try {
+      const result = discoverPackages(root);
+      expect(injected.lstatPaths).not.toContain(
+        join(root, 'packages', 'link', 'package.json').replace(/\\/g, '/'),
+      );
+      expect(result.packages.map((unit) => unit.relPath)).toEqual(['package.json']);
+      expect(result.notes.join('\n')).toMatch(/packages[/\\]link.*escapes/i);
+    } finally {
+      globSync.mockRestore();
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

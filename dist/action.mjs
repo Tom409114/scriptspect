@@ -3467,21 +3467,21 @@ var require_pattern = __commonJS({
     exports.removeDuplicateSlashes = removeDuplicateSlashes;
     function partitionAbsoluteAndRelative(patterns) {
       const absolute = [];
-      const relative4 = [];
+      const relative6 = [];
       for (const pattern of patterns) {
-        if (isAbsolute3(pattern)) {
+        if (isAbsolute5(pattern)) {
           absolute.push(pattern);
         } else {
-          relative4.push(pattern);
+          relative6.push(pattern);
         }
       }
-      return [absolute, relative4];
+      return [absolute, relative6];
     }
     exports.partitionAbsoluteAndRelative = partitionAbsoluteAndRelative;
-    function isAbsolute3(pattern) {
+    function isAbsolute5(pattern) {
       return path.isAbsolute(pattern);
     }
-    exports.isAbsolute = isAbsolute3;
+    exports.isAbsolute = isAbsolute5;
   }
 });
 
@@ -4568,41 +4568,41 @@ var require_queue = __commonJS({
       queue.drained = drained;
       return queue;
       function push(value) {
-        var p = new Promise(function(resolve5, reject) {
+        var p = new Promise(function(resolve6, reject) {
           pushCb(value, function(err, result) {
             if (err) {
               reject(err);
               return;
             }
-            resolve5(result);
+            resolve6(result);
           });
         });
         p.catch(noop);
         return p;
       }
       function unshift(value) {
-        var p = new Promise(function(resolve5, reject) {
+        var p = new Promise(function(resolve6, reject) {
           unshiftCb(value, function(err, result) {
             if (err) {
               reject(err);
               return;
             }
-            resolve5(result);
+            resolve6(result);
           });
         });
         p.catch(noop);
         return p;
       }
       function drained() {
-        var p = new Promise(function(resolve5) {
+        var p = new Promise(function(resolve6) {
           process.nextTick(function() {
             if (queue.idle()) {
-              resolve5();
+              resolve6();
             } else {
               var previousDrain = queue.drain;
               queue.drain = function() {
                 if (typeof previousDrain === "function") previousDrain();
-                resolve5();
+                resolve6();
                 queue.drain = previousDrain;
               };
             }
@@ -5088,9 +5088,9 @@ var require_stream3 = __commonJS({
         });
       }
       _getStat(filepath) {
-        return new Promise((resolve5, reject) => {
+        return new Promise((resolve6, reject) => {
           this._stat(filepath, this._fsStatSettings, (error, stats) => {
-            return error === null ? resolve5(stats) : reject(error);
+            return error === null ? resolve6(stats) : reject(error);
           });
         });
       }
@@ -5114,10 +5114,10 @@ var require_async5 = __commonJS({
         this._readerStream = new stream_1.default(this._settings);
       }
       dynamic(root, options) {
-        return new Promise((resolve5, reject) => {
+        return new Promise((resolve6, reject) => {
           this._walkAsync(root, options, (error, entries) => {
             if (error === null) {
-              resolve5(entries);
+              resolve6(entries);
             } else {
               reject(error);
             }
@@ -5127,10 +5127,10 @@ var require_async5 = __commonJS({
       async static(patterns, options) {
         const entries = [];
         const stream = this._readerStream.static(patterns, options);
-        return new Promise((resolve5, reject) => {
+        return new Promise((resolve6, reject) => {
           stream.once("error", reject);
           stream.on("data", (entry) => entries.push(entry));
-          stream.once("end", () => resolve5(entries));
+          stream.once("end", () => resolve6(entries));
         });
       }
     };
@@ -9748,10 +9748,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep4, value } = collItem;
+        const { start, key, sep: sep5, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -9765,7 +9765,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep4) {
+          if (!keyProps.anchor && !keyProps.tag && !sep5) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -9789,7 +9789,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep5 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -9805,7 +9805,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep4, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep5, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -9896,7 +9896,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep4 = "";
+        let sep5 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -9910,13 +9910,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep4 + cb;
-              sep4 = "";
+                comment += sep5 + cb;
+              sep5 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep4 += source;
+                sep5 += source;
               hasSpace = true;
               break;
             default:
@@ -9959,18 +9959,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep4, value } = collItem;
+        const { start, key, sep: sep5, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep4?.[0],
+          next: key ?? sep5?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep4 && !value) {
+          if (!props.anchor && !props.tag && !sep5 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -10024,8 +10024,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep4 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep4, null, props, onError);
+        if (!isMap && !sep5 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep5, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -10037,7 +10037,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep4 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep5 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -10048,8 +10048,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep4)
-                for (const st of sep4) {
+              if (sep5)
+                for (const st of sep5) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -10066,7 +10066,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep4, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep5, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -10246,7 +10246,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep4 = "";
+      let sep5 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -10263,24 +10263,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep4 + indent.slice(trimIndent) + content;
-          sep4 = "\n";
+          value += sep5 + indent.slice(trimIndent) + content;
+          sep5 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep4 === " ")
-            sep4 = "\n";
-          else if (!prevMoreIndented && sep4 === "\n")
-            sep4 = "\n\n";
-          value += sep4 + indent.slice(trimIndent) + content;
-          sep4 = "\n";
+          if (sep5 === " ")
+            sep5 = "\n";
+          else if (!prevMoreIndented && sep5 === "\n")
+            sep5 = "\n\n";
+          value += sep5 + indent.slice(trimIndent) + content;
+          sep5 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep4 === "\n")
+          if (sep5 === "\n")
             value += "\n";
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          value += sep4 + content;
-          sep4 = " ";
+          value += sep5 + content;
+          sep5 = " ";
           prevMoreIndented = false;
         }
       }
@@ -10462,25 +10462,25 @@ var require_resolve_flow_scalar = __commonJS({
       if (!match)
         return source;
       let res = match[1];
-      let sep4 = " ";
+      let sep5 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
       while (match = line.exec(source)) {
         if (match[1] === "") {
-          if (sep4 === "\n")
-            res += sep4;
+          if (sep5 === "\n")
+            res += sep5;
           else
-            sep4 = "\n";
+            sep5 = "\n";
         } else {
-          res += sep4 + match[1];
-          sep4 = " ";
+          res += sep5 + match[1];
+          sep5 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep4 + (match?.[1] ?? "");
+      return res + sep5 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -11290,14 +11290,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep4, value }) {
+    function stringifyItem({ start, key, sep: sep5, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep4)
-        for (const st of sep4)
+      if (sep5)
+        for (const st of sep5)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -12464,18 +12464,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep4;
+          let sep5;
           if (scalar.end) {
-            sep4 = scalar.end;
-            sep4.push(this.sourceToken);
+            sep5 = scalar.end;
+            sep5.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep4 = [this.sourceToken];
+            sep5 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep4 }]
+            items: [{ start, key: scalar, sep: sep5 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -12628,15 +12628,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep4 = it.sep;
-                  sep4.push(this.sourceToken);
+                  const sep5 = it.sep;
+                  sep5.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep4 }]
+                    items: [{ start: start2, key, sep: sep5 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -12830,13 +12830,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep4 = fc.end.splice(1, fc.end.length);
-            sep4.push(this.sourceToken);
+            const sep5 = fc.end.splice(1, fc.end.length);
+            sep5.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep4 }]
+              items: [{ start, key: fc, sep: sep5 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -13115,8 +13115,8 @@ var require_dist = __commonJS({
 });
 
 // src/action.ts
-import { realpathSync as realpathSync3 } from "fs";
-import { resolve as resolve4 } from "path";
+import { realpathSync as realpathSync4 } from "fs";
+import { resolve as resolve5 } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
 // src/action-inputs.ts
@@ -16311,13 +16311,12 @@ function isIgnored(config, packagePath, scriptName, ruleId) {
 
 // src/core/analyze.ts
 import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
-import { dirname, join as join3, sep as sep3 } from "path";
+import { dirname, isAbsolute as isAbsolute4, join as join4, relative as relative5, resolve as resolve4, sep as sep4 } from "path";
 import { TextDecoder as TextDecoder2 } from "util";
 
 // src/workspaces/discover.ts
-var import_fast_glob = __toESM(require_out4(), 1);
-import { lstatSync } from "fs";
-import { join as join2, relative as relative3, resolve as resolve3 } from "path";
+import { lstatSync as lstatSync2 } from "fs";
+import { join as join3, relative as relative4, resolve as resolve3 } from "path";
 
 // src/core/errors.ts
 var AnalyzeError = class extends Error {
@@ -16327,16 +16326,117 @@ var AnalyzeError = class extends Error {
   }
 };
 
+// src/workspaces/glob.ts
+var import_fast_glob = __toESM(require_out4(), 1);
+import { lstatSync, realpathSync as realpathSync3 } from "fs";
+import { isAbsolute as isAbsolute3, join as join2, relative as relative3, sep as sep3 } from "path";
+var workspaceGlobEngine = import_fast_glob.default;
+var ABSOLUTE_BRANCH = /(^|[(,|])(?:\/|[A-Za-z]:)/u;
+var PARENT_SEGMENT = /(^|[/,(|])\.\.(?=$|[/,)|])/u;
+function positivePattern(pattern) {
+  let positive = pattern;
+  while (positive.startsWith("!") && positive[1] !== "(") positive = positive.slice(1);
+  return positive;
+}
+function isUnsafeBranch(branch) {
+  const normalized = branch.replace(/\\/g, "/");
+  return ABSOLUTE_BRANCH.test(normalized) || PARENT_SEGMENT.test(normalized);
+}
+function isUnsafePattern(pattern) {
+  const normalized = positivePattern(pattern.replace(/\\/g, "/"));
+  if (normalized === "") return true;
+  try {
+    const tasks = import_fast_glob.default.generateTasks([normalized]);
+    if (tasks.length === 0) return true;
+    return [
+      normalized,
+      ...tasks.flatMap((task) => [task.base, ...task.patterns, ...task.positive, ...task.negative])
+    ].some(isUnsafeBranch);
+  } catch {
+    return true;
+  }
+}
+function assertSafeWorkspaceGlob(pattern, origin) {
+  if (isUnsafePattern(pattern)) {
+    throw new AnalyzeError(
+      `${origin}: unsafe workspace glob ${JSON.stringify(pattern)} must stay inside the project root`
+    );
+  }
+  return pattern;
+}
+function assertSafeWorkspaceGlobs(patterns, origin) {
+  return patterns.map((pattern) => assertSafeWorkspaceGlob(pattern, origin));
+}
+function assertWorkspaceGlobBasesContained(root, patterns) {
+  for (const pattern of patterns) {
+    let tasks;
+    try {
+      tasks = import_fast_glob.default.generateTasks([positivePattern(pattern)]);
+    } catch (error) {
+      throw new AnalyzeError(
+        `unsafe workspace glob ${JSON.stringify(pattern)}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    const bases = new Set(tasks.flatMap((task) => task.dynamic ? [task.base] : task.positive));
+    for (const base of bases) assertStaticBaseContained(root, base, pattern);
+  }
+}
+function assertStaticBaseContained(root, base, pattern) {
+  const segments = base.replace(/\\/g, "/").split("/").filter(Boolean);
+  let current = root;
+  for (const segment of segments) {
+    if (segment === ".") continue;
+    if (segment === "..") throw escapingBaseError(pattern);
+    const candidate = join2(current, segment);
+    try {
+      lstatSync(candidate);
+    } catch (error) {
+      if (isErrno(error, "ENOENT") || isErrno(error, "ENOTDIR")) return;
+      throw baseFilesystemError(pattern, candidate, error);
+    }
+    let canonical;
+    try {
+      canonical = realpathSync3(candidate);
+    } catch (error) {
+      throw baseFilesystemError(pattern, candidate, error);
+    }
+    const rel = relative3(root, canonical);
+    if (rel === ".." || rel.startsWith(`..${sep3}`) || isAbsolute3(rel)) {
+      throw escapingBaseError(pattern);
+    }
+    current = canonical;
+  }
+}
+function escapingBaseError(pattern) {
+  return new AnalyzeError(
+    `workspace glob ${JSON.stringify(pattern)} has a static base outside the project root`
+  );
+}
+function baseFilesystemError(pattern, candidate, error) {
+  return new AnalyzeError(
+    `workspace glob ${JSON.stringify(pattern)} cannot inspect static base ${candidate}: ${error instanceof Error ? error.message : String(error)}`
+  );
+}
+function isErrno(error, code) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
 // src/workspaces/npm.ts
 function npmWorkspaceGlobs(workspaces) {
   if (workspaces === void 0 || workspaces === null) return [];
   if (Array.isArray(workspaces)) {
-    return workspaces.filter((w) => typeof w === "string" && w.trim() !== "");
+    return assertSafeWorkspaceGlobs(
+      workspaces.filter((w) => typeof w === "string" && w.trim() !== ""),
+      "package.json workspaces"
+    );
   }
   if (typeof workspaces === "object") {
     const packages = workspaces.packages;
     if (Array.isArray(packages)) {
-      return packages.filter((w) => typeof w === "string" && w.trim() !== "");
+      return assertSafeWorkspaceGlobs(
+        packages.filter((w) => typeof w === "string" && w.trim() !== ""),
+        "package.json workspaces.packages"
+      );
     }
   }
   return [];
@@ -16351,7 +16451,7 @@ function pnpmWorkspaceGlobs(file) {
   try {
     bytes = readFileSync2(file);
   } catch (error) {
-    if (isErrno(error, "ENOENT")) return [];
+    if (isErrno2(error, "ENOENT")) return [];
     throw new AnalyzeError(`${file}: cannot be read (${errorMessage(error)})`);
   }
   let text;
@@ -16377,9 +16477,9 @@ function pnpmWorkspaceGlobs(file) {
   if (!Array.isArray(packages) || packages.some((workspace) => typeof workspace !== "string" || workspace.trim() === "")) {
     throw new AnalyzeError(`${file}: "packages" must be an array of non-empty strings`);
   }
-  return packages;
+  return assertSafeWorkspaceGlobs(packages, file);
 }
-function isErrno(error, code) {
+function isErrno2(error, code) {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 function errorMessage(error) {
@@ -16402,11 +16502,11 @@ var EXCLUDED_DIRS = [
 function discoverPackages(root) {
   const notes = [];
   const rootReal = canonicalRoot(root);
-  const rootManifest = containedPath(rootReal, join2(rootReal, "package.json"), "root manifest");
+  const rootManifest = containedPath(rootReal, join3(rootReal, "package.json"), "root manifest");
   const rootUnit = packageUnit(rootReal, rootReal, "package.json", rootManifest);
   const globs = /* @__PURE__ */ new Set();
   for (const g of npmWorkspaceGlobs(rootUnit.manifest.workspaces)) globs.add(g);
-  const logicalPnpmWorkspace = join2(rootReal, "pnpm-workspace.yaml");
+  const logicalPnpmWorkspace = join3(rootReal, "pnpm-workspace.yaml");
   if (manifestExists(logicalPnpmWorkspace)) {
     const pnpmWorkspace = containedPath(rootReal, logicalPnpmWorkspace, "pnpm workspace manifest");
     for (const g of pnpmWorkspaceGlobs(pnpmWorkspace)) globs.add(g);
@@ -16414,7 +16514,9 @@ function discoverPackages(root) {
   const units = [rootUnit];
   const seen = /* @__PURE__ */ new Set([rootManifest]);
   if (globs.size > 0) {
-    const dirs = import_fast_glob.default.sync([...globs], {
+    const patterns = [...globs];
+    assertWorkspaceGlobBasesContained(rootReal, patterns);
+    const dirs = workspaceGlobEngine.sync(patterns, {
       cwd: rootReal,
       onlyDirectories: true,
       ignore: EXCLUDED_DIRS,
@@ -16424,7 +16526,6 @@ function discoverPackages(root) {
     });
     for (const dir of dirs.sort()) {
       const abs = resolve3(rootReal, dir);
-      if (!manifestExists(join2(abs, "package.json"))) continue;
       let real;
       try {
         real = resolveContainedPath(rootReal, abs);
@@ -16433,14 +16534,15 @@ function discoverPackages(root) {
         if (error.kind === "filesystem") {
           throw new AnalyzeError(`${abs}: ${error.message}`);
         }
-        notes.push(`skipped ${toPosix(relative3(rootReal, abs))}: path escapes the project root`);
+        notes.push(`skipped ${toPosix(relative4(rootReal, abs))}: path escapes the project root`);
         continue;
       }
-      const manifestFile = join2(real, "package.json");
+      const manifestFile = join3(real, "package.json");
+      if (!manifestExists(manifestFile)) continue;
       const realFile = containedPath(rootReal, manifestFile, "workspace manifest");
       if (seen.has(realFile)) continue;
       seen.add(realFile);
-      const relPath = toPosix(join2(relative3(rootReal, real), "package.json"));
+      const relPath = toPosix(join3(relative4(rootReal, real), "package.json"));
       units.push(packageUnit(real, rootReal, relPath, realFile));
     }
   }
@@ -16472,16 +16574,16 @@ function containedPath(root, candidate, label) {
 }
 function manifestExists(file) {
   try {
-    lstatSync(file);
+    lstatSync2(file);
     return true;
   } catch (error) {
-    if (isErrno2(error, "ENOENT")) return false;
+    if (isErrno3(error, "ENOENT")) return false;
     throw new AnalyzeError(
       `${file}: cannot inspect manifest (${error instanceof Error ? error.message : String(error)})`
     );
   }
 }
-function isErrno2(error, code) {
+function isErrno3(error, code) {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 function manifestBinNames(manifest) {
@@ -16638,7 +16740,7 @@ function dependencyNames(manifest) {
   return names;
 }
 function toPosix(p) {
-  return sep3 === "\\" ? p.replace(/\\/g, "/") : p;
+  return sep4 === "\\" ? p.replace(/\\/g, "/") : p;
 }
 function readManifest(file) {
   let bytes;
@@ -16684,10 +16786,20 @@ function readManifest(file) {
   }
   return manifest;
 }
-function resolveRoot(startDir) {
-  let dir = startDir;
+function resolveRoot(startDir, stopDir) {
+  let dir = resolve4(startDir);
+  const boundary = stopDir === void 0 ? void 0 : resolve4(stopDir);
+  if (boundary !== void 0) {
+    const rel = relative5(boundary, dir);
+    if (rel === ".." || rel.startsWith(`..${sep4}`) || isAbsolute4(rel)) {
+      throw new AnalyzeError(`root search start is outside the boundary ${boundary}`);
+    }
+  }
   for (; ; ) {
-    if (existsSync2(join3(dir, "package.json"))) return dir;
+    if (existsSync2(join4(dir, "package.json"))) return dir;
+    if (dir === boundary) {
+      throw new AnalyzeError(`no package.json found in ${startDir} within ${boundary}`);
+    }
     const parent = dirname(dir);
     if (parent === dir) {
       throw new AnalyzeError(`no package.json found in ${startDir} or any parent directory`);
@@ -16790,9 +16902,9 @@ function renderSummary(result) {
 function isMainModule(importMetaUrl, entry = process.argv[1]) {
   if (entry === void 0) return false;
   try {
-    return realpathSync3(resolve4(entry)) === realpathSync3(fileURLToPath(importMetaUrl));
+    return realpathSync4(resolve5(entry)) === realpathSync4(fileURLToPath(importMetaUrl));
   } catch {
-    return pathToFileURL(resolve4(entry)).href === importMetaUrl;
+    return pathToFileURL(resolve5(entry)).href === importMetaUrl;
   }
 }
 var HIDDEN_WARNING_SUMMARY_NOTE = "> Hidden warnings still count toward the failure budget.";
@@ -16830,7 +16942,7 @@ function runAction(env = process.env, providedIo) {
   let summaryNote = "";
   try {
     const inputs = parseActionInputs(env);
-    const root = resolveRoot(inputs.path);
+    const root = resolveRoot(inputs.path, inputs.workspace);
     if (!isWithinWorkspace(inputs.workspace, root))
       throw new ActionInputError("path must be within workspace");
     const { config } = loadConfig(root);

@@ -18,6 +18,7 @@ import type { Finding } from '../src/rules/types';
 import {
   CORPUS_SAMPLE_METHOD,
   type CorpusCandidateSnapshot,
+  MAX_CORPUS_REPOSITORIES,
   type OrderedCandidate,
   parseCorpusCandidateSnapshot,
 } from './corpus-candidates';
@@ -556,7 +557,11 @@ function validateSampleEvidence(
     'candidatesConsidered',
     1,
   );
-  if (requested > 100 || actual !== requested || candidatesConsidered < actual) {
+  if (
+    requested > MAX_CORPUS_REPOSITORIES ||
+    actual !== requested ||
+    candidatesConsidered < actual
+  ) {
     throw new Error('corpus sample evidence requested/actual contract was invalid');
   }
 

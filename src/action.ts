@@ -72,7 +72,7 @@ export function runAction(
 
   try {
     const inputs = parseActionInputs(env);
-    const root = resolveRoot(inputs.path);
+    const root = resolveRoot(inputs.path, inputs.workspace);
     if (!isWithinWorkspace(inputs.workspace, root))
       throw new ActionInputError('path must be within workspace');
 

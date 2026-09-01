@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { TextDecoder } from 'node:util';
 import { parse } from 'yaml';
 import { AnalyzeError } from '../core/errors';
+import { assertSafeWorkspaceGlobs } from './glob';
 
 export function pnpmWorkspaceGlobs(file: string): string[] {
   let bytes: Buffer;
@@ -44,7 +45,7 @@ export function pnpmWorkspaceGlobs(file: string): string[] {
   ) {
     throw new AnalyzeError(`${file}: "packages" must be an array of non-empty strings`);
   }
-  return packages as string[];
+  return assertSafeWorkspaceGlobs(packages as string[], file);
 }
 
 function isErrno(error: unknown, code: string): boolean {

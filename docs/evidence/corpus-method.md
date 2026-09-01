@@ -5,18 +5,33 @@ public code. A machine scan produces a **data draft**, not a precision claim.
 
 ## Immutable scan
 
-1. The manual/monthly corpus workflow captures the complete first page of two
-   popularity-ranked GitHub Search strata (JavaScript and TypeScript), including
-   each query, response hash, rank, star count, and repository. It then uses a
-   deterministic rank-by-rank round robin and de-duplicates a repository at its
-   first appearance. The full ordered snapshot is preserved rather than sorting
-   away its rank or stratum.
-2. The resolver batches candidates through GitHub GraphQL. One response anchors
+1. The manual/monthly corpus workflow accepts an integer target from 1 through
+   1,000; scheduled and ordinary manual runs default to 100 to control API and
+   runner cost. For each of two popularity-ranked GitHub Search strata
+   (JavaScript and TypeScript), the collector requests 100 results per page up
+   to the target, never beyond GitHub Search's 1,000-result ceiling. A 1,000
+   target therefore captures as many as 2,000 ranked candidates across 20
+   read-only Search requests, leaving replacement capacity for rootless or
+   duplicated repositories. Each page number, item count, response SHA-256,
+   aggregate response digest, query, rank, star count, and latest Search
+   rate-limit state is preserved. `incomplete_results`, a changing
+   `total_count`, a short page, invalid rate-limit headers, duplicate candidates,
+   or non-monotonic star ordering fails closed. Pagination stops at page 10 even
+   if a Link header advertises an inaccessible page beyond the Search ceiling.
+   The collector then uses a deterministic rank-by-rank round robin and
+   de-duplicates a repository at its first appearance. The full ordered
+   snapshot is preserved rather than sorting away its rank or stratum. Existing
+   schema-version-1, single-page snapshots remain valid replay inputs; new
+   collectors write schema version 2 with the pagination evidence above.
+2. The resolver accepts the same 1-through-1,000 target and batches candidates
+   through GitHub GraphQL. One response anchors
    the default-branch commit and root `package.json` blob together. Only an exact
    `NOT_FOUND` error at that candidate's root-file field is an eligibility
    exclusion; every other partial error or response mismatch fails closed. The
    resolver records only `owner/repository@40-character-commit` locators and
-   hashes the complete ordered candidate snapshot into its evidence.
+   hashes the complete ordered candidate snapshot into its evidence. It must
+   resolve the exact requested count or fail; it never silently shrinks a
+   500- or 1,000-repository run.
 3. `tools/corpus-scan.ts` makes one bounded recursive-tree REST request per
    selected repository. It reads each selected manifest from
    `raw.githubusercontent.com` at the exact commit without an Authorization
@@ -48,7 +63,8 @@ root-only PS040 results from being presented as monorepo truth.
 The workflow artifact contains:
 
 - `repository-candidates.json`: the complete ordered popularity-strata snapshot,
-  including query metadata, ranks, repositories, response hashes, and status;
+  including query metadata, ranks, repositories, per-page and aggregate
+  response hashes, Search request/rate-limit evidence, and status;
 - `repository-sample.json`: candidate-snapshot SHA-256, deterministic method,
   GraphQL request/cost evidence, rootless replacements, and selected immutable
   commits/root-manifest blobs;

@@ -302,7 +302,7 @@ describe('reproducible CI', () => {
     );
   });
 
-  it('bounds every hosted job and delegates the 100-repository cap to the typed resolver', () => {
+  it('bounds every hosted job while allowing manually requested 1-1000 repository corpora', () => {
     for (const name of workflowNames()) {
       for (const [jobName, job] of Object.entries(workflow(name).jobs ?? {})) {
         expect(job['timeout-minutes'], `${name}:${jobName}`).toBeGreaterThan(0);
@@ -310,6 +310,8 @@ describe('reproducible CI', () => {
     }
     const corpus = workflowSource('corpus.yml');
     expect(corpus).toContain("default: '100'");
+    expect(corpus).toContain('type: number');
+    expect(corpus).toContain('tools/corpus-candidates.ts repository-candidates.json "$REPO_COUNT"');
     expect(corpus).toContain('tools/corpus-resolve.ts');
     expect(corpus).not.toContain('{0,2}');
   });
@@ -350,6 +352,28 @@ describe('reproducible CI', () => {
 });
 
 describe('corpus repository selection', () => {
+  it('preserves a manual zero for fail-closed validation while scheduled runs default to 100', () => {
+    const repoCountExpression = `\${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.repo-count) || '100' }}`;
+    const steps = allSteps(workflow('corpus.yml'));
+    const countConsumers = steps.filter((step) => step.env?.REPO_COUNT !== undefined);
+
+    expect(countConsumers.map((step) => step.name)).toEqual([
+      'Collect the ranked repository candidate snapshot',
+      'Resolve the exact root-eligible repository sample',
+    ]);
+    for (const step of countConsumers) {
+      expect(step.env?.REPO_COUNT).toBe(repoCountExpression);
+    }
+  });
+
+  it('keeps the read-only corpus checkout free of persisted Git credentials', () => {
+    const checkout = allSteps(workflow('corpus.yml')).find((step) =>
+      step.uses?.startsWith('actions/checkout@'),
+    );
+
+    expect(checkout?.with).toMatchObject({ 'persist-credentials': false });
+  });
+
   it('captures the complete ranked candidate universe before resolving the sample', () => {
     const steps = allSteps(workflow('corpus.yml'));
     const collector = steps.find(
@@ -360,9 +384,12 @@ describe('corpus repository selection', () => {
     );
 
     expect(collector?.run).toBe(
-      'pnpm exec tsx tools/corpus-candidates.ts repository-candidates.json',
+      'pnpm exec tsx tools/corpus-candidates.ts repository-candidates.json "$REPO_COUNT"',
     );
-    expect(collector?.env).toEqual({ GITHUB_TOKEN: `\${{ github.token }}` });
+    expect(collector?.env).toEqual({
+      GITHUB_TOKEN: `\${{ github.token }}`,
+      REPO_COUNT: `\${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.repo-count) || '100' }}`,
+    });
     expect(steps.indexOf(collector as Step)).toBeLessThan(steps.indexOf(resolver as Step));
     expect(workflowSource('corpus.yml')).not.toContain('uniqueCandidates.sort');
     expect(workflowSource('corpus.yml')).not.toContain('gh api');
@@ -385,7 +412,7 @@ describe('corpus repository selection', () => {
     );
     expect(resolver?.env).toMatchObject({
       GITHUB_TOKEN: `\${{ github.token }}`,
-      REPO_COUNT: `\${{ inputs.repo-count || '100' }}`,
+      REPO_COUNT: `\${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.repo-count) || '100' }}`,
     });
 
     const scanner = steps[scannerIndex];
