@@ -1,9 +1,19 @@
 /**
- * Registry of well-known local CLI tools: bin name → npm package that
- * provides it. PS040 only reports commands it can map to a package —
+ * Registry of well-known local CLI tools: bin name → npm packages that
+ * provide it. The first package is the canonical remediation suggestion;
+ * the remaining packages are verified aliases for the same executable.
+ * PS040 only reports commands it can map to a package —
  * unknown words are never flagged (precision over recall).
  */
-export const KNOWN_TOOLS: ReadonlyMap<string, string> = new Map(
+const KNOWN_TOOL_PROVIDER_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  gatsby: ['gatsby'],
+  'npm-run-all': ['npm-run-all2'],
+  playwright: ['playwright'],
+  'run-p': ['npm-run-all2'],
+  'run-s': ['npm-run-all2'],
+};
+
+export const KNOWN_TOOLS: ReadonlyMap<string, readonly string[]> = new Map(
   Object.entries({
     tsc: 'typescript',
     tsserver: 'typescript',
@@ -71,7 +81,10 @@ export const KNOWN_TOOLS: ReadonlyMap<string, string> = new Map(
     'npm-check-updates': 'npm-check-updates',
     ncu: 'npm-check-updates',
     'pkg-pr-new': 'pkg-pr-new',
-  }),
+  }).map(
+    ([bin, primaryProvider]) =>
+      [bin, [primaryProvider, ...(KNOWN_TOOL_PROVIDER_ALIASES[bin] ?? [])]] as const,
+  ),
 );
 
 /** Commands that ship with the OS or the Node/npm toolchain itself. */

@@ -156,6 +156,55 @@ function sensitiveDiagnosticFixture(): {
   };
 }
 
+function npmWorkspaceLockFixture(lockfile: 'package-lock.json' | 'npm-shrinkwrap.json'): {
+  tree: TreeEntry[];
+  blobs: Record<string, Buffer>;
+  lockOid: string;
+  lockBytes: number;
+} {
+  const root = Buffer.from(
+    JSON.stringify({
+      name: 'root',
+      private: true,
+      workspaces: ['packages/*'],
+      devDependencies: { typescript: '^5.9.0' },
+    }),
+  );
+  const child = Buffer.from(
+    JSON.stringify({ name: '@fixture/inspector', scripts: { 'watch:source': 'tsc --watch' } }),
+  );
+  const lockOid = 'a'.repeat(40);
+  const lockBytes = DEFAULT_CORPUS_LIMITS.maxFileBytes * 4;
+  return {
+    lockOid,
+    lockBytes,
+    tree: [
+      {
+        path: 'package.json',
+        type: 'blob',
+        mode: '100644',
+        size: root.length,
+        sha: fixtureGitBlobOid(root),
+      },
+      {
+        path: lockfile,
+        type: 'blob',
+        mode: '100644',
+        size: lockBytes,
+        sha: lockOid,
+      },
+      {
+        path: 'packages/inspector/package.json',
+        type: 'blob',
+        mode: '100644',
+        size: child.length,
+        sha: fixtureGitBlobOid(child),
+      },
+    ],
+    blobs: { 'package.json': root, 'packages/inspector/package.json': child },
+  };
+}
+
 function completeCandidateSnapshot(): Record<string, unknown> {
   return {
     schemaVersion: 1,
@@ -475,6 +524,115 @@ describe('immutable corpus run evidence', () => {
         'summary.md': expect.stringMatching(/^[a-f0-9]{64}$/),
       },
     });
+  });
+
+  it.each(['package-lock.json', 'npm-shrinkwrap.json'] as const)(
+    'projects root npm %s presence so workspace scripts see verified root bins',
+    async (lockfile) => {
+      const directory = temporaryDirectory();
+      const inputFile = join(directory, 'repos.txt');
+      const outputDir = join(directory, 'out');
+      const data = npmWorkspaceLockFixture(lockfile);
+      const observation: GitHubObservation = { rawUrls: [], rawAuthorization: [], rawRedirect: [] };
+      writeFileSync(inputFile, `example/project@${COMMIT}\n`);
+
+      const manifest = await runCorpusScan({
+        inputFile,
+        outputDir,
+        token: 'read-only-test-token',
+        sourceCommit: SOURCE_COMMIT,
+        generatedAt: '2026-09-01T00:00:00.000Z',
+        fetchImpl: fakeGitHub(data.tree, data.blobs, observation),
+      });
+
+      const findings = readFileSync(join(outputDir, 'findings.jsonl'), 'utf8')
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { packagePath: string; ruleId: string });
+      expect(findings).not.toContainEqual(
+        expect.objectContaining({
+          packagePath: 'packages/inspector/package.json',
+          ruleId: 'PS040',
+        }),
+      );
+      expect(manifest.repositories[0]).toMatchObject({
+        managerSignalProjections: [
+          {
+            manager: 'npm',
+            projectedPath: lockfile,
+            semantics: 'presence-only-empty-regular-file-v1',
+            sourceTree: {
+              path: lockfile,
+              mode: '100644',
+              blobOid: data.lockOid,
+              bytes: data.lockBytes,
+            },
+            materialized: {
+              bytes: 0,
+              sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            },
+          },
+        ],
+      });
+      expect(manifest.schemaVersion).toBe(2);
+      expect(observation.rawUrls).toEqual([
+        `https://raw.githubusercontent.com/example/project/${COMMIT}/package.json`,
+        `https://raw.githubusercontent.com/example/project/${COMMIT}/packages/inspector/package.json`,
+      ]);
+    },
+  );
+
+  it.each([
+    {
+      label: 'mode',
+      mutate: (entry: TreeEntry) => {
+        entry.mode = '100664';
+      },
+      error: 'package-lock.json: package-manager signal was not a regular Git blob',
+    },
+    {
+      label: 'blob OID',
+      mutate: (entry: TreeEntry) => {
+        entry.sha = 'not-a-git-oid';
+      },
+      error: 'package-lock.json: immutable tree Git blob OID was not 40 lowercase hex characters',
+    },
+    {
+      label: 'byte size',
+      mutate: (entry: TreeEntry) => {
+        delete entry.size;
+      },
+      error: 'package-lock.json: immutable tree entry had no valid byte size',
+    },
+  ])('fails closed on invalid npm manager-signal tree $label', async ({ mutate, error }) => {
+    const directory = temporaryDirectory();
+    const inputFile = join(directory, 'repos.txt');
+    const outputDir = join(directory, 'out');
+    const data = npmWorkspaceLockFixture('package-lock.json');
+    const lockEntry = data.tree.find((entry) => entry.path === 'package-lock.json');
+    if (lockEntry === undefined) throw new Error('test lock entry was unavailable');
+    mutate(lockEntry);
+    const observation: GitHubObservation = { rawUrls: [], rawAuthorization: [], rawRedirect: [] };
+    writeFileSync(inputFile, `example/project@${COMMIT}\n`);
+
+    await expect(
+      runCorpusScan({
+        inputFile,
+        outputDir,
+        token: 'read-only-test-token',
+        sourceCommit: SOURCE_COMMIT,
+        generatedAt: '2026-09-01T00:00:00.000Z',
+        fetchImpl: fakeGitHub(data.tree, data.blobs, observation),
+      }),
+    ).rejects.toThrow('one or more repositories failed');
+
+    const persisted = JSON.parse(readFileSync(join(outputDir, 'corpus-run.json'), 'utf8')) as {
+      repositories: Array<{ error?: string; status: string }>;
+    };
+    expect(persisted.repositories[0]).toMatchObject({ status: 'failed', error });
+    expect(observation.rawUrls).not.toContain(
+      `https://raw.githubusercontent.com/example/project/${COMMIT}/package-lock.json`,
+    );
   });
 
   it('uses source-free corpus messages for arbitrary environment and substitution findings', async () => {

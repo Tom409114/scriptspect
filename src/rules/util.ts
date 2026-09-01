@@ -27,6 +27,8 @@ export function collectSequenceOps(
       return acc;
     case 'boolean':
     case 'pipeline':
+    case 'case':
+    case 'compound':
       for (const part of node.parts) collectSequenceOps(part, acc);
       return acc;
     case 'group':

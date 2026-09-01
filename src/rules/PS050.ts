@@ -118,6 +118,9 @@ function collectGraphFeatures(
         features.push({ role: 'pipeline:|', span });
       });
       break;
+    case 'case':
+    case 'compound':
+      break;
   }
   for (const part of node.parts) collectGraphFeatures(part, target, features);
   return features;

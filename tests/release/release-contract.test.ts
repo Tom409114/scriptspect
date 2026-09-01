@@ -861,21 +861,57 @@ describe('release coordinator trust and recovery', () => {
     });
   });
 
-  it('creates the immutable tag through the create-only refs API and verifies 422 retries', () => {
-    const stage = jobSource('release.yml', 'stage-release');
-    expect(stage).toContain('git/refs');
-    expect(stage).toContain('refs/tags/$TAG');
-    expect(stage).toContain('HTTP_STATUS');
-    expect(stage).toContain('422');
-    expect(stage).toContain('git/ref/tags/$TAG');
-    expect(stage).toContain('object.sha == $sha');
-    expect(stage).not.toContain('git push');
+  it('isolates the protected deploy credential in a shell-only immutable-tag mutator', () => {
+    const release = workflow('release.yml');
+    const createTag = release.jobs?.['create-protected-tag'];
+    expect(createTag).toBeDefined();
+    expect(createTag?.needs).toEqual(['authorize', 'build-candidate']);
+    expect(createTag?.environment).toBe('release');
+    expect(createTag?.permissions).toEqual({ contents: 'read' });
+    expect(createTag?.steps).toHaveLength(1);
+
+    const mutation = createTag?.steps?.[0];
+    expect(mutation?.name).toBe('Create or verify the exact protected tag');
+    expect(mutation?.env).toMatchObject({
+      RELEASE_TAG_DEPLOY_KEY: `\${{ secrets.RELEASE_TAG_DEPLOY_KEY }}`,
+      REPOSITORY: `\${{ github.repository }}`,
+      SHA: `\${{ needs.authorize.outputs.sha }}`,
+      TAG: `\${{ needs.authorize.outputs.tag }}`,
+    });
+    const mutationRun = mutation?.run ?? '';
+    for (const predicate of [
+      '[[ "$REPOSITORY" == "Tom409114/scriptspect" ]]',
+      '[[ "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]',
+      'git init',
+      'https://github.com/$REPOSITORY.git',
+      'git@github.com:$REPOSITORY.git',
+      'StrictHostKeyChecking=yes',
+      'UserKnownHostsFile=',
+      'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl',
+      'trap cleanup EXIT',
+      'refs/tags/$TAG',
+    ]) {
+      expect(mutationRun).toContain(predicate);
+    }
+    expect(mutationRun).not.toMatch(/(?:^|\s)(?:node|npm|pnpm|tsx)(?:\s|$)/u);
+    expect(mutationRun).not.toContain('tools/');
+    expect(mutationRun).not.toContain('--force');
+
+    const stage = release.jobs?.['stage-release'];
+    expect(stage?.needs).toEqual(['authorize', 'build-candidate', 'create-protected-tag']);
+    expect(jobSource('release.yml', 'stage-release')).toContain('git/ref/tags/$TAG');
+    expect(jobSource('release.yml', 'stage-release')).toContain('object.sha == $sha');
+    expect(jobSource('release.yml', 'stage-release')).not.toContain('RELEASE_TAG_DEPLOY_KEY');
+    expect(jobSource('release.yml', 'stage-release')).not.toContain('git push');
   });
 
-  it('runs trusted publication only from the exact immutable tag event context', () => {
+  it('runs trusted publication only from the coordinator dispatch bound to the immutable tag', () => {
     const publisher = workflow('npm-publish.yml');
-    expect(publisher.on).toMatchObject({ push: { tags: ['v[0-9]+.[0-9]+.[0-9]+'] } });
+    expect(publisher.on).not.toHaveProperty('push');
     expect(publisher.on).toHaveProperty('workflow_dispatch');
+    expect(publisher.jobs?.['verify-action-tag']?.if).toContain(
+      "github.event_name == 'workflow_dispatch'",
+    );
     expect(publisher.jobs?.publish?.environment).toBe('release');
     const run = jobSource('npm-publish.yml', 'publish');
     for (const predicate of [
@@ -891,6 +927,7 @@ describe('release coordinator trust and recovery', () => {
     ]) {
       expect(run).toContain(predicate);
     }
+    expect(run).toContain('[[ "$EVENT_NAME" == workflow_dispatch ]]');
     expect(run.indexOf('verify-publish-anchors')).toBeLessThan(run.indexOf('npm publish'));
     expect(run).not.toContain('payload:.npmVerified');
     expect(jobSource('release.yml', 'authorize')).toContain('releasePrHeadRepo');
@@ -952,7 +989,9 @@ describe('release coordinator trust and recovery', () => {
     );
     expect(finalize).toContain('alias-planned');
     expect(finalize).toContain('compare-and-update');
-    expect(finalize.indexOf('alias-planned')).toBeLessThan(finalize.indexOf('git push origin'));
+    expect(finalize.indexOf('alias-planned')).toBeLessThan(
+      finalize.indexOf('push --no-verify "$REMOTE"'),
+    );
     expect(finalize).not.toContain("':refs/tags/v0.1'");
     expect(publisher.jobs?.publish?.concurrency).toBeDefined();
     expect(workflow('npm-publish.yml').concurrency?.group).toBe(
@@ -965,14 +1004,63 @@ describe('release coordinator trust and recovery', () => {
       finalize.indexOf('gh release edit'),
     );
 
+    const aliasMutation = publisher.jobs?.['advance-aliases']?.steps?.find(
+      (step) => step.name === 'Move exact floating aliases with protected deploy credential',
+    );
+    expect(aliasMutation?.env).toMatchObject({
+      RELEASE_TAG_DEPLOY_KEY: `\${{ secrets.RELEASE_TAG_DEPLOY_KEY }}`,
+      REPOSITORY: `\${{ github.repository }}`,
+      SHA: `\${{ needs.publish.outputs.sha }}`,
+      VERSION: `\${{ needs.publish.outputs.version }}`,
+      INTENT_ID: `\${{ needs.publish.outputs.intent-id }}`,
+    });
+    const aliasMutationRun = aliasMutation?.run ?? '';
+    expect(aliasMutationRun).toContain('StrictHostKeyChecking=yes');
+    expect(aliasMutationRun).toContain('trap cleanup EXIT');
+    expect(aliasMutationRun).toContain('--force-with-lease');
+    expect(aliasMutationRun).toContain('refs/tags/$name');
+    expect(aliasMutationRun).not.toMatch(/(?:^|\s)(?:node|npm|pnpm|tsx)(?:\s|$)/u);
+    expect(aliasMutationRun).not.toContain('tools/');
+
     const rollback = publisher.jobs?.['rollback-aliases'];
     expect(rollback?.needs).toEqual(['publish', 'advance-aliases', 'record-verification']);
     expect(rollback?.if).toContain('always()');
     const rollbackRun = jobSource('npm-publish.yml', 'rollback-aliases');
     expect(rollbackRun).toContain('.aliasPlan.aliases | reverse[]');
-    expect(rollbackRun).toContain('alias-rollback');
-    expect(rollbackRun).toContain('--force-with-lease');
-    expect(rollbackRun).toContain('git push origin ":refs/tags/$NAME"');
+    const rollbackMutation = rollback?.steps?.find(
+      (step) => step.name === 'Restore exact floating aliases with protected deploy credential',
+    );
+    expect(rollbackMutation?.if).toBe("steps.prepare-rollback.outputs.rollback == 'true'");
+    expect(rollbackMutation?.env).toMatchObject({
+      RELEASE_TAG_DEPLOY_KEY: `\${{ secrets.RELEASE_TAG_DEPLOY_KEY }}`,
+      REPOSITORY: `\${{ github.repository }}`,
+      SHA: `\${{ needs.publish.outputs.sha }}`,
+      VERSION: `\${{ needs.publish.outputs.version }}`,
+      INTENT_ID: `\${{ needs.publish.outputs.intent-id }}`,
+    });
+    const rollbackMutationRun = rollbackMutation?.run ?? '';
+    expect(rollbackMutationRun).toContain('StrictHostKeyChecking=yes');
+    expect(rollbackMutationRun).toContain('trap cleanup EXIT');
+    expect(rollbackMutationRun).toContain('--force-with-lease');
+    expect(rollbackMutationRun).toContain('push --no-verify "$REMOTE" ":refs/tags/$NAME"');
+    expect(rollbackMutationRun).not.toMatch(/(?:^|\s)(?:node|npm|pnpm|tsx)(?:\s|$)/u);
+    expect(rollbackMutationRun).not.toContain('tools/');
+  });
+
+  it('exposes the protected deploy key to only the three exact ref-mutation steps', () => {
+    const credentialSteps = ['release.yml', 'npm-publish.yml'].flatMap((name) =>
+      Object.values(workflow(name).jobs ?? {}).flatMap((job) =>
+        (job.steps ?? [])
+          .filter((step) => step.env?.RELEASE_TAG_DEPLOY_KEY !== undefined)
+          .map((step) => `${name}:${step.name}`),
+      ),
+    );
+
+    expect(credentialSteps).toEqual([
+      'release.yml:Create or verify the exact protected tag',
+      'npm-publish.yml:Move exact floating aliases with protected deploy credential',
+      'npm-publish.yml:Restore exact floating aliases with protected deploy credential',
+    ]);
   });
 
   it('uses the observed Release draft value and bounded exact-version registry retrieval', () => {

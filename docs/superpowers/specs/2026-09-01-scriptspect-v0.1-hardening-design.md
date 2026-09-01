@@ -226,7 +226,9 @@ Only changed root script string literals are replaced. Indentation, field order,
 - an object `bin` exposes only its keys;
 - no `bin` exposes nothing.
 
-Visibility is calculated per calling package, not as a monorepo-wide union. `visibleBins(unit)` contains bins from packages that `unit` declares in `dependencies` or `devDependencies` and that resolve to a workspace package, plus other package-manager-independent declared bin mappings already known to PS040. An undeclared sibling workspace, root hoisting, and the calling package's own `bin` are not assumed to be executable; relying on them is fragile and remains reportable. npm, pnpm, Yarn, and Bun fixtures establish the conservative common contract, including scoped packages and custom bin keys.
+Visibility is calculated per calling package, not as a monorepo-wide union. `visibleBins(unit)` contains bins from packages that `unit` declares in `dependencies` or `devDependencies` and that resolve to a workspace package, plus other package-manager-independent declared bin mappings already known to PS040. Dependency keys are not treated as proof when an `npm:` alias names another provider or a `workspace:` dependency resolves to a package without the invoked `bin`.
+
+Root toolchain visibility is the one manager-aware exception to the conservative common contract. When exactly one non-conflicting `packageManager`/root-lockfile identity proves npm or pnpm, leaf scripts may use verified root dependency providers and real root workspace-dependency bins: npm run-script adds ancestor `node_modules/.bin` directories to `PATH`, and pnpm explicitly adds `<workspace root>/node_modules/.bin`. Yarn remains per-workspace (modern Yarn requires `-T` for root binaries and PnP explicitly keeps root `tsc` root-only); Bun and unknown or conflicting manager signals remain conservative. An undeclared sibling workspace and the calling package's own `bin` are not assumed executable. npm, pnpm, Yarn, Bun, conflict, and unknown-manager fixtures establish these boundaries, including scoped packages, aliases, and custom bin keys.
 
 ### 7.3 Recoverable multi-file write
 

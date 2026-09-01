@@ -2,7 +2,15 @@
   "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!dist", "!coverage", "!schema"]
+    "includes": [
+      "**",
+      "!dist",
+      "!coverage",
+      "!schema",
+      "!.worktrees",
+      "!comparison/evidence",
+      "!docs/evidence/corpus"
+    ]
   },
   "formatter": {
     "enabled": true,

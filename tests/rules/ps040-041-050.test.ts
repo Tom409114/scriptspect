@@ -16,6 +16,54 @@ describe('PS040 MISSING_LOCAL_BIN', () => {
     expect(
       only(run('biome check .', { dependencies: new Set(['@biomejs/biome']) }), 'PS040'),
     ).toEqual([]);
+    expect(only(run('cpy src out', { dependencies: new Set(['cpy-cli']) }), 'PS040')).toEqual([]);
+  });
+
+  it('accepts every verified provider for shared executable names', () => {
+    expect(only(run('gatsby build', { dependencies: new Set(['gatsby']) }), 'PS040')).toEqual([]);
+    expect(only(run('gatsby build', { dependencies: new Set(['gatsby-cli']) }), 'PS040')).toEqual(
+      [],
+    );
+    expect(
+      only(run('playwright test', { dependencies: new Set(['playwright']) }), 'PS040'),
+    ).toEqual([]);
+    expect(
+      only(run('playwright test', { dependencies: new Set(['@playwright/test']) }), 'PS040'),
+    ).toEqual([]);
+    for (const command of [
+      'npm-run-all --serial test:types:*',
+      'run-p lint test',
+      'run-s lint test',
+    ]) {
+      expect(only(run(command, { dependencies: new Set(['npm-run-all2']) }), 'PS040')).toEqual([]);
+    }
+  });
+
+  it('still reports shared executables when none of their providers is declared', () => {
+    expect(only(run('gatsby build'), 'PS040')).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('gatsby-cli') }),
+    ]);
+    expect(only(run('playwright test'), 'PS040')).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('@playwright/test') }),
+    ]);
+  });
+
+  it('does not accept a command-named package when a different package provides the bin', () => {
+    expect(only(run('cpy src out', { dependencies: new Set(['cpy']) }), 'PS040')).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('provided by `cpy-cli`'),
+      }),
+    ]);
+  });
+
+  it('does not accept an unverified npm-run-all fork as a provider', () => {
+    for (const command of ['npm-run-all test:*', 'run-p lint test', 'run-s lint test']) {
+      expect(only(run(command, { dependencies: new Set(['npm-run-all3']) }), 'PS040')).toEqual([
+        expect.objectContaining({
+          message: expect.stringContaining('npm-run-all'),
+        }),
+      ]);
+    }
   });
 
   it('negative: workspace bins count as present', () => {

@@ -260,6 +260,22 @@ describe('workspace discovery', () => {
     rmSync(outside, { recursive: true, force: true });
   });
 
+  itWithFileSymlinks(
+    'rejects an escaping Yarn lockfile symlink before reading its contents',
+    () => {
+      const root = makeProject({
+        'package.json': pkg('root', {}, { packageManager: 'yarn@1.22.22' }),
+      });
+      const outside = makeProject({ 'yarn.lock': '# yarn lockfile v1\n' });
+      symlinkSync(join(outside, 'yarn.lock'), join(root, 'yarn.lock'), 'file');
+
+      expect(() => discoverPackages(root)).toThrow(/outside the project root|escapes/i);
+
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    },
+  );
+
   it.each(['packages/link/*', 'packages/link/missing/*', 'packages/{link,real}/*'])(
     'rejects an escaping symlink in static glob base %s before fast-glob runs',
     (pattern) => {
@@ -489,6 +505,71 @@ describe('workspace bins and dependencies', () => {
     );
   });
 
+  it.each([
+    ['an exact matching version', '2.3.4'],
+    ['a compatible semver range', '^2.0.0'],
+    ['a wildcard range', '*'],
+    ['an empty npm range', ''],
+  ])('exposes a workspace bin for %s', (_label, spec) => {
+    const caller: PackageUnit = {
+      relPath: 'apps/a/package.json',
+      absDir: '/r/apps/a',
+      manifest: { dependencies: { tool: spec } },
+    };
+    const tool: PackageUnit = {
+      relPath: 'packages/tool/package.json',
+      absDir: '/r/packages/tool',
+      manifest: { name: 'tool', version: '2.3.4', bin: { custom: './cli.js' } },
+    };
+
+    expect(visibleWorkspaceBins(caller, [caller, tool])).toEqual(new Set(['custom']));
+  });
+
+  it.each([
+    ['a mismatched registry range', '^4.0.0'],
+    ['a non-registry source', 'github:example/tool'],
+    ['a missing workspace version', '^2.0.0'],
+  ])('does not expose a same-named workspace bin for %s', (_label, spec) => {
+    const caller: PackageUnit = {
+      relPath: 'apps/a/package.json',
+      absDir: '/r/apps/a',
+      manifest: { dependencies: { tool: spec } },
+    };
+    const tool: PackageUnit = {
+      relPath: 'packages/tool/package.json',
+      absDir: '/r/packages/tool',
+      manifest: {
+        name: 'tool',
+        ...(spec === '^2.0.0' && _label === 'a missing workspace version'
+          ? {}
+          : { version: '2.3.4' }),
+        bin: { custom: './cli.js' },
+      },
+    };
+
+    expect(visibleWorkspaceBins(caller, [caller, tool])).toEqual(new Set());
+  });
+
+  it('does not expose ambiguous duplicate workspace identities', () => {
+    const caller: PackageUnit = {
+      relPath: 'apps/a/package.json',
+      absDir: '/r/apps/a',
+      manifest: { dependencies: { tool: 'workspace:*' } },
+    };
+    const first: PackageUnit = {
+      relPath: 'packages/first/package.json',
+      absDir: '/r/packages/first',
+      manifest: { name: 'tool', version: '1.0.0', bin: { first: './first.js' } },
+    };
+    const second: PackageUnit = {
+      relPath: 'packages/second/package.json',
+      absDir: '/r/packages/second',
+      manifest: { name: 'tool', version: '1.0.0', bin: { second: './second.js' } },
+    };
+
+    expect(visibleWorkspaceBins(caller, [caller, first, second])).toEqual(new Set());
+  });
+
   it('unitDependencyNames merges all dependency blocks', () => {
     const unit: PackageUnit = {
       relPath: 'package.json',
@@ -534,6 +615,508 @@ describe('monorepo analysis', () => {
     });
     const result = analyze(root, { config: parseConfig({}, 'test') });
     expect(result.findings.filter((f) => f.ruleId === 'PS040')).toHaveLength(0);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    {
+      label: 'npm identified by its lockfile',
+      rootExtra: {},
+      managerFiles: { 'package-lock.json': '{}\n' },
+    },
+    {
+      label: 'pnpm identified by packageManager',
+      rootExtra: { packageManager: 'pnpm@11.24.0' },
+      managerFiles: {},
+    },
+  ])('PS040 recognizes root toolchain bins for $label', ({ rootExtra, managerFiles }) => {
+    const root = makeProject({
+      ...(managerFiles as unknown as Record<string, string>),
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          ...rootExtra,
+          workspaces: ['packages/*'],
+          devDependencies: {
+            vite: '^7',
+            'npm-run-all': '^4',
+            prettier: '^3',
+            vitest: '^4',
+          },
+        },
+      ),
+      'packages/web/package.json': pkg('web', {
+        build: 'vite build',
+        parallel: 'run-p lint test',
+        format: 'prettier --check .',
+        test: 'vitest run',
+      }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      label: 'the default pnpm setting',
+      workspaceSetting: '',
+      npmrc: undefined,
+      expectedFindings: 1,
+    },
+    {
+      label: 'an explicit false pnpm workspace setting',
+      workspaceSetting: 'linkWorkspacePackages: false\n',
+      npmrc: undefined,
+      expectedFindings: 1,
+    },
+    {
+      label: 'an explicit true pnpm workspace setting',
+      workspaceSetting: 'linkWorkspacePackages: true\n',
+      npmrc: undefined,
+      expectedFindings: 0,
+    },
+    {
+      label: 'the pnpm deep workspace setting',
+      workspaceSetting: 'linkWorkspacePackages: deep\n',
+      npmrc: undefined,
+      expectedFindings: 0,
+    },
+    {
+      label: 'a legacy true .npmrc setting',
+      workspaceSetting: '',
+      npmrc: 'link-workspace-packages=true\n',
+      expectedFindings: 0,
+    },
+    {
+      label: 'a legacy deep .npmrc setting',
+      workspaceSetting: '',
+      npmrc: 'link-workspace-packages=deep\n',
+      expectedFindings: 0,
+    },
+  ])(
+    'PS040 resolves ordinary pnpm workspace ranges for $label',
+    ({ workspaceSetting, npmrc, expectedFindings }) => {
+      const root = makeProject({
+        'package.json': pkg('root', {}, { packageManager: 'pnpm@11.24.0' }),
+        'pnpm-workspace.yaml': `packages:\n  - 'packages/*'\n${workspaceSetting}`,
+        ...(npmrc === undefined ? {} : { '.npmrc': npmrc }),
+        'packages/tool/package.json': pkg(
+          'tool',
+          {},
+          { version: '2.3.4', bin: { vite: './cli.js' } },
+        ),
+        'packages/web/package.json': pkg(
+          'web',
+          { build: 'vite build' },
+          { dependencies: { tool: '^2.0.0' } },
+        ),
+      });
+
+      try {
+        const result = analyze(root, {
+          config: parseConfig({}, 'test'),
+          onlyRules: new Set(['PS040']),
+        });
+
+        expect(result.findings).toHaveLength(expectedFindings);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    {
+      label: 'false in pnpm-workspace.yaml over true in .npmrc',
+      workspaceSetting: 'linkWorkspacePackages: false\n',
+      npmrc: 'link-workspace-packages=true\n',
+      expectedFindings: 1,
+    },
+    {
+      label: 'true in pnpm-workspace.yaml over false in .npmrc',
+      workspaceSetting: 'linkWorkspacePackages: true\n',
+      npmrc: 'link-workspace-packages=false\n',
+      expectedFindings: 0,
+    },
+    {
+      label: 'an invalid higher-priority pnpm-workspace.yaml value',
+      workspaceSetting: 'linkWorkspacePackages: "true"\n',
+      npmrc: 'link-workspace-packages=true\n',
+      expectedFindings: 1,
+    },
+    {
+      label: 'an environment-dependent legacy .npmrc value',
+      workspaceSetting: '',
+      npmrc: `link-workspace-packages=\${LINK_WORKSPACES}\n`,
+      expectedFindings: 1,
+    },
+  ])(
+    'PS040 applies fail-closed pnpm config precedence for $label',
+    ({ workspaceSetting, npmrc, expectedFindings }) => {
+      const root = makeProject({
+        'package.json': pkg('root', {}, { packageManager: 'pnpm@11.24.0' }),
+        'pnpm-workspace.yaml': `packages:\n  - 'packages/*'\n${workspaceSetting}`,
+        '.npmrc': npmrc,
+        'packages/tool/package.json': pkg(
+          'tool',
+          {},
+          { version: '2.3.4', bin: { vite: './cli.js' } },
+        ),
+        'packages/web/package.json': pkg(
+          'web',
+          { build: 'vite build' },
+          { dependencies: { tool: '^2.0.0' } },
+        ),
+      });
+
+      try {
+        const result = analyze(root, {
+          config: parseConfig({}, 'test'),
+          onlyRules: new Set(['PS040']),
+        });
+
+        expect(result.findings).toHaveLength(expectedFindings);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    {
+      label: 'Yarn',
+      rootExtra: { packageManager: 'yarn@4.9.2' },
+      managerFiles: { 'yarn.lock': '# yarn lockfile v1\n' },
+    },
+    {
+      label: 'Bun',
+      rootExtra: { packageManager: 'bun@1.3.2' },
+      managerFiles: { 'bun.lock': '{}\n' },
+    },
+    { label: 'an unknown manager', rootExtra: {}, managerFiles: {} },
+    {
+      label: 'conflicting npm and Yarn signals',
+      rootExtra: { packageManager: 'npm@11.11.0' },
+      managerFiles: { 'package-lock.json': '{}\n', 'yarn.lock': '# yarn lockfile v1\n' },
+    },
+    {
+      label: 'an unrecognized packageManager despite an npm lockfile',
+      rootExtra: { packageManager: 'other@1.0.0' },
+      managerFiles: { 'package-lock.json': '{}\n' },
+    },
+  ])('PS040 does not assume root-bin visibility for $label', ({ rootExtra, managerFiles }) => {
+    const root = makeProject({
+      ...(managerFiles as Record<string, string>),
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          ...rootExtra,
+          workspaces: ['packages/*'],
+          devDependencies: { vite: '^7' },
+        },
+      ),
+      'packages/web/package.json': pkg('web', { build: 'vite build' }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([
+        expect.objectContaining({
+          ruleId: 'PS040',
+          packagePath: 'packages/web/package.json',
+          scriptName: 'build',
+        }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      label: 'an explicit Yarn Classic package manager',
+      rootExtra: { packageManager: 'yarn@1.22.22' },
+      yarnLock: '# yarn lockfile v1\n',
+    },
+    {
+      label: 'a Yarn Classic v1 lockfile without packageManager',
+      rootExtra: {},
+      yarnLock:
+        '# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.\n# yarn lockfile v1\n',
+    },
+  ])('PS040 recognizes root toolchain bins for $label', ({ rootExtra, yarnLock }) => {
+    const root = makeProject({
+      'yarn.lock': yarnLock,
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          ...rootExtra,
+          workspaces: ['packages/*'],
+          devDependencies: { vite: '^7' },
+        },
+      ),
+      'packages/web/package.json': pkg('web', { build: 'vite build' }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      label: 'manifest-enabled Yarn Classic PnP',
+      rootExtra: { packageManager: 'yarn@1.22.22', installConfig: { pnp: true } },
+      managerFiles: { 'yarn.lock': '# yarn lockfile v1\n' },
+    },
+    {
+      label: 'a checked-in Yarn Classic PnP loader',
+      rootExtra: { packageManager: 'yarn@1.22.22' },
+      managerFiles: { 'yarn.lock': '# yarn lockfile v1\n', '.pnp.js': 'module.exports = {};\n' },
+    },
+    {
+      label: 'a Yarn Classic .yarnrc PnP setting',
+      rootExtra: { packageManager: 'yarn@1.22.22' },
+      managerFiles: {
+        'yarn.lock': '# yarn lockfile v1\n',
+        '.yarnrc': '--enable-pnp true\n',
+      },
+    },
+    {
+      label: 'a Yarn major/lockfile format conflict',
+      rootExtra: { packageManager: 'yarn@1.22.22' },
+      managerFiles: { 'yarn.lock': '__metadata:\n  version: 8\n' },
+    },
+  ])('PS040 remains conservative for $label', ({ rootExtra, managerFiles }) => {
+    const root = makeProject({
+      ...(managerFiles as unknown as Record<string, string>),
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          ...rootExtra,
+          workspaces: ['packages/*'],
+          devDependencies: { vite: '^7' },
+        },
+      ),
+      'packages/web/package.json': pkg('web', { build: 'vite build' }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([
+        expect.objectContaining({ ruleId: 'PS040', scriptName: 'build' }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('PS040 does not trust a known dependency key whose npm alias targets another package', () => {
+    const root = makeProject({
+      'package-lock.json': '{}\n',
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          workspaces: ['packages/*'],
+          devDependencies: { vite: 'npm:lodash@^4' },
+        },
+      ),
+      'packages/web/package.json': pkg('web', { build: 'vite build' }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([
+        expect.objectContaining({ ruleId: 'PS040', scriptName: 'build' }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('PS040 recognizes the real provider and bin behind an npm dependency alias', () => {
+    const root = makeProject({
+      'package-lock.json': '{}\n',
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          workspaces: ['packages/*'],
+          devDependencies: { tooling: 'npm:vite@^7' },
+        },
+      ),
+      'packages/web/package.json': pkg('web', { build: 'vite build' }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('PS040 requires a workspace dependency to expose the invoked bin', () => {
+    const root = makeProject({
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          packageManager: 'pnpm@11.24.0',
+          workspaces: ['packages/*'],
+          devDependencies: { vite: 'workspace:*' },
+        },
+      ),
+      'packages/vite/package.json': pkg('vite'),
+      'packages/web/package.json': pkg('web', { build: 'vite build' }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([
+        expect.objectContaining({ ruleId: 'PS040', scriptName: 'build' }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('PS040 does not accept a bin from a same-named workspace whose version cannot satisfy the dependency', () => {
+    const root = makeProject({
+      'yarn.lock': '# yarn lockfile v1\n',
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          packageManager: 'yarn@1.22.22',
+          workspaces: ['packages/*'],
+        },
+      ),
+      'packages/fake/package.json': pkg(
+        'lodash',
+        {},
+        {
+          version: '99.0.0',
+          bin: { vite: './fake-vite.js' },
+        },
+      ),
+      'packages/web/package.json': pkg(
+        'web',
+        { build: 'vite build' },
+        {
+          dependencies: { lodash: '^4.17.21' },
+        },
+      ),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([
+        expect.objectContaining({ ruleId: 'PS040', scriptName: 'build' }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('PS040 exposes a real workspace bin through the pnpm root toolchain', () => {
+    const root = makeProject({
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          packageManager: 'pnpm@11.24.0',
+          workspaces: ['packages/*'],
+          devDependencies: { vite: 'workspace:*' },
+        },
+      ),
+      'packages/vite/package.json': pkg('vite', {}, { bin: './cli.js' }),
+      'packages/web/package.json': pkg('web', { build: 'vite build' }),
+    });
+
+    try {
+      const result = analyze(root, {
+        config: parseConfig({}, 'test'),
+        onlyRules: new Set(['PS040']),
+      });
+
+      expect(result.findings).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('PS040 keeps an Immich-style tsc finding when neither leaf nor root declares typescript', () => {
+    const root = makeProject({
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          packageManager: 'pnpm@11.24.0',
+          workspaces: ['packages/*'],
+          devDependencies: { vite: '^7' },
+        },
+      ),
+      'packages/server/package.json': pkg('server', { typecheck: 'tsc --noEmit' }),
+    });
+
+    const result = analyze(root, {
+      config: parseConfig({}, 'test'),
+      onlyRules: new Set(['PS040']),
+    });
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        ruleId: 'PS040',
+        packagePath: 'packages/server/package.json',
+        scriptName: 'typecheck',
+      }),
+    ]);
     rmSync(root, { recursive: true, force: true });
   });
 

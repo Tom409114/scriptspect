@@ -1,6 +1,6 @@
 # Comparison: scriptspect vs scripts-doctor
 
-[scripts-doctor](https://github.com/Ashwani2529/scripts-doctor) (MIT) lints and auto-fixes package.json scripts for cross-platform reliability. ScriptSpect addresses the same problem with a different parser, evidence model, and CI contract. This page compares documented surfaces; it does not claim that either tool is more accurate.
+[scripts-doctor](https://github.com/Ashwani2529/scripts-doctor) (MIT) lints and auto-fixes package.json scripts for cross-platform reliability. ScriptSpect addresses the same problem with a different parser, evidence model, and CI contract. The surface table below is not a quality claim; the later reviewed result is limited to seven fixed, repository-owned questions.
 
 ## Documented surface baseline
 
@@ -31,24 +31,34 @@ are pinned in [`comparison/toolchain.json`](../comparison/toolchain.json).
 | Target shell matrix | every finding lists affected shells (posix-sh / cmd / powershell); default matrix = npm defaults (sh + cmd) |
 | Confidence + severity | every rule has confidence (high/medium) and severity (error/warn/advisory); any configured `error` is in the failure universe, and the warning budget is evaluated before display filtering |
 | Rule provenance | each rule documents shell-behavior evidence and real failure classes with good/bad examples |
-| Monorepo first-class | npm/pnpm/Yarn/Bun workspace discovery and per-package reporting; the controlled hosted 100-package/2-second benchmark passed in [run `33482453059`](https://github.com/Tom409114/scriptspect/actions/runs/33482453059) at exact `main` commit `c9c671c8e150705d78d9169d4c5a8f22cb37fad0`, but it is implementation evidence rather than an external-corpus performance or adoption claim |
+| Monorepo first-class | npm/pnpm/Yarn/Bun workspace discovery and per-package reporting; the controlled hosted 100-package/2-second benchmark passed in [run `33501069632`](https://github.com/Tom409114/scriptspect/actions/runs/33501069632) at exact candidate commit `b514d367b9922b1180e1b1efa500ff22bd014902`, but it is implementation evidence rather than an external-corpus performance or adoption claim |
 | Safe fix engine | safe / conditional / manual; `--fix` applies only replacements whose structural and dependency preconditions are proved; idempotency and formatting are regression-tested |
 | No execution | static only — safe to run on untrusted PRs |
 | GitHub-native | first-class Action, PR annotations, job summary; SARIF planned |
 | Package-manager neutral | npm / pnpm / Yarn / Bun |
 | Extensible rules | standalone rule modules with typed metadata + fixtures; new rules don't touch the parser |
 
-## Release gate
+## Reviewed shared-fixture result
 
-The executable [shared-corpus harness](../comparison/README.md) now captures both
-tools' commands and outputs under a pinned toolchain. Its adjudication rows are
-still pending human review. Therefore the competitive gate remains **OPEN** and
-no “finds more,” “fewer false positives,” or winner claim is published.
+The executable [shared-corpus harness](../comparison/README.md) captured both
+tools at exact ScriptSpect source
+`b514d367b9922b1180e1b1efa500ff22bd014902` under Node `22.23.2` and the
+pinned package toolchain. The versioned [2026-09-01
+review](../comparison/evidence/2026-09-01/README.md) independently checked all
+14 tool/fixture observations; all 14 secondary decisions agreed with the final
+primary decisions.
 
-The v0.1 bar remains: reviewed shared-corpus evidence must identify useful
-problems ScriptSpect catches without purchasing that coverage with more false
-positives. If that result is not established, the project improves or narrows
-scope rather than publishing a marketing conclusion.
+On these seven fixed questions, ScriptSpect was correct on 7/7. The
+`scripts-doctor@1.0.0` baseline had 2 correct results, 2 false positives, and 3
+false negatives. ScriptSpect identified command substitution, POSIX environment
+expansion, and target-specific separator semantics that the baseline missed,
+while avoiding false positives on quoted command text and an already-declared
+executable.
+
+This satisfies the v0.1 specification's narrow shared-fixture differentiation
+bar without claiming ecosystem-wide superiority. Public-corpus precision is
+measured and reported separately, and future comparison changes must retain the
+same pinned-input, raw-output, and independent-review contract.
 
 ## Relationship to cross-env / shx / rimraf
 

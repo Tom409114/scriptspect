@@ -4,6 +4,8 @@
 
 来源：`PortScript_Agent_Engineering_Spec_v1.0.docx`。文档中的“agent 执行合同/启动指令”仅作为项目历史流程和验收要求审计，不视为本轮用户指令；本轮权限以用户消息及系统/开发者指令为准。
 
+> 本文件主体是 append-only 的修复前基线；其中的 FAIL/PARTIAL 与早期远程快照保留当时事实，不代表最新候选状态。最新核签见文末“PR #82 最终候选合规核签”。
+
 状态：
 
 - **PASS**：当前权威证据直接证明要求成立。
@@ -497,3 +499,38 @@
 | README 可复制证据 | `REFRESHED` | 首页源码评估与本地 Action pin 更新到 exact source commit `c9c671c8e150705d78d9169d4c5a8f22cb37fad0`；真实 `uses: ./` clean/broken consumer、2 条 annotations 与 job summary 来自 main run `33482453059` 的 `Bundled Action consumer` job。 |
 
 [PR #66](https://github.com/Tom409114/scriptspect/pull/66) 仍为 OPEN/BLOCKED；PR #80 合并后 release-please 将其推进到 head `bdc8e1990096db8ca096a8462e3307322d7c9f65`，对应 run [`33482502821`](https://github.com/Tom409114/scriptspect/actions/runs/33482502821) 仍为 `action_required`。npm 404、0 tags、0 releases、Trusted Publishing、tag creation/floating alias policy 与 M8 外部/时间证据均未被本次工程闭环改变。因此总体仍是 **NOT RELEASE READY**。
+
+## PR #82 最终候选合规核签（2026-09-01，追加）
+
+本节只更新 PR #80 之后新产生的事实。历史 212 项基线、早期本地数字与当时的远程状态保持原样；若与本节冲突，以本节对应的较新 exact-source 证据为当前候选结论。
+
+### 候选与托管验证
+
+| 项目 | 当前状态 | 准确证据与限制 |
+|---|---|---|
+| Source candidate | `HOSTED PASS / DRAFT PR OPEN` | Draft [PR #82](https://github.com/Tom409114/scriptspect/pull/82) 绑定 exact source `b514d367b9922b1180e1b1efa500ff22bd014902`。[CI run `33501069632`](https://github.com/Tom409114/scriptspect/actions/runs/33501069632) 与 [release-readiness run `33501069825`](https://github.com/Tom409114/scriptspect/actions/runs/33501069825) 均 completed/success；它尚未合并，不冒充 `main` 或 release SHA。 |
+| Parser / rule truth | `CANDIDATE HOSTED PASS` | POSIX `case` grammar/tail recovery、container invocation/option grammar 的 per-target PS026 判断，以及此前 target-aware lexer/parser/rule regressions 均随 exact-source quality/coverage 与三 OS × Node 22/24 matrix 通过。生态精度仍以单独人工 corpus 证明。 |
+| Workspaces / PS040 | `CANDIDATE HOSTED PASS` | workspace package identity、version/range、npm alias 与 manager-aware root-bin visibility 采用 fail-closed 解析；Yarn Classic node_modules/PnP 分流和冲突场景有回归，并随 exact-source CI 通过。公开 corpus 的人工裁决仍单独计。 |
+| Monthly collector contract | `HOSTED PASS / PARTIAL DRAFT` | [Run `33501032020`](https://github.com/Tom409114/scriptspect/actions/runs/33501032020) completed/success。分页连续性/immutable ID、2xx JSON 结构、deadline 与 paired-source 规则已通过；实际 draft 仅 npm package/download observations 因 404 为 partial，并与完整的 0 GitHub Releases observation 配对。 |
+
+### 比较、corpus 与 M8 边界
+
+| 项目 | 当前状态 | 准确证据与限制 |
+|---|---|---|
+| Shared-fixture comparison | `REVIEWED EVIDENCE PASS` | [版本化 evidence](../../comparison/evidence/2026-09-01/README.md) 绑定 exact ScriptSpect source、Node `22.23.2`、`scripts-doctor@1.0.0`、七个 fixture digests、raw outputs 与 adjudication。ScriptSpect 7/7 correct；baseline 2 correct / 2 false positives / 3 false negatives；14/14 independent secondary decisions agree。该结论只关闭设计 §16 的窄固定问题 differentiation gate，不声称生态级 superiority。 |
+| 500-repository collection | `HOSTED COLLECTION PASS / ADJUDICATION OPEN` | Read-only [run `33501028186`](https://github.com/Tom409114/scriptspect/actions/runs/33501028186) completed/success；artifact 在 ≥100 findings 的 primary adjudication 与规定 secondary review 完成前仍是 draft，不能宣称 precision 或 real-problem-density gate 已通过。 |
+| External/time evidence | `OPEN` | 独立试用/反馈、首次 onboarding、真实 downstream 与 30/60/90/180 天指标只能由真实用户和时间产生；没有从 PR、CI、fixture 或管理员配置推断 adoption。 |
+
+因此，基线中的 `PRODUCT-02`、`DOC-03`、`GATE-competition` 与 comparison 相关 `DOD-12` 缺口，已由可重放且独立复核的 fixed-corpus evidence 在其明确范围内关闭；`EVID-01` 的只读 scheduled draft 执行链也已有首次 hosted artifact。`GATE-precision`、真实 adoption/onboarding 与时间窗口继续保持 OPEN，直到 500-repository artifact 的人工账本及外部事实完成。
+
+### GitHub 管理员与发布边界
+
+| 项目 | 当前状态 | 准确事实 |
+|---|---|---|
+| Immutable semantic tags | `ADMIN PASS / ZERO TAGS` | ruleset `21964642` 对 `refs/tags/v*.*.*` 禁止 update/delete；ruleset `22006456` 只允许 DeployKey bypass 创建 matching tags。 |
+| Floating aliases | `ADMIN PASS / ZERO TAGS` | 不重叠 ruleset `22006468` 对 exact `refs/tags/v0`、`refs/tags/v0.1` 的 create/update/delete 只允许 DeployKey bypass。 |
+| Release tag credential | `ADMIN PASS` | 可写 deploy key ID `161938616`（`ScriptSpect release tag coordinator v2`）的私钥仅存于 `release` environment secret `RELEASE_TAG_DEPLOY_KEY`；`RELEASE_TAG_POLICY_READY=true`。当前 0 tags，没有用虚假生产 tag 制造演练证据。 |
+| npm ownership / OIDC | `ADMIN OPEN` | npm `scriptspect` 仍返回 404；`NPM_BOOTSTRAP_ENABLED=false`、`NPM_TRUSTED_PUBLISHING_READY=false`。一次性 bootstrap ownership/integrity contract 与 npm Trusted Publisher 仍须仓库所有者完成。 |
+| Public release | `PUBLICATION OPEN` | GitHub Releases 为 0；没有 `v0.1.0`、floating aliases、npm provenance、Release checksum assets 或 released Action consumer。 |
+
+最新结论仍为 **NOT RELEASE READY**，原因已收窄为：PR #82 尚待合并/exact-main CI，npm 所有权与 Trusted Publishing 尚未完成，真实 v0.1 发布尚未发生，以及 M8 的人工 public-corpus 与外部/时间事实尚未产生。GitHub tag creation/floating 权限已不再是 OPEN 项；在候选合并后，需要仓库所有者亲自完成的唯一管理员前置是 npm 侧配置。

@@ -26,8 +26,12 @@ output directory:
 ```bash
 corepack pnpm@11.24.0 install --frozen-lockfile --ignore-scripts
 pnpm build
-SCRIPTSPECT_SOURCE_COMMIT="$(git rev-parse HEAD)" pnpm exec tsx tools/comparison/run.ts comparison-output
+comparison_output="$(mktemp -d)/scriptspect-comparison"
+SCRIPTSPECT_SOURCE_COMMIT="$(git rev-parse HEAD)" pnpm exec tsx tools/comparison/run.ts "$comparison_output"
 ```
+
+The fresh output directory must stay outside the checkout so the recorded
+`cleanCheckout` value cannot be changed by the evidence files being created.
 
 `comparison-run.json` records commands, exact environment, fixture and output
 hashes, exit codes, path normalization, and whether the run is eligible for
@@ -36,11 +40,13 @@ generated `comparison-adjudication-draft.jsonl` follows
 [`adjudication.schema.json`](adjudication.schema.json); every row remains
 `pending` until named reviewers supply a rationale and date.
 
+The first completed, independently checked ledger and its exact raw observations
+are versioned in [`evidence/2026-09-01`](evidence/2026-09-01). The generated
+draft remains immutable; the reviewed ledger is a separate file so review
+cannot rewrite the captured tool output.
+
 ## Claim boundary
 
-A promotable run still does not prove accuracy. Reviewers must judge both tools
-against each fixture question, secondary-review disagreements and error cases,
-and publish denominators with the versioned ledger. Until that happens,
-[`docs/comparison.md`](../docs/comparison.md) continues to state that no
-head-to-head conclusion exists.
-
+A completed run still does not prove broad accuracy. Reviewers judge both tools
+against each fixture question, resolve secondary-review disagreements, and
+publish only the narrow result supported by the versioned ledger.
