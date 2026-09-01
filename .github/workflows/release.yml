@@ -396,6 +396,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
           pnpm exec vitest run
+          git diff --exit-code -- dist schema
       - name: Pack once and create the versioned candidate manifest
         if: steps.recover.outputs.needs-build == 'true'
         env:
@@ -406,9 +407,31 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/candidate"
-          pnpm pack --pack-destination "$RUNNER_TEMP/candidate"
+          PACKAGE_STAGE="$RUNNER_TEMP/package-stage"
+          test ! -e "$PACKAGE_STAGE"
+          mkdir -p "$PACKAGE_STAGE"
+          git archive "$SHA" | tar -x -C "$PACKAGE_STAGE"
+          rm -rf "$PACKAGE_STAGE/dist" "$PACKAGE_STAGE/schema"
+          cp -R dist schema "$PACKAGE_STAGE/"
+          jq -e --arg version "$VERSION" \
+            '.name == "scriptspect" and .version == $version' \
+            "$PACKAGE_STAGE/package.json" >/dev/null
+          node tools/release/generate-package-readmes.mjs \
+            --version "$VERSION" --source-commit "$SHA" --channel stable \
+            --english "$PACKAGE_STAGE/README.md" \
+            --chinese "$PACKAGE_STAGE/README.zh-CN.md"
+          git diff --exit-code -- README.md README.zh-CN.md
+          (cd "$PACKAGE_STAGE" && pnpm pack --pack-destination "$RUNNER_TEMP/candidate")
           TARBALL=$(find "$RUNNER_TEMP/candidate" -maxdepth 1 -name 'scriptspect-*.tgz' -printf '%f\n')
           [[ $(printf '%s\n' "$TARBALL" | sed '/^$/d' | wc -l) == 1 ]]
+          for README in README.md README.zh-CN.md; do
+            [[ "$(tar -tf "$RUNNER_TEMP/candidate/$TARBALL" | grep -Fxc "package/$README")" == 1 ]]
+            tar -xOf "$RUNNER_TEMP/candidate/$TARBALL" "package/$README" \
+              > "$RUNNER_TEMP/packed-$README"
+            cmp "$PACKAGE_STAGE/$README" "$RUNNER_TEMP/packed-$README"
+          done
+          grep -F "npx --yes scriptspect@$VERSION ." "$RUNNER_TEMP/packed-README.md"
+          ! grep -F 'pre-release source evaluation' "$RUNNER_TEMP/packed-README.md"
           SHA256=$(sha256sum "$RUNNER_TEMP/candidate/$TARBALL" | cut -d' ' -f1)
           SRI="sha512-$(openssl dgst -sha512 -binary "$RUNNER_TEMP/candidate/$TARBALL" | openssl base64 -A)"
           (cd "$RUNNER_TEMP/candidate" && sha256sum "$TARBALL" > SHA256SUMS)

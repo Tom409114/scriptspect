@@ -24,6 +24,7 @@ const canonicalTreeAlgorithmDigest = (
 type Step = {
   name?: string;
   id?: string;
+  if?: string;
   uses?: string;
   run?: string;
   env?: Record<string, string>;
@@ -763,6 +764,33 @@ describe('release coordinator trust and recovery', () => {
     expect(test).toBeGreaterThan(build);
   });
 
+  it('packs exact-version bilingual npm READMEs without changing the repository homepages', () => {
+    const releaseCandidate = jobSource('release.yml', 'build-candidate');
+    const bootstrapCandidate = jobSource('npm-bootstrap.yml', 'bootstrap');
+    const publisher = jobSource('npm-publish.yml', 'publish');
+
+    for (const candidate of [releaseCandidate, bootstrapCandidate]) {
+      expect(candidate).toContain('tools/release/generate-package-readmes.mjs');
+      expect(candidate).toContain('package-stage');
+      expect(candidate).toContain('git archive');
+      expect(candidate).toContain('cp -R dist schema "$PACKAGE_STAGE/"');
+      expect(candidate).toContain('git diff --exit-code -- README.md README.zh-CN.md');
+      expect(candidate.indexOf('tools/release/generate-package-readmes.mjs')).toBeLessThan(
+        candidate.indexOf('pnpm pack'),
+      );
+      expect(candidate).toContain('tar -xOf');
+      expect(candidate).toContain('README.zh-CN.md');
+    }
+    expect(releaseCandidate).toContain('npx --yes scriptspect@$VERSION .');
+    expect(bootstrapCandidate).toContain('--channel bootstrap');
+    expect(publisher).toContain('tools/release/generate-package-readmes.mjs');
+    expect(publisher).toContain('--channel stable');
+    expect(publisher).toContain('cmp "$EXPECTED_READMES/$README"');
+    expect(publisher.indexOf('tools/release/generate-package-readmes.mjs')).toBeLessThan(
+      publisher.indexOf('npm publish'),
+    );
+  });
+
   it('serializes every state mutation under one per-SHA mutex and every publisher under one alias mutex', () => {
     expect(workflow('release-intent.yml').jobs?.['record-intent']?.concurrency).toEqual({
       group: `release-state-\${{ github.repository }}-\${{ github.sha }}`,
@@ -1032,46 +1060,186 @@ describe('release coordinator trust and recovery', () => {
 });
 
 describe('one-time npm bootstrap', () => {
-  it('is manual, separately approved, prerelease-only, and never moves latest', () => {
+  it('isolates candidate preparation, one-time credentials, and public verification', () => {
     const bootstrap = workflow('npm-bootstrap.yml');
     expect(bootstrap.on).toHaveProperty('workflow_dispatch');
-    expect(bootstrap.jobs?.bootstrap?.environment).toBe('npm-bootstrap');
-
-    const run = jobSource('npm-bootstrap.yml', 'bootstrap');
-    expect(source('npm-bootstrap.yml')).toContain('default: 0.0.0-bootstrap.0');
-    expect(run).toContain('--tag bootstrap');
-    expect(run).toContain('npm dist-tag ls');
-    expect(run).toContain('NPM_BOOTSTRAP_TOKEN');
-    expect(source('npm-bootstrap.yml')).toContain('registry-url: https://registry.npmjs.org');
-    expect(run).toContain('npm version "$VERSION"');
-    expect(run).toContain('pnpm build');
-    expect(run).toContain('pnpm exec vitest run');
-    expect(run.indexOf('npm version "$VERSION"')).toBeLessThan(run.indexOf('pnpm build'));
-    expect(run.indexOf('pnpm build')).toBeLessThan(run.indexOf('pnpm exec vitest run'));
-    expect(run).toContain('already-published');
-    expect(run).toContain('node_modules/scriptspect/dist/cli.mjs');
-    expect(run).toContain('node_modules/scriptspect/schema/config.schema.json');
-    expect(run).toContain('node_modules/scriptspect/dist/action.mjs');
-    expect(run).toContain('canonical-tree');
-    expect(run).toContain('comparatorAlgorithmDigest');
-    expect(run).toContain('canonical-tree.mjs algorithm-digest');
-    expect(run).toContain('comparator-source-bundle.json');
-    expect(source('npm-bootstrap.yml')).toContain(
-      `\${{ runner.temp }}/bootstrap/comparator-source-bundle.json`,
-    );
-    expect(bootstrap.jobs?.bootstrap?.concurrency).toEqual({
+    expect(bootstrap.concurrency).toEqual({
       group: `npm-bootstrap-\${{ github.repository }}`,
       'cancel-in-progress': false,
     });
-    expect(run).toContain('bootstrap-anchor.json');
-    expect(run).toContain('dist-tags-before.json');
-    expect(run).toContain('actions/artifacts');
-    expect(run).toContain('sha256sum --check SHA256SUMS');
-    expect(run).toContain('canonical-tree.mjs digest --tarball');
-    expect(run.indexOf('bootstrap-anchor.json')).toBeLessThan(run.indexOf('npm publish'));
-    expect(run).toMatch(/sha256sum "\$TARBALL_BASENAME" > SHA256SUMS/);
-    expect(run).not.toMatch(/sha256sum "\$TARBALL" > .*SHA256SUMS/);
-    expect(run).not.toMatch(/npm publish[^\n]*0\.1\.0/);
+
+    const prepareJob = bootstrap.jobs?.bootstrap;
+    const publishJob = bootstrap.jobs?.publish_bootstrap;
+    const verifyJob = bootstrap.jobs?.verify_bootstrap;
+    expect(prepareJob?.environment).toBeUndefined();
+    expect(publishJob?.environment).toBe('npm-bootstrap');
+    expect(verifyJob?.environment).toBeUndefined();
+    expect(publishJob?.needs).toEqual(['bootstrap']);
+    expect(verifyJob?.needs).toEqual(['bootstrap', 'publish_bootstrap']);
+    expect(verifyJob?.if).toContain("needs.bootstrap.outputs.needs-publish != 'true'");
+    expect(verifyJob?.if).toContain("needs.publish_bootstrap.result == 'success'");
+
+    const prepare = jobSource('npm-bootstrap.yml', 'bootstrap');
+    const publish = jobSource('npm-bootstrap.yml', 'publish_bootstrap');
+    const verify = jobSource('npm-bootstrap.yml', 'verify_bootstrap');
+    const allRun = [prepare, publish, verify].join('\n');
+    const prepareSteps = prepareJob?.steps ?? [];
+    const publishSteps = publishJob?.steps ?? [];
+    const verifySteps = verifyJob?.steps ?? [];
+    const allSteps = [...prepareSteps, ...publishSteps, ...verifySteps];
+
+    const validation = prepareSteps.find(
+      (step) => step.name === 'Validate the approved request and exact successful CI run',
+    )?.run;
+    const recovery = prepareSteps.find(
+      (step) => step.name === 'Recover the single crash-stable pre-publish anchor',
+    )?.run;
+    const build = prepareSteps.find(
+      (step) => step.name === 'Version first, then build and pack the bootstrap prerelease once',
+    )?.run;
+    const candidateGateStep = prepareSteps.find(
+      (step) => step.name === 'Gate the exact candidate against the public registry',
+    );
+    const handoffStep = prepareSteps.find(
+      (step) => step.name === 'Hand the verified candidate to a fresh publisher runner',
+    );
+    const freshPreflightStep = publishSteps.find(
+      (step) =>
+        step.name === 'Revalidate current main, handoff bytes, package name, and public owner',
+    );
+    const credentialStep = publishSteps.find(
+      (step) => step.name === 'Publish the bootstrap candidate with the one-time credential',
+    );
+    const publicStateStep = verifySteps.find(
+      (step) => step.name === 'Verify exact public bootstrap registry state',
+    );
+    const registryVerification = verifySteps.find(
+      (step) => step.name === 'Verify registry bytes, canonical tree, CLI, schemas, and Action',
+    )?.run;
+    const candidateGate = candidateGateStep?.run;
+    const freshPreflight = freshPreflightStep?.run;
+    const credentialPublication = credentialStep?.run;
+    const publicState = publicStateStep?.run;
+
+    expect(validation).toBeDefined();
+    expect(recovery).toBeDefined();
+    expect(build).toBeDefined();
+    expect(candidateGate).toBeDefined();
+    expect(freshPreflight).toBeDefined();
+    expect(credentialPublication).toBeDefined();
+    expect(publicState).toBeDefined();
+    expect(registryVerification).toBeDefined();
+    expect(handoffStep?.uses).toBe(
+      'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
+    );
+    expect(handoffStep?.with?.name).toBe(`npm-bootstrap-handoff-\${{ github.run_id }}`);
+
+    expect(source('npm-bootstrap.yml')).toContain('default: 0.0.0-bootstrap.0');
+    expect(publish).toContain('--tag bootstrap');
+    expect(allRun).not.toContain('npm dist-tag ls');
+    expect(allRun).not.toContain('npm owner ls');
+    expect(verify).toContain('npm view scriptspect dist-tags --json');
+    expect(verify).toContain('npm view scriptspect maintainers --json');
+    expect(verify).toContain('verify-npm-bootstrap-state.mjs');
+    expect(source('npm-bootstrap.yml')).toContain('registry-url: https://registry.npmjs.org');
+    expect(prepare).toContain('npm version "$VERSION"');
+    expect(prepare).toContain('pnpm build');
+    expect(prepare).toContain('pnpm exec vitest run');
+    expect(prepare.indexOf('npm version "$VERSION"')).toBeLessThan(prepare.indexOf('pnpm build'));
+    expect(prepare.indexOf('pnpm build')).toBeLessThan(prepare.indexOf('pnpm exec vitest run'));
+    expect(build?.match(/pnpm build/gu)).toHaveLength(2);
+    expect(build).toContain('bootstrap-first-build');
+    expect(build).toContain('diff -qr "$RUNNER_TEMP/bootstrap-first-build/dist" dist');
+    expect(candidateGateStep?.id).toBe('registry');
+    expect(prepare).toContain('needs-publish');
+    expect(allRun).toContain('node_modules/scriptspect/dist/cli.mjs');
+    expect(allRun).toContain('node_modules/scriptspect/schema/config.schema.json');
+    expect(allRun).toContain('node_modules/scriptspect/dist/action.mjs');
+    expect(verify).toContain('canonical-tree');
+    expect(verify).toContain('comparatorAlgorithmDigest');
+    expect(verify).toContain('canonical-tree.mjs algorithm-digest');
+    expect(verify).toContain('comparator-source-bundle.json');
+    expect(source('npm-bootstrap.yml')).toContain(
+      `\${{ runner.temp }}/bootstrap/comparator-source-bundle.json`,
+    );
+    expect(prepare).toContain('bootstrap-anchor.json');
+    expect(prepare).toContain('dist-tags-before.json');
+    expect(prepare).toContain('actions/artifacts');
+    expect(prepare).toContain('published bootstrap version exists without the retained anchor');
+    expect(validation).toContain('git fetch --no-tags origin main');
+    expect(validation).toContain('git merge-base --is-ancestor "$SOURCE_SHA" origin/main');
+    expect(validation).toContain('.path == ".github/workflows/ci.yml"');
+    expect(validation).toContain('.head_repository.full_name == $repository');
+    expect(validation).toContain('.conclusion == "success"');
+    expect(validation?.indexOf('git merge-base --is-ancestor')).toBeLessThan(
+      validation?.indexOf('node tools/release/release-state.mjs') ?? -1,
+    );
+    expect(validation?.indexOf('.conclusion == "success"')).toBeLessThan(
+      validation?.indexOf('node tools/release/release-state.mjs') ?? -1,
+    );
+
+    const secretBearingSteps = allSteps.filter((step) =>
+      Object.values(step.env ?? {}).some((value) => value.includes('secrets.NPM_BOOTSTRAP_TOKEN')),
+    );
+    expect(secretBearingSteps).toHaveLength(1);
+    expect(prepareSteps.some((step) => step.uses?.startsWith('actions/checkout@'))).toBe(true);
+    expect(publishSteps.some((step) => step.uses?.startsWith('actions/checkout@'))).toBe(false);
+    expect(verifySteps.some((step) => step.uses?.startsWith('actions/checkout@'))).toBe(true);
+    expect(prepare).not.toContain('NPM_BOOTSTRAP_TOKEN');
+    expect(secretBearingSteps[0]).toBe(credentialStep);
+    expect(freshPreflightStep?.env?.EXPECTED_NPM_OWNER).toBe('Tom409114');
+    expect(credentialStep?.env?.EXPECTED_NPM_OWNER).toBe('Tom409114');
+    expect(credentialStep?.if).toContain("steps.fresh-registry.outputs.publish-now == 'true'");
+    expect(freshPreflight).not.toMatch(/\bnode\s+tools\//u);
+    expect(freshPreflight).not.toContain('pnpm ');
+    expect(credentialPublication).toContain(`[[ "\${OWNER,,}" == "\${EXPECTED_NPM_OWNER,,}" ]]`);
+    expect(credentialPublication?.indexOf(`[[ "\${OWNER,,}"`)).toBeLessThan(
+      credentialPublication?.indexOf('npm publish') ?? -1,
+    );
+    expect(credentialPublication).not.toMatch(/\bnode\s+tools\//u);
+    expect(credentialPublication).not.toContain('pnpm ');
+    expect(credentialStep?.env?.NPM_CONFIG_IGNORE_SCRIPTS).toBe('true');
+    expect(credentialStep?.env?.NPM_CONFIG_REGISTRY).toBe('https://registry.npmjs.org');
+    expect(credentialPublication).toContain('cd "$RUNNER_TEMP/npm-bootstrap-credential"');
+    expect(freshPreflight).toContain('unique == [$expected]');
+    expect(credentialPublication).toContain('unique == [$expected]');
+    expect(credentialPublication).toContain('repos/$REPOSITORY/git/ref/heads/main');
+    expect(credentialPublication).toContain('.object.sha == $source and .object.sha == $workflow');
+    expect(credentialPublication).toContain('raced-version.json');
+    expect(credentialPublication?.indexOf('publish-main.json')).toBeLessThan(
+      credentialPublication?.indexOf('npm whoami') ?? -1,
+    );
+    expect(credentialPublication?.indexOf('publish-main.json')).toBeLessThan(
+      credentialPublication?.indexOf('npm publish') ?? -1,
+    );
+    expect(recovery).toContain('verify-npm-bootstrap-anchor.mjs provenance');
+    expect(recovery).toContain('verify-npm-bootstrap-anchor.mjs files');
+    expect(recovery).toContain('workflow_run.id');
+    expect(recovery).toContain('actions/workflows/npm-bootstrap.yml');
+    expect(recovery).toContain('.artifactDigest');
+    expect(recovery).toContain('sha256sum "$RUNNER_TEMP/bootstrap-anchor.zip"');
+    expect(recovery?.indexOf('bootstrap-anchor.zip')).toBeLessThan(
+      recovery?.indexOf('unzip -q') ?? -1,
+    );
+    expect(build).not.toContain('$RUNNER_TEMP/bootstrap/dist-tags-before.err');
+    expect(candidateGate).toContain('git fetch --no-tags origin main');
+    expect(candidateGate).toContain('[[ "$(git rev-parse origin/main)" == "$SOURCE_SHA" ]]');
+    const existingVersionProbe = candidateGate?.indexOf('existing-version.raw.json') ?? -1;
+    const exactMainCheck = candidateGate?.indexOf('git rev-parse origin/main') ?? -1;
+    expect(existingVersionProbe).toBeGreaterThanOrEqual(0);
+    expect(existingVersionProbe).toBeLessThan(exactMainCheck);
+    expect(publicState).toContain('verify-npm-bootstrap-state.mjs');
+    expect(publicStateStep?.env ?? {}).not.toHaveProperty('NODE_AUTH_TOKEN');
+    expect(
+      allRun.match(/verify-npm-bootstrap-state\.mjs normalize/gu)?.length ?? 0,
+    ).toBeGreaterThanOrEqual(3);
+    expect(registryVerification).toContain('registry-metadata.raw.json');
+    expect(allRun).toContain('sha256sum --check SHA256SUMS');
+    expect(allRun).toContain('.name == "scriptspect" and .version == $version');
+    expect(verify).toContain('canonical-tree.mjs digest --tarball');
+    expect(prepare).toMatch(/sha256sum "\$TARBALL_BASENAME" > SHA256SUMS/);
+    expect(prepare).not.toMatch(/sha256sum "\$TARBALL" > .*SHA256SUMS/);
+    expect(publish).not.toMatch(/npm publish[^\n]*0\.1\.0/);
     expect(source('release.yml')).not.toContain('NPM_BOOTSTRAP_TOKEN');
   });
 });

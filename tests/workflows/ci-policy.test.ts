@@ -156,6 +156,7 @@ describe('reproducible CI', () => {
 
   it('enforces 90 percent coverage and generated-file parity', () => {
     const ci = workflow('ci.yml');
+    expect(ci.jobs?.generated?.permissions).toEqual({ checks: 'read', contents: 'read' });
     const qualitySteps = ci.jobs?.quality?.steps ?? [];
     const qualityRun = qualitySteps.map((step) => step.run ?? '').join('\n');
     expect(qualityRun).toContain('--coverage');
@@ -167,6 +168,7 @@ describe('reproducible CI', () => {
     const generatedRun = (ci.jobs?.generated?.steps ?? []).map((step) => step.run ?? '').join('\n');
     expect(generatedRun).toContain('generate-schemas.ts');
     expect(generatedRun).toContain('generate-readme-demo.ts');
+    expect(generatedRun).toContain('verify-readme-release-evidence.ts');
     expect(generatedRun).toContain('check-readme-parity.ts');
     expect(generatedRun).not.toContain('generate-readme-status.ts');
     expect(generatedRun).toContain('docs/readme-status.json');
@@ -183,10 +185,10 @@ describe('reproducible CI', () => {
       'terminal.txt',
       'fix.patch',
       'package.after.json',
-      'terminal.svg',
     ]) {
       expect(generatedRun).toContain(pinnedAsset);
     }
+    expect(generatedRun).not.toContain('terminal.svg');
     expect(generatedRun).toContain('docs/validation/readme-action-evidence.json');
     expect(generatedRun).toContain('git diff --quiet "$STATUS_COMMIT" HEAD --');
     expect(generatedRun).not.toContain('git diff-tree');
@@ -212,6 +214,14 @@ describe('reproducible CI', () => {
       step.uses?.startsWith('actions/checkout@'),
     );
     expect(generatedCheckout?.with?.['fetch-depth']).toBe(0);
+    const generatedCommand = (ci.jobs?.generated?.steps ?? []).find((step) =>
+      step.run?.includes('verify-readme-release-evidence.ts'),
+    );
+    expect(generatedCommand?.env?.GITHUB_TOKEN).toBe(`\${{ github.token }}`);
+
+    const paritySource = readFileSync(join(root, 'tools/check-readme-parity.ts'), 'utf8');
+    expect(paritySource).not.toContain("execFileSync('git'");
+    expect(paritySource).not.toContain("spawnSync('git'");
 
     const qualityBuildIndex = qualitySteps.findIndex((step) => step.run === 'pnpm build');
     const qualityCoverageIndex = qualitySteps.findIndex((step) => step.run?.includes('--coverage'));

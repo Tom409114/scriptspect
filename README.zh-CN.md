@@ -16,10 +16,12 @@
 
 ScriptSpect 会静态检查 npm 风格的 `package.json` scripts，并且不会运行它们。它识别在 `posix-sh`、Windows `cmd` 或可选 `powershell` 下含义不同的结构，精确指向相关 span，并只在安全条件得到证明后提供自动修复。
 
+<!-- readme-state:overview:start -->
 > [!IMPORTANT]
 > 本仓库目前是**预发布源码评估版**。npm package 与公开 Action tag 尚不存在；下面所有可复制步骤都特意固定到不可变 source commit。
 
 **[查看真实 demo](#修复前分析结果与修复后)** · **[从源码评估](#从源码评估evaluate-from-source-pre-release)** · **[GitHub Actions](#github-actions-预览pre-release)** · **[规则列表](docs/rules/README.md)**
+<!-- readme-state:overview:end -->
 
 <!-- readme-section: why -->
 ## 为什么值得使用
@@ -70,6 +72,7 @@ ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正�
 
 `--fix-dry-run` 只打印 patch 而不写入。`--fix` 使用 staged writes、写后重新分析与 recovery journal；它不会安装依赖或改写 lockfile。使用 `pnpm exec tsx tools/generate-readme-demo.ts` 可重新生成全部 demo assets。
 
+<!-- readme-state:evaluate:start -->
 <!-- readme-section: evaluate -->
 ## 从源码评估（Evaluate from source (pre-release)）
 
@@ -78,7 +81,7 @@ ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正�
 ```bash
 git clone https://github.com/Tom409114/scriptspect.git
 cd scriptspect
-git checkout 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+git checkout bf37b4132508c685a91cc16a9c0a3058c252502e
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
@@ -86,6 +89,7 @@ node dist/cli.mjs tests/fixtures/readme-demo
 ```
 
 这里特意还没有 `npx scriptspect` 快速开始。机器可读的 release state 见 [docs/readme-status.json](docs/readme-status.json)。
+<!-- readme-state:evaluate:end -->
 
 <!-- readme-section: cli -->
 ## CLI 快速参考
@@ -104,6 +108,7 @@ node dist/cli.mjs explain PS010
 
 显示过滤不会隐藏失败语义：任何配置为 `error` 的 finding 都会失败；未过滤 warning 总数会与 `--max-warnings` 比较。
 
+<!-- readme-state:action:start -->
 <!-- readme-section: action -->
 ## GitHub Actions 预览（pre-release）
 
@@ -124,7 +129,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Tom409114/scriptspect
-          ref: 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+          ref: bf37b4132508c685a91cc16a9c0a3058c252502e
           path: .scriptspect
           persist-credentials: false
       - uses: ./.scriptspect
@@ -133,12 +138,13 @@ jobs:
 ```
 
 Action 会先写入 annotations、job summary 以及名为 `exit-code`、`packages`、`scripts`、`errors`、`warnings`、`advisories` 的数字 outputs，再把 finding run 标记为失败。默认模式只读。
+<!-- readme-state:action:end -->
 
-**真实托管证据——不是模拟截图。** 在 `main` 的 `0898538` 上，公开的 [CI run #33449906358](https://github.com/Tom409114/scriptspect/actions/runs/33449906358) 使用 `uses: ./` 分别消费 clean 与 broken fixture。clean consumer 返回 `1 package · 1 script · 0 errors`；broken fixture 产生 2 条 check annotations，其中包括落在 `package.json` 上的 `PS010: scripts.clean`。
+**真实托管证据——不是模拟截图。** 在 `main` 的 `bf37b413` 上，公开的 [CI run #33467290054](https://github.com/Tom409114/scriptspect/actions/runs/33467290054) 使用 `uses: ./` 分别消费 clean 与 broken fixture。clean consumer 返回 `1 package · 1 script · 0 errors`；broken fixture 产生 2 条 check annotations，其中包括落在 `package.json` 上的 `PS010: scripts.clean`。
 
 ![根据真实托管 Action run 生成的验证卡片](docs/assets/demo/action.svg)
 
-[可选择的 Action 证据文本](docs/assets/demo/action.txt) · [提交进仓库的源证据](docs/validation/readme-action-evidence.json) · [打开托管 job](https://github.com/Tom409114/scriptspect/actions/runs/33449906358/job/99677215357)
+[可选择的 Action 证据文本](docs/assets/demo/action.txt) · [提交进仓库的源证据](docs/validation/readme-action-evidence.json) · [打开托管 job](https://github.com/Tom409114/scriptspect/actions/runs/33467290054/job/99729679961)
 
 <!-- readme-section: config -->
 ## 最小配置
@@ -163,6 +169,7 @@ Contracts：[config JSON Schema](schema/config.schema.json) · [JSON output Sche
 <!-- readme-section: support -->
 ## 支持范围与诚实边界
 
+<!-- readme-state:scope-table:start -->
 | 范围 | 当前源码评估行为 |
 | --- | --- |
 | Projects | 根 `package.json`，以及 npm/Yarn/Bun workspaces 与 `pnpm-workspace.yaml` |
@@ -171,9 +178,12 @@ Contracts：[config JSON Schema](schema/config.schema.json) · [JSON output Sche
 | Output | stylish terminal text、versioned JSON、GitHub annotations + summary |
 | Fixes | dry-run 以及可证明的 safe/conditional rewrites；ambiguous case 保持 manual |
 | Privacy | 离线分析；不执行 scripts；无 telemetry |
-| Release | pre-release；目前没有 npm package 或公开 Action reference |
+<!-- readme-state:scope-table:end -->
+<!-- readme-state:release-row:start -->
+**Release:** pre-release；目前没有 npm package 或公开 Action reference。
+<!-- readme-state:release-row:end -->
 
-本主页不宣称外部采用、测量精度、比较优势、hosted performance 或 release gate 已完成。[validation ledger](docs/validation/spec-compliance-2026-09-01.md) 会把仓库内可以完成的工程工作，与只有真实用户和公开 release 才能形成的 evidence 分开。
+本主页不宣称外部采用、测量精度、比较优势或 hosted performance。即使 verified release 完成，外部验证与采用门仍必须由真实 evidence 驱动。[validation ledger](docs/validation/spec-compliance-2026-09-01.md) 会把仓库内可以完成的工程工作，与只有真实用户才能形成的 evidence 分开。
 
 <!-- readme-section: faq -->
 ## 常见问题与故障排查
@@ -186,7 +196,9 @@ Contracts：[config JSON Schema](schema/config.schema.json) · [JSON output Sche
 
 **最终使用了哪个 config？** 显式 `--config` 优先，其次是 `package.json` 字段、standalone file，最后是 defaults。人类可读输出会报告非默认 source。
 
+<!-- readme-state:production-faq:start -->
 **现在能在 production CI 使用吗？** 请把这份 source checkout 当作 evaluation build。等待公开 npm、Release、provenance、checksum 与 immutable Action-consumer evidence 齐全后，再依赖 released reference。
+<!-- readme-state:production-faq:end -->
 
 <!-- readme-section: navigation -->
 ## 深入了解

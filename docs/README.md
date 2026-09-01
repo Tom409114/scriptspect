@@ -11,7 +11,8 @@ The GitHub homepage is available in [English](../README.md) and [Simplified Chin
 
 ## Project status and governance
 
-- [Pre-release homepage status](readme-status.json)
+- [Homepage release status](readme-status.json)
+- [Published-homepage handoff](release-readme.md)
 - [Validation audit](validation/spec-compliance-2026-09-01.md)
 - [Corpus report](validation/corpus-2026-08.md)
 - [Roadmap](roadmap.md)

@@ -19,12 +19,14 @@ them. It identifies constructs that mean different things to `posix-sh`,
 Windows `cmd`, or optional `powershell`, points to the relevant span, and keeps
 automatic fixes behind explicit safety gates.
 
+<!-- readme-state:overview:start -->
 > [!IMPORTANT]
 > This repository is a **pre-release source evaluation**. The npm package and
 > public Action tag do not exist yet; the copy-paste paths below deliberately
 > use an immutable source commit.
 
 **[See the real demo](#before-result-and-after)** · **[Evaluate from source](#evaluate-from-source-pre-release)** · **[GitHub Actions](#github-actions-preview-pre-release)** · **[Rules](docs/rules/README.md)**
+<!-- readme-state:overview:end -->
 
 <!-- readme-section: why -->
 ## Why it is useful
@@ -83,6 +85,7 @@ post-write analysis, and a recovery journal; it never installs dependencies or
 rewrites a lockfile. Regenerate all demo assets with
 `pnpm exec tsx tools/generate-readme-demo.ts`.
 
+<!-- readme-state:evaluate:start -->
 <!-- readme-section: evaluate -->
 ## Evaluate from source (pre-release)
 
@@ -94,7 +97,7 @@ configuration, or I/O exits `2`.
 ```bash
 git clone https://github.com/Tom409114/scriptspect.git
 cd scriptspect
-git checkout 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+git checkout bf37b4132508c685a91cc16a9c0a3058c252502e
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
@@ -103,6 +106,7 @@ node dist/cli.mjs tests/fixtures/readme-demo
 
 There is deliberately no `npx scriptspect` quick start yet. The machine-readable
 release state is [docs/readme-status.json](docs/readme-status.json).
+<!-- readme-state:evaluate:end -->
 
 <!-- readme-section: cli -->
 ## CLI at a glance
@@ -123,6 +127,7 @@ node dist/cli.mjs explain PS010
 Presentation filters do not hide failure semantics: any configured `error`
 fails, and the unfiltered warning count is compared with `--max-warnings`.
 
+<!-- readme-state:action:start -->
 <!-- readme-section: action -->
 ## GitHub Actions preview (pre-release)
 
@@ -146,7 +151,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Tom409114/scriptspect
-          ref: 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+          ref: bf37b4132508c685a91cc16a9c0a3058c252502e
           path: .scriptspect
           persist-credentials: false
       - uses: ./.scriptspect
@@ -157,16 +162,17 @@ jobs:
 The Action writes annotations, a job summary, and numeric outputs named
 `exit-code`, `packages`, `scripts`, `errors`, `warnings`, and `advisories` before
 marking a finding run as failed. Its default mode is read-only.
+<!-- readme-state:action:end -->
 
-**Real hosted proof — not a mock screenshot.** On `main` at `0898538`, public
-[CI run #33449906358](https://github.com/Tom409114/scriptspect/actions/runs/33449906358)
+**Real hosted proof — not a mock screenshot.** On `main` at `bf37b413`, public
+[CI run #33467290054](https://github.com/Tom409114/scriptspect/actions/runs/33467290054)
 consumed `uses: ./` against both clean and broken fixtures. The clean consumer
 reported `1 package · 1 script · 0 errors`; the broken fixture emitted 2 check
 annotations, including `PS010: scripts.clean` on `package.json`.
 
 ![Generated card summarizing the verified hosted Action run](docs/assets/demo/action.svg)
 
-[Selectable Action evidence](docs/assets/demo/action.txt) · [Committed source evidence](docs/validation/readme-action-evidence.json) · [Open the hosted job](https://github.com/Tom409114/scriptspect/actions/runs/33449906358/job/99677215357)
+[Selectable Action evidence](docs/assets/demo/action.txt) · [Committed source evidence](docs/validation/readme-action-evidence.json) · [Open the hosted job](https://github.com/Tom409114/scriptspect/actions/runs/33467290054/job/99729679961)
 
 <!-- readme-section: config -->
 ## Minimal configuration
@@ -196,6 +202,7 @@ Contracts: [config JSON Schema](schema/config.schema.json) · [JSON output Schem
 <!-- readme-section: support -->
 ## Scope and honest limits
 
+<!-- readme-state:scope-table:start -->
 | Area | Current source-evaluation behavior |
 | --- | --- |
 | Projects | root `package.json` plus npm/Yarn/Bun workspaces and `pnpm-workspace.yaml` |
@@ -204,13 +211,16 @@ Contracts: [config JSON Schema](schema/config.schema.json) · [JSON output Schem
 | Output | stylish terminal text, versioned JSON, GitHub annotations + summary |
 | Fixes | dry-run plus provable safe/conditional rewrites; ambiguous cases stay manual |
 | Privacy | offline analysis; scripts are not executed; no telemetry |
-| Release | pre-release; no npm package or public Action reference yet |
+<!-- readme-state:scope-table:end -->
+<!-- readme-state:release-row:start -->
+**Release:** pre-release; no npm package or public Action reference yet.
+<!-- readme-state:release-row:end -->
 
 The homepage does not claim external adoption, measured precision, comparative
-superiority, hosted performance, or completed release gates. The
-[validation ledger](docs/validation/spec-compliance-2026-09-01.md) keeps
-repository-controlled work separate from evidence that only real users and a
-public release can create.
+superiority, or hosted performance. Even after a verified release, external
+validation and adoption gates remain evidence-led. The [validation
+ledger](docs/validation/spec-compliance-2026-09-01.md) keeps repository-controlled
+work separate from evidence that only real users can create.
 
 <!-- readme-section: faq -->
 ## FAQ and troubleshooting
@@ -230,9 +240,11 @@ dependency to be declared. Otherwise the finding remains explanatory and manual.
 field, the standalone file, then defaults. Non-default sources are reported in
 human-readable output.
 
+<!-- readme-state:production-faq:start -->
 **Can I use it in production CI today?** Treat this source checkout as an
 evaluation build. Wait for public npm, Release, provenance, checksum, and
 immutable Action-consumer evidence before depending on a released reference.
+<!-- readme-state:production-faq:end -->
 
 <!-- readme-section: navigation -->
 ## Go deeper

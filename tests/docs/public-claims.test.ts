@@ -47,13 +47,26 @@ describe('public project claims', () => {
     const security = read('SECURITY.md');
     const maintainers = read('MAINTAINERS.md');
     const changelog = read('CHANGELOG.md');
+    const readmeStatus = JSON.parse(read('docs/readme-status.json')) as {
+      releaseState: 'pre-release' | 'published';
+      packageVersion: string;
+    };
     const releaseManifest = JSON.parse(read('.release-please-manifest.json')) as Record<
       string,
       string
     >;
 
-    expect(security).toContain('No npm release has been published yet');
-    expect(maintainers).toContain('After the first release');
+    if (readmeStatus.releaseState === 'pre-release') {
+      expect(security).toContain('No npm release has been published yet');
+    } else {
+      expect(security).not.toContain('No npm release has been published yet');
+      expect(security).not.toContain('not published yet');
+      expect(security).not.toContain('main` (pre-release)');
+      expect(security).toContain(`\`${readmeStatus.packageVersion}\``);
+    }
+    expect(maintainers).toContain(
+      'After the first release, each successful release must publish the same tarball',
+    );
     if (releaseManifest['.'] === '0.0.0') {
       expect(changelog).toBe('');
     } else {

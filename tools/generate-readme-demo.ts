@@ -107,7 +107,7 @@ function terminalSvg(text: string): string {
     .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="title desc">
-  <title id="title">ScriptSpect pre-release demo output</title>
+  <title id="title">ScriptSpect demo output</title>
   <desc id="desc">Terminal output from checking the README demo fixture. The selectable text version is available beside this image.</desc>
   <style>.terminal { fill: #0d1117; } .bar { fill: #161b22; } .terminal-line { fill: #c9d1d9; font: 16px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; } .terminal-command { fill: #7ee787; } .terminal-section { fill: #79c0ff; font-weight: 600; } .terminal-error { fill: #ff7b72; font-weight: 600; } .terminal-advisory { fill: #d29922; font-weight: 600; } .terminal-summary { fill: #8b949e; }</style>
   <rect class="terminal" width="100%" height="100%" rx="12"/>
