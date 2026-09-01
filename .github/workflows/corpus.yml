@@ -27,88 +27,22 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.24.0 --activate
           pnpm install --frozen-lockfile
-      - name: Collect repository candidates
+      - name: Collect the ranked repository candidate snapshot
         env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_FILE: ${{ runner.temp }}/repository-candidates.txt
-        run: |
-          set -euo pipefail
-          gh api 'search/repositories?q=language:typescript+stars:%3E2000&sort=stars&order=desc&per_page=100' \
-            --jq '.items[].full_name' > "$CANDIDATE_FILE"
-          gh api 'search/repositories?q=language:javascript+stars:%3E5000&sort=stars&order=desc&per_page=100' \
-            --jq '.items[].full_name' >> "$CANDIDATE_FILE"
-      - name: Select the exact deterministic repository sample
+          GITHUB_TOKEN: ${{ github.token }}
+        run: pnpm exec tsx tools/corpus-candidates.ts repository-candidates.json
+      - name: Resolve the exact root-eligible repository sample
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           REPO_COUNT: ${{ inputs.repo-count || '100' }}
-          CANDIDATE_FILE: ${{ runner.temp }}/repository-candidates.txt
-          SELECTED_FILE: ${{ runner.temp }}/repository-names.txt
-          SELECTION_FILE: repository-sample.json
-        run: |
-          set -euo pipefail
-          [[ "$REPO_COUNT" =~ ^([1-9]|[1-9][0-9]|100)$ ]]
-          [[ "$REPO_COUNT" -le 100 ]]
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-
-          const countText = process.env.REPO_COUNT ?? '';
-          if (!/^(?:[1-9]|[1-9][0-9]|100)$/u.test(countText)) {
-            throw new Error('REPO_COUNT must be an integer from 1 through 100');
-          }
-          const requested = Number(countText);
-          const candidateFile = process.env.CANDIDATE_FILE;
-          const selectedFile = process.env.SELECTED_FILE;
-          const selectionFile = process.env.SELECTION_FILE;
-          if (!candidateFile || !selectedFile || !selectionFile) {
-            throw new Error('corpus selection file paths are required');
-          }
-
-          const candidates = readFileSync(candidateFile, 'utf8')
-            .split(/\r?\n/u)
-            .filter(Boolean);
-          for (const repository of candidates) {
-            if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
-              throw new Error(`invalid repository name: ${repository}`);
-            }
-          }
-          const uniqueCandidates = [...new Set(candidates)].sort();
-          if (uniqueCandidates.length < requested) {
-            throw new Error(
-              `requested ${requested} repositories but only ${uniqueCandidates.length} unique candidates were returned`,
-            );
-          }
-          const selected = uniqueCandidates.slice(0, requested);
-          writeFileSync(selectedFile, `${selected.join('\n')}\n`, 'utf8');
-          writeFileSync(
-            selectionFile,
-            `${JSON.stringify({ schemaVersion: 1, requested, actual: selected.length }, null, 2)}\n`,
-            'utf8',
-          );
-          NODE
-      - name: Resolve immutable repository commits
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO_COUNT: ${{ inputs.repo-count || '100' }}
-          SELECTED_FILE: ${{ runner.temp }}/repository-names.txt
-        run: |
-          set -euo pipefail
-          : > repos.txt
-          while IFS= read -r repository; do
-            [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
-            default_branch=$(gh api "repos/$repository" --jq '.default_branch')
-            [[ -n "$default_branch" ]]
-            commit=$(gh api -X GET "repos/$repository/commits" \
-              -f sha="$default_branch" -f per_page=1 --jq '.[0].sha')
-            [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
-            printf '%s@%s\n' "$repository" "$commit" >> repos.txt
-          done < "$SELECTED_FILE"
-          sort -u repos.txt -o repos.txt
-          awk '!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/ { exit 1 }' repos.txt
-          ACTUAL_COUNT=$(wc -l < repos.txt)
-          test "$ACTUAL_COUNT" -eq "$REPO_COUNT"
+        run: pnpm exec tsx tools/corpus-resolve.ts repository-candidates.json repos.txt repository-sample.json "$REPO_COUNT"
       - name: Scan scripts without writing to sampled repositories
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SCRIPTSPECT_SOURCE_COMMIT: ${{ github.sha }}
+          CORPUS_SAMPLE_METHOD: popularity-strata-round-robin-v1
+          CORPUS_CANDIDATE_SNAPSHOT: repository-candidates.json
+          CORPUS_SAMPLE_EVIDENCE: repository-sample.json
         run: pnpm exec tsx tools/corpus-scan.ts repos.txt
       - name: Create a deterministic 100-finding adjudication draft when available
         if: always()
@@ -126,6 +60,7 @@ jobs:
         with:
           name: corpus-draft-${{ github.run_id }}
           path: |
+            repository-candidates.json
             repos.txt
             repository-sample.json
             findings.jsonl

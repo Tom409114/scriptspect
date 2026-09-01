@@ -5,22 +5,40 @@ public code. A machine scan produces a **data draft**, not a precision claim.
 
 ## Immutable scan
 
-1. The manual/monthly corpus workflow selects public JavaScript and TypeScript
-   repositories, resolves each default branch once, and records only
-   `owner/repository@40-character-commit` locators.
-2. `tools/corpus-scan.ts` reads those immutable locators through GitHub's tree
-   and blob APIs. It never clones with credentials, executes scripts, or writes
-   to a sampled repository.
-3. Only the root `package.json`, `pnpm-workspace.yaml`, and candidate workspace
+1. The manual/monthly corpus workflow captures the complete first page of two
+   popularity-ranked GitHub Search strata (JavaScript and TypeScript), including
+   each query, response hash, rank, star count, and repository. It then uses a
+   deterministic rank-by-rank round robin and de-duplicates a repository at its
+   first appearance. The full ordered snapshot is preserved rather than sorting
+   away its rank or stratum.
+2. The resolver batches candidates through GitHub GraphQL. One response anchors
+   the default-branch commit and root `package.json` blob together. Only an exact
+   `NOT_FOUND` error at that candidate's root-file field is an eligibility
+   exclusion; every other partial error or response mismatch fails closed. The
+   resolver records only `owner/repository@40-character-commit` locators and
+   hashes the complete ordered candidate snapshot into its evidence.
+3. `tools/corpus-scan.ts` makes one bounded recursive-tree REST request per
+   selected repository. It reads each selected manifest from
+   `raw.githubusercontent.com` at the exact commit without an Authorization
+   header, then verifies byte length and the Git blob OID from the immutable tree
+   before analysis. Manifest downloads therefore do not consume per-blob GitHub
+   REST core requests. The scanner never clones, executes scripts, or writes to
+   a sampled repository.
+4. Only the root `package.json`, `pnpm-workspace.yaml`, and candidate workspace
    `package.json` files are materialized in a fresh temporary directory. The
    normal CLI analyzer then applies the same canonical-root, workspace glob,
    dependency visibility, and symlink-boundary policy used for local projects.
-4. Dependency/VCS/vendor/generated/build/distribution directories and symlink
+5. Dependency/VCS/vendor/generated/build/distribution directories and symlink
    tree entries are excluded. The default ceilings are 20,000 tree entries,
    500 manifests, depth 12, 1 MiB per file, and 10 MiB decoded bytes per
    repository. A GitHub-truncated tree or any local limit marks the repository
-   `truncated`; API, decoding, or analysis errors mark it `failed`. Neither
-   status contributes to promoted totals.
+   `truncated`; API, decoding, immutable-blob verification, or analysis errors
+   mark it `failed`. Neither status contributes to promoted totals. GitHub HTTP
+   failures retain their status, rate-limit limit/remaining/reset/used/resource,
+   Retry-After, request ID, and a rate/auth/permission classification; request
+   credentials are never persisted. Findings from truncated or failed
+   repositories are also excluded from `findings.jsonl`, so the adjudication
+   draft cannot silently sample incomplete repositories.
 
 The scan reports root-only and workspace-full counts separately. This prevents
 root-only PS040 results from being presented as monorepo truth.
@@ -29,13 +47,81 @@ root-only PS040 results from being presented as monorepo truth.
 
 The workflow artifact contains:
 
+- `repository-candidates.json`: the complete ordered popularity-strata snapshot,
+  including query metadata, ranks, repositories, response hashes, and status;
+- `repository-sample.json`: candidate-snapshot SHA-256, deterministic method,
+  GraphQL request/cost evidence, rootless replacements, and selected immutable
+  commits/root-manifest blobs;
 - `repos.txt`: the exact immutable sample;
 - `findings.jsonl`: stable finding IDs, immutable source URLs, script SHA-256,
-  rule metadata, spans, and redacted messages—never raw script source;
+  rule metadata, spans, and source-free rule summaries—never raw script source;
 - `corpus-run.json`: selected manifest paths, scanner/source commit and hashes,
-  rule-registry hash, limits, sample method/seed, environment, per-repository
-  status, separate scan modes, artifact hashes, and reproduction command;
+  rule-registry hash, limits, sample method/seed, hashes of the full candidate
+  snapshot and sample evidence, environment, per-repository status, separate
+  scan modes, artifact hashes, and a directly copyable POSIX-shell reproduction
+  command;
 - `summary.md`: an explicitly unverified summary for maintainers.
+
+To replay a run, place its `repository-candidates.json`,
+`repository-sample.json`, and `repos.txt` as nonignored, untracked regular files
+at the root of a **fresh dedicated checkout already positioned at the recorded
+commit**. Their basenames must be safe and unique and cannot collide with
+`.git`, `node_modules`, `findings.jsonl`, `summary.md`, `corpus-run.json`, or the
+deterministic replay output directory. Before the original scan makes a network
+request, it also requires its source checkout's `HEAD` to equal the recorded
+source commit and compares the evidence basenames with that commit's raw root
+tree. A basename already tracked there is rejected instead of emitting an
+intrinsically unreplayable command. Set `GITHUB_TOKEN` externally to a read-only
+public-repository token, then run the command recorded in `corpus-run.json`.
+The command never invokes `git checkout`: a different HEAD fails closed and no
+smudge/process filter or `post-checkout` hook gets an opportunity to run first.
+
+The validator source is gzip/base64-embedded once in the reproduction command
+and decoded with Node's built-in `node:zlib` into a data-module; it is never
+loaded from the checkout being validated. Every Git subprocess forces
+`core.fsmonitor=false` and `core.hooksPath=/dev/null`, disables replacement
+objects, binds the worktree to the current checkout, and discards inherited Git
+repository/index/object/config redirection variables. The validator parses the
+raw NUL-delimited `HEAD` tree and hashes every regular file's worktree bytes
+with the repository's Git object algorithm. It separately parses
+NUL-delimited `git ls-files --stage` records and requires every path, mode, blob
+OID, and stage to match the `HEAD` tree exactly. This direct comparison makes
+`assume-unchanged`, `skip-worktree`, `fsmonitor-valid`, clean/smudge filters,
+EOL or working-tree encodings, and racy stat data unable to substitute other
+bytes without invoking `git diff` or `git status`. POSIX executable bits and
+raw symlink targets must match their tree modes. Gitlinks are rejected rather
+than trusted as submodules. A NUL-delimited
+`git ls-files --others --exclude-standard` enumeration must contain exactly the
+three named evidence inputs; any other nonignored untracked file or any Git or
+filesystem failure is fatal. Raw path buffers preserve unusual filenames.
+
+Before **and** after the frozen-lockfile install, each evidence input must still
+be a regular file with the exact SHA-256 recorded by the original manifest, and
+the tracked worktree/index/untracked checks must all pass. `node_modules` must
+not exist before package tooling starts (including as a broken link), while the
+second gate permits the frozen install's ignored `node_modules` output. The
+complete replay runs in a POSIX subshell. It first disables inherited shell
+`allexport`, copies `GITHUB_TOKEN` into a non-exported shell variable, and
+removes the credential from the environment. An empty token fails before
+package setup or output-directory creation, so adding a token and retrying does
+not require cleanup. Corepack, pnpm install, and the final pnpm scanner command
+are resolved as external commands through `command env`, bypassing caller shell
+functions and aliases that could otherwise read shell-local replay state. The
+token is injected as a single-command environment assignment only for the final
+scanner invocation. Caller environment values therefore survive the replay
+unchanged.
+
+Replay also requires the exact recorded Node version, platform, and
+architecture; inside its subshell it restores the recorded `RUNNER_OS` value or
+explicitly unsets it. It binds the complete canonical limits JSON, original
+generation timestamp, sample method and seed, candidate snapshot, sample
+evidence, repository list, and a new deterministic output directory to the
+scanner's actual environment variables and positional arguments. The command
+refuses to reuse that output directory. Only evidence basenames and their
+digests plus a token-variable reference are recorded; neither the credential
+nor a local absolute path is persisted. A run recorded on another platform
+must therefore be replayed in a matching environment with the recorded Node
+patch version.
 
 The run fails if any repository fails, while still leaving `corpus-run.json`
 for diagnosis. Truncation is visible and excluded rather than silently treated
@@ -77,4 +163,3 @@ exist, scriptspect makes no head-to-head superiority claim.
 - Draft, partial, overdue, or failed runs leave the relevant gate `OPEN`.
 - No issue, pull request, comment, email, or other third-party write is made
   from corpus automation. Such contact requires explicit human authorization.
-

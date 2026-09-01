@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_CORPUS_LIMITS,
+  gitBlobOid,
   parseRepoLocator,
   redactCorpusText,
   selectCorpusFiles,
@@ -8,6 +9,12 @@ import {
 } from '../../tools/corpus-lib';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
+
+describe('Git blob integrity', () => {
+  it('derives the canonical SHA-1 object ID from the exact blob bytes', () => {
+    expect(gitBlobOid(Buffer.from('hello\n'))).toBe('ce013625030ba8dba906f756967f9e9ca394464a');
+  });
+});
 
 describe('immutable corpus locators', () => {
   it('accepts only owner/repo plus an exact 40-character commit', () => {
@@ -58,6 +65,22 @@ describe('bounded workspace manifest selection', () => {
     expect(selected.truncations).toEqual(
       expect.arrayContaining(['manifest-limit:2', 'depth-limit:3', 'byte-limit:160']),
     );
+  });
+
+  it('keeps the root manifest inside the tree-entry budget even when GitHub lists it late', () => {
+    const tree: TreeEntry[] = [
+      { path: 'a/readme.md', type: 'blob', mode: '100644', size: 20, sha: 'a' },
+      { path: 'b/readme.md', type: 'blob', mode: '100644', size: 20, sha: 'b' },
+      { path: 'package.json', type: 'blob', mode: '100644', size: 80, sha: 'root' },
+    ];
+
+    const selected = selectCorpusFiles(tree, {
+      ...DEFAULT_CORPUS_LIMITS,
+      maxTreeEntries: 2,
+    });
+
+    expect(selected.files.map((entry) => entry.path)).toEqual(['package.json']);
+    expect(selected.truncations).toEqual(['tree-entry-limit:2']);
   });
 });
 
