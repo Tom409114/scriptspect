@@ -403,6 +403,12 @@ describe('release coordinator trust and recovery', () => {
     });
     expect(readiness.permissions).toEqual({ contents: 'read' });
     expect(readiness.jobs).toHaveProperty('release-pr-readiness');
+    const readinessCheckout = readiness.jobs?.['release-pr-readiness']?.steps?.find((step) =>
+      step.uses?.startsWith('actions/checkout@'),
+    );
+    expect(readinessCheckout).toBeDefined();
+    expect(readinessCheckout?.with ?? {}).not.toHaveProperty('ref');
+    expect(readinessCheckout?.with).toMatchObject({ 'persist-credentials': false });
 
     const gate = jobSource('release-readiness.yml', 'release-pr-readiness');
     for (const predicate of [
@@ -412,7 +418,7 @@ describe('release coordinator trust and recovery', () => {
       expect(gate).toContain(predicate);
     }
     const readinessSource = source('release-readiness.yml');
-    expect(readinessSource).toContain('github.event.pull_request.base.sha');
+    expect(readinessSource).not.toContain('github.event.pull_request.base.sha');
     expect(readinessSource).not.toContain('github.event.pull_request.head.sha');
     expect(readinessSource).not.toContain('github.event.pull_request.head.ref');
     expect(readinessSource).toContain('node-version: 22');
