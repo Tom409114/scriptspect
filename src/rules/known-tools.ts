@@ -7,7 +7,10 @@
  */
 const KNOWN_TOOL_PROVIDER_ALIASES: Readonly<Record<string, readonly string[]>> = {
   gatsby: ['gatsby'],
+  'npm-run-all': ['npm-run-all2'],
   playwright: ['playwright'],
+  'run-p': ['npm-run-all2'],
+  'run-s': ['npm-run-all2'],
 };
 
 export const KNOWN_TOOLS: ReadonlyMap<string, readonly string[]> = new Map(

@@ -32,6 +32,8 @@ export interface TreeEntry {
 
 export interface SelectedCorpusFiles {
   files: TreeEntry[];
+  /** Root npm lockfiles whose presence is projected without downloading their bytes. */
+  managerSignals: TreeEntry[];
   truncations: string[];
 }
 
@@ -58,6 +60,8 @@ const EXCLUDED_SEGMENTS = new Set([
   '.nuxt',
   '.turbo',
 ]);
+
+const ROOT_NPM_MANAGER_SIGNALS = new Set(['package-lock.json', 'npm-shrinkwrap.json']);
 
 export function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
@@ -98,6 +102,12 @@ function isCandidate(entry: TreeEntry): boolean {
   return entry.path === 'pnpm-workspace.yaml' || entry.path.endsWith('package.json');
 }
 
+function isRootNpmManagerSignal(entry: TreeEntry): boolean {
+  return (
+    entry.type === 'blob' && entry.mode !== '120000' && ROOT_NPM_MANAGER_SIGNALS.has(entry.path)
+  );
+}
+
 function addTruncation(truncations: string[], reason: string): void {
   if (!truncations.includes(reason)) truncations.push(reason);
 }
@@ -106,8 +116,9 @@ function boundedTreeEntries(tree: readonly TreeEntry[], maxTreeEntries: number):
   const rootControlFiles = tree
     .filter(
       (entry) =>
-        (entry.path === 'package.json' || entry.path === 'pnpm-workspace.yaml') &&
-        isCandidate(entry),
+        ((entry.path === 'package.json' || entry.path === 'pnpm-workspace.yaml') &&
+          isCandidate(entry)) ||
+        isRootNpmManagerSignal(entry),
     )
     .sort((left, right) => {
       if (left.path === 'package.json') return -1;
@@ -128,15 +139,17 @@ export function selectCorpusFiles(
   if (tree.length > limits.maxTreeEntries) {
     addTruncation(truncations, `tree-entry-limit:${limits.maxTreeEntries}`);
   }
-  const candidates = boundedTreeEntries(tree, limits.maxTreeEntries)
-    .filter(isCandidate)
-    .sort((left, right) => {
-      if (left.path === 'package.json') return -1;
-      if (right.path === 'package.json') return 1;
-      if (left.path === 'pnpm-workspace.yaml') return -1;
-      if (right.path === 'pnpm-workspace.yaml') return 1;
-      return left.path.localeCompare(right.path);
-    });
+  const bounded = boundedTreeEntries(tree, limits.maxTreeEntries);
+  const candidates = bounded.filter(isCandidate).sort((left, right) => {
+    if (left.path === 'package.json') return -1;
+    if (right.path === 'package.json') return 1;
+    if (left.path === 'pnpm-workspace.yaml') return -1;
+    if (right.path === 'pnpm-workspace.yaml') return 1;
+    return left.path.localeCompare(right.path);
+  });
+  const managerSignals = bounded
+    .filter(isRootNpmManagerSignal)
+    .sort((left, right) => left.path.localeCompare(right.path));
 
   const files: TreeEntry[] = [];
   let totalBytes = 0;
@@ -163,7 +176,7 @@ export function selectCorpusFiles(
     totalBytes += size;
     if (isManifest) manifestCount += 1;
   }
-  return { files, truncations };
+  return { files, managerSignals, truncations };
 }
 
 /** Remove common token/credential shapes before any public evidence is persisted. */

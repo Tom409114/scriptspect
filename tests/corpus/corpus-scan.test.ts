@@ -42,8 +42,43 @@ describe('bounded workspace manifest selection', () => {
 
     expect(selectCorpusFiles(tree, DEFAULT_CORPUS_LIMITS)).toEqual({
       files: [tree[0], tree[1], tree[2]],
+      managerSignals: [],
       truncations: [],
     });
+  });
+
+  it('selects only root npm lockfiles as presence signals without applying byte limits', () => {
+    const hugeLockBytes = DEFAULT_CORPUS_LIMITS.maxTotalBytes * 2;
+    const tree: TreeEntry[] = [
+      { path: 'package.json', type: 'blob', mode: '100644', size: 100, sha: 'root' },
+      {
+        path: 'package-lock.json',
+        type: 'blob',
+        mode: '100644',
+        size: hugeLockBytes,
+        sha: 'lock',
+      },
+      {
+        path: 'npm-shrinkwrap.json',
+        type: 'blob',
+        mode: '120000',
+        size: 10,
+        sha: 'link',
+      },
+      {
+        path: 'packages/app/package-lock.json',
+        type: 'blob',
+        mode: '100644',
+        size: 10,
+        sha: 'nested',
+      },
+    ];
+
+    const selected = selectCorpusFiles(tree, DEFAULT_CORPUS_LIMITS);
+
+    expect(selected.files).toEqual([tree[0]]);
+    expect(selected.managerSignals).toEqual([tree[1]]);
+    expect(selected.truncations).toEqual([]);
   });
 
   it('reports deterministic truncation instead of silently sampling beyond limits', () => {

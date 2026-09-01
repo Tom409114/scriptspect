@@ -18436,7 +18436,10 @@ var PS032 = availabilityRule(
 // src/rules/known-tools.ts
 var KNOWN_TOOL_PROVIDER_ALIASES = {
   gatsby: ["gatsby"],
-  playwright: ["playwright"]
+  "npm-run-all": ["npm-run-all2"],
+  playwright: ["playwright"],
+  "run-p": ["npm-run-all2"],
+  "run-s": ["npm-run-all2"]
 };
 var KNOWN_TOOLS = new Map(
   Object.entries({

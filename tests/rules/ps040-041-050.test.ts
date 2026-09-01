@@ -30,6 +30,13 @@ describe('PS040 MISSING_LOCAL_BIN', () => {
     expect(
       only(run('playwright test', { dependencies: new Set(['@playwright/test']) }), 'PS040'),
     ).toEqual([]);
+    for (const command of [
+      'npm-run-all --serial test:types:*',
+      'run-p lint test',
+      'run-s lint test',
+    ]) {
+      expect(only(run(command, { dependencies: new Set(['npm-run-all2']) }), 'PS040')).toEqual([]);
+    }
   });
 
   it('still reports shared executables when none of their providers is declared', () => {
@@ -47,6 +54,16 @@ describe('PS040 MISSING_LOCAL_BIN', () => {
         message: expect.stringContaining('provided by `cpy-cli`'),
       }),
     ]);
+  });
+
+  it('does not accept an unverified npm-run-all fork as a provider', () => {
+    for (const command of ['npm-run-all test:*', 'run-p lint test', 'run-s lint test']) {
+      expect(only(run(command, { dependencies: new Set(['npm-run-all3']) }), 'PS040')).toEqual([
+        expect.objectContaining({
+          message: expect.stringContaining('npm-run-all'),
+        }),
+      ]);
+    }
   });
 
   it('negative: workspace bins count as present', () => {
