@@ -1,7 +1,7 @@
 ScriptSpect hosted Action evidence
-workflow run: 33449906358 (success)
-workflow URL: https://github.com/Tom409114/scriptspect/actions/runs/33449906358
-source commit: 0898538abef5b054db6a20dc0ffe7fb9bb67e96b
+workflow run: 33467290054 (success)
+workflow URL: https://github.com/Tom409114/scriptspect/actions/runs/33467290054
+source commit: bf37b4132508c685a91cc16a9c0a3058c252502e
 clean consumer: exit 0 · 1 package · 1 script · 0 errors
 broken fixture: 2 annotations
 - Action failure contract — .github: scriptspect action failed

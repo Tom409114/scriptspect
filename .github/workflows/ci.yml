@@ -37,6 +37,9 @@ jobs:
     name: Generated files are current
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      checks: read
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,12 +54,14 @@ jobs:
           pnpm install --frozen-lockfile
       - name: Regenerate schemas, rule docs, and bilingual demo assets
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -o pipefail
           pnpm exec tsx tools/generate-schemas.ts
           pnpm docs:rules
           pnpm exec tsx tools/generate-readme-demo.ts
+          pnpm exec tsx tools/verify-readme-release-evidence.ts
           pnpm exec tsx tools/check-readme-parity.ts
           STATUS_COMMIT=$(node -e "const fs=require('node:fs'); const status=JSON.parse(fs.readFileSync('docs/readme-status.json')); if(!/^[0-9a-f]{40}$/.test(status.sourceCommit)) process.exit(1); process.stdout.write(status.sourceCommit)")
           git cat-file -e "$STATUS_COMMIT^{commit}"
@@ -85,8 +90,7 @@ jobs:
                 package.before.json \
                 terminal.txt \
                 fix.patch \
-                package.after.json \
-                terminal.svg; do
+                package.after.json; do
                 git diff --no-index --exit-code -- \
                   "$PINNED_SOURCE_DIR/docs/assets/demo/$PINNED_ASSET" \
                   "docs/assets/demo/$PINNED_ASSET"

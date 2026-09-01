@@ -209,7 +209,10 @@ jobs:
           (cd "$RUNNER_TEMP/release" && sha256sum --check SHA256SUMS)
           TARBALL="scriptspect-$VERSION.tgz"
           tar -xOf "$RUNNER_TEMP/release/$TARBALL" package/package.json | \
-            jq -e '.repository == {type:"git",url:"git+https://github.com/Tom409114/scriptspect.git"}' >/dev/null
+            jq -e --arg version "$VERSION" '
+              .name == "scriptspect" and .version == $version and
+              .repository == {type:"git",url:"git+https://github.com/Tom409114/scriptspect.git"}
+            ' >/dev/null
           node tools/release/release-state.mjs validate-candidate \
             "$RUNNER_TEMP/release/candidate-manifest.json" >/dev/null
           node tools/release/release-state.mjs validate-release \
@@ -239,6 +242,20 @@ jobs:
             "$RUNNER_TEMP/publish-anchors.json" > "$RUNNER_TEMP/verified-anchors.json"
           CANDIDATE_SRI=$(jq -er '.npmSRI' "$RUNNER_TEMP/verified-anchors.json")
           INTEGRITY_CONTRACT=docs/release/npm-integrity-contract.json
+
+          EXPECTED_READMES="$RUNNER_TEMP/release-expected-readmes"
+          node tools/release/generate-package-readmes.mjs \
+            --version "$VERSION" --source-commit "$SHA" --channel stable \
+            --english "$EXPECTED_READMES/README.md" \
+            --chinese "$EXPECTED_READMES/README.zh-CN.md"
+          for README in README.md README.zh-CN.md; do
+            [[ "$(tar -tf "$RUNNER_TEMP/release/$TARBALL" | grep -Fxc "package/$README")" == 1 ]]
+            tar -xOf "$RUNNER_TEMP/release/$TARBALL" "package/$README" \
+              > "$RUNNER_TEMP/release-packed-$README"
+            cmp "$EXPECTED_READMES/$README" "$RUNNER_TEMP/release-packed-$README"
+          done
+          grep -F "npx --yes scriptspect@$VERSION ." "$RUNNER_TEMP/release-packed-README.md"
+          ! grep -F 'pre-release source evaluation' "$RUNNER_TEMP/release-packed-README.md"
 
           npm install --global npm@11.12.1
           node tools/release/fetch-npm-artifact.mjs probe \
@@ -727,6 +744,27 @@ jobs:
           gh api -X PATCH -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
 
+          # This is a handoff receipt for a later, protected README/status PR. It is
+          # created only after the consumed state is durable; this workflow never
+          # writes documentation directly to main.
+          jq -n \
+            --arg schemaVersion scriptspect-readme-release-receipt/v1 \
+            --arg repository "https://github.com/$REPOSITORY" \
+            --argjson intentCheckRunId "$INTENT_ID" \
+            --argjson finalVerificationAssetId "$FINAL_ASSET_ID" \
+            --arg finalVerificationDigest "$FINAL_DIGEST" \
+            --argjson publishRunId "$(jq -er '.npmPublished.publishRunId' "$RUNNER_TEMP/approved-consumed-state.json")" \
+            --slurpfile finalVerification "$RUNNER_TEMP/final-verification.json" '
+            {schemaVersion:$schemaVersion,repository:$repository,
+              intentCheckRunId:$intentCheckRunId,
+              finalVerificationAssetId:$finalVerificationAssetId,
+              finalVerificationDigest:$finalVerificationDigest,publishRunId:$publishRunId,
+              finalVerification:$finalVerification[0]}
+          ' > "$RUNNER_TEMP/readme-release-receipt.json"
+          node tools/release/release-state.mjs canonicalize-json \
+            "$RUNNER_TEMP/readme-release-receipt.json" \
+            --out "$RUNNER_TEMP/readme-release-receipt.json" >/dev/null
+
           # The latest marker is advisory, terminal-only, and monotonic across stale retries.
           LATEST_HTTP_STATUS=$(curl --silent --show-error \
             --output "$RUNNER_TEMP/current-latest-release.json" --write-out '%{http_code}' \
@@ -752,6 +790,14 @@ jobs:
           if [[ "$(jq -er '.action' "$RUNNER_TEMP/latest-promotion.json")" == promote ]]; then
             gh release edit "$TAG" --repo "$REPOSITORY" --latest
           fi
+
+      - name: Upload the terminal README handoff receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: readme-release-receipt-v${{ needs.publish.outputs.version }}
+          path: ${{ runner.temp }}/readme-release-receipt.json
+          if-no-files-found: error
+          retention-days: 90
 
   rollback-aliases:
     name: Roll back the durable alias plan after any later failure
