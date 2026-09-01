@@ -39,6 +39,13 @@ import {
 
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
+const CORPUS_LIMIT_KEYS = [
+  'maxTreeEntries',
+  'maxManifests',
+  'maxDepth',
+  'maxFileBytes',
+  'maxTotalBytes',
+] as const satisfies readonly (keyof CorpusLimits)[];
 
 interface GitHubTreeResponse {
   tree?: TreeEntry[];
@@ -139,21 +146,78 @@ function posixShellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function normalizeCorpusLimits(value: unknown, source: string): CorpusLimits {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${source} must be an object with the complete corpus limit contract`);
+  }
+  const record = value as Record<string, unknown>;
+  const actualKeys = Object.keys(record).sort();
+  const expectedKeys = [...CORPUS_LIMIT_KEYS].sort();
+  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+    throw new Error(`${source} must contain exactly ${CORPUS_LIMIT_KEYS.join(', ')}`);
+  }
+  for (const key of CORPUS_LIMIT_KEYS) {
+    if (!Number.isSafeInteger(record[key]) || (record[key] as number) < 0) {
+      throw new Error(`${source}.${key} must be a non-negative safe integer`);
+    }
+  }
+  return {
+    maxTreeEntries: record.maxTreeEntries as number,
+    maxManifests: record.maxManifests as number,
+    maxDepth: record.maxDepth as number,
+    maxFileBytes: record.maxFileBytes as number,
+    maxTotalBytes: record.maxTotalBytes as number,
+  };
+}
+
+function corpusLimitsFromEnvironment(value: string | undefined): CorpusLimits {
+  if (value === undefined) return normalizeCorpusLimits(DEFAULT_CORPUS_LIMITS, 'default limits');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error('CORPUS_LIMITS_JSON must be valid JSON');
+  }
+  return normalizeCorpusLimits(parsed, 'CORPUS_LIMITS_JSON');
+}
+
 function reproductionCommand(options: {
   sourceCommit: string;
   generatedAt: string;
   sampleMethod: string;
   sampleSeed: string;
+  environment: CorpusRunManifest['environment'];
+  limits: CorpusLimits;
   inputFile: string;
   candidateSnapshotFile?: string;
   sampleEvidenceFile?: string;
 }): string {
   const outputDirectory = `corpus-reproduction-${options.sourceCommit}`;
+  const evidenceFiles = [
+    basename(options.inputFile),
+    ...(options.candidateSnapshotFile === undefined
+      ? []
+      : [basename(options.candidateSnapshotFile)]),
+    ...(options.sampleEvidenceFile === undefined ? [] : [basename(options.sampleEvidenceFile)]),
+  ];
+  const cleanStatusPathspec = [
+    '.',
+    ...new Set(evidenceFiles.map((file) => `:(top,literal,exclude)${file}`)),
+  ]
+    .map(posixShellQuote)
+    .join(' ');
+  const cleanCheckout = [
+    `test "$(git rev-parse --verify HEAD)" = ${posixShellQuote(options.sourceCommit)}`,
+    'git diff --quiet --',
+    'git diff --cached --quiet --',
+    `test -z "$(git status --porcelain=v1 --untracked-files=all -- ${cleanStatusPathspec})"`,
+  ];
   const environment = [
     `SCRIPTSPECT_SOURCE_COMMIT=${posixShellQuote(options.sourceCommit)}`,
     `CORPUS_GENERATED_AT=${posixShellQuote(options.generatedAt)}`,
     `CORPUS_SAMPLE_METHOD=${posixShellQuote(options.sampleMethod)}`,
     `CORPUS_SAMPLE_SEED=${posixShellQuote(options.sampleSeed)}`,
+    `CORPUS_LIMITS_JSON=${posixShellQuote(JSON.stringify(options.limits))}`,
     ...(options.candidateSnapshotFile === undefined
       ? []
       : [`CORPUS_CANDIDATE_SNAPSHOT=${posixShellQuote(basename(options.candidateSnapshotFile))}`]),
@@ -164,11 +228,19 @@ function reproductionCommand(options: {
   return [
     `: "\${GITHUB_TOKEN:?set GITHUB_TOKEN to a read-only public-repository token}"`,
     `git -c advice.detachedHead=false checkout --detach ${posixShellQuote(options.sourceCommit)}`,
+    ...cleanCheckout,
+    `test "$(node --version)" = ${posixShellQuote(options.environment.node)}`,
+    `test "$(node -p 'process.platform')" = ${posixShellQuote(options.environment.platform)}`,
+    `test "$(node -p 'process.arch')" = ${posixShellQuote(options.environment.arch)}`,
     'corepack enable',
     "corepack prepare 'pnpm@11.24.0' --activate",
     'pnpm install --frozen-lockfile',
+    ...cleanCheckout,
     `test ! -e ${posixShellQuote(outputDirectory)}`,
     `mkdir -- ${posixShellQuote(outputDirectory)}`,
+    options.environment.runnerOs === undefined
+      ? 'unset RUNNER_OS'
+      : `export RUNNER_OS=${posixShellQuote(options.environment.runnerOs)}`,
     `${environment.join(' ')} pnpm exec tsx tools/corpus-scan.ts ${posixShellQuote(basename(options.inputFile))} ${posixShellQuote(outputDirectory)}`,
   ].join(' && ');
 }
@@ -620,7 +692,13 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
   if (options.token === '') throw new Error('GITHUB_TOKEN is required (read-only public access)');
   const sourceCommit = exactSourceCommit(options.sourceCommit);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
-  const limits = options.limits ?? DEFAULT_CORPUS_LIMITS;
+  const environment: CorpusRunManifest['environment'] = {
+    node: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    ...(process.env.RUNNER_OS === undefined ? {} : { runnerOs: process.env.RUNNER_OS }),
+  };
+  const limits = normalizeCorpusLimits(options.limits ?? DEFAULT_CORPUS_LIMITS, 'corpus limits');
   const fetchImpl = options.fetchImpl ?? fetch;
   const sampleMethod = options.sampleMethod ?? CORPUS_SAMPLE_METHOD;
   if (
@@ -785,12 +863,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
       ...(candidateSnapshotSha256 === undefined ? {} : { candidateSnapshotSha256 }),
       ...(sampleEvidenceSha256 === undefined ? {} : { sampleEvidenceSha256 }),
     },
-    environment: {
-      node: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      ...(process.env.RUNNER_OS === undefined ? {} : { runnerOs: process.env.RUNNER_OS }),
-    },
+    environment,
     repositories,
     promotedTotals: {
       rootOnly: sumComplete(repositories, 'rootOnly'),
@@ -801,6 +874,8 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
       generatedAt,
       sampleMethod,
       sampleSeed: options.sampleSeed ?? 'none',
+      environment,
+      limits,
       inputFile: options.inputFile,
       candidateSnapshotFile: options.candidateSnapshotFile,
       sampleEvidenceFile: options.sampleEvidenceFile,
@@ -837,22 +912,30 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
   return manifest;
 }
 
-async function main(): Promise<void> {
-  const inputFile = process.argv[2];
+export function corpusScanOptionsFromCli(
+  arguments_: readonly string[],
+  environment: NodeJS.ProcessEnv,
+): CorpusScanOptions {
+  const inputFile = arguments_[0];
   if (inputFile === undefined) {
     throw new Error('usage: tsx tools/corpus-scan.ts repos.txt [output-directory]');
   }
-  await runCorpusScan({
+  return {
     inputFile,
-    outputDir: process.argv[3] ?? process.cwd(),
-    token: process.env.GITHUB_TOKEN ?? '',
-    sourceCommit: process.env.SCRIPTSPECT_SOURCE_COMMIT ?? process.env.GITHUB_SHA ?? '',
-    generatedAt: process.env.CORPUS_GENERATED_AT,
-    sampleMethod: process.env.CORPUS_SAMPLE_METHOD,
-    sampleSeed: process.env.CORPUS_SAMPLE_SEED,
-    candidateSnapshotFile: process.env.CORPUS_CANDIDATE_SNAPSHOT,
-    sampleEvidenceFile: process.env.CORPUS_SAMPLE_EVIDENCE,
-  });
+    outputDir: arguments_[1] ?? process.cwd(),
+    token: environment.GITHUB_TOKEN ?? '',
+    sourceCommit: environment.SCRIPTSPECT_SOURCE_COMMIT ?? environment.GITHUB_SHA ?? '',
+    generatedAt: environment.CORPUS_GENERATED_AT,
+    limits: corpusLimitsFromEnvironment(environment.CORPUS_LIMITS_JSON),
+    sampleMethod: environment.CORPUS_SAMPLE_METHOD,
+    sampleSeed: environment.CORPUS_SAMPLE_SEED,
+    candidateSnapshotFile: environment.CORPUS_CANDIDATE_SNAPSHOT,
+    sampleEvidenceFile: environment.CORPUS_SAMPLE_EVIDENCE,
+  };
+}
+
+async function main(): Promise<void> {
+  await runCorpusScan(corpusScanOptionsFromCli(process.argv.slice(2), process.env));
 }
 
 if (

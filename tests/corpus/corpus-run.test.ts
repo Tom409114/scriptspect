@@ -1,10 +1,11 @@
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_CORPUS_LIMITS, type TreeEntry } from '../../tools/corpus-lib';
-import { runCorpusScan } from '../../tools/corpus-scan';
+import { type CorpusLimits, DEFAULT_CORPUS_LIMITS, type TreeEntry } from '../../tools/corpus-lib';
+import { corpusScanOptionsFromCli, runCorpusScan } from '../../tools/corpus-scan';
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 const SOURCE_COMMIT = '89abcdef0123456789abcdef0123456789abcdef';
@@ -230,6 +231,105 @@ function completeProvenance(data: ReturnType<typeof fixture>): {
     candidateSnapshot,
     sampleEvidence: completeSampleEvidence(candidateSnapshot, root.sha, root.size),
   };
+}
+
+function git(directory: string, ...arguments_: string[]): string {
+  return execFileSync('git', ['-C', directory, ...arguments_], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+
+function posixShell(): string {
+  if (process.platform !== 'win32') return 'sh';
+  const gitExecPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
+  const gitRoot = dirname(dirname(dirname(gitExecPath)));
+  return join(gitRoot, 'bin', 'sh.exe');
+}
+
+async function replayFixture(
+  options: { limits?: CorpusLimits; runnerOs?: string } = {},
+): Promise<{ directory: string; reproduction: string }> {
+  const directory = temporaryDirectory();
+  const outputRoot = temporaryDirectory();
+  mkdirSync(join(directory, 'tools'), { recursive: true });
+  writeFileSync(join(directory, 'tools', 'corpus-scan.ts'), 'export const committed = true;\n');
+  writeFileSync(join(directory, 'package.json'), '{"packageManager":"pnpm@11.24.0"}\n');
+  git(directory, 'init', '--quiet');
+  git(directory, 'config', 'user.name', 'Corpus Replay Test');
+  git(directory, 'config', 'user.email', 'corpus-replay@example.invalid');
+  git(directory, 'config', 'core.autocrlf', 'false');
+  git(directory, 'add', '--', 'tools/corpus-scan.ts', 'package.json');
+  git(directory, 'commit', '--quiet', '-m', 'fixture');
+  const sourceCommit = git(directory, 'rev-parse', 'HEAD');
+  const inputFile = join(directory, 'repos.txt');
+  const candidateSnapshotFile = join(directory, 'repository-candidates.json');
+  const sampleEvidenceFile = join(directory, 'repository-sample.json');
+  const data = fixture();
+  const provenance = completeProvenance(data);
+  writeFileSync(inputFile, `example/project@${COMMIT}\n`);
+  writeFileSync(candidateSnapshotFile, provenance.candidateSnapshot);
+  writeFileSync(
+    sampleEvidenceFile,
+    `${JSON.stringify(provenance.sampleEvidence, null, 2)}\n`,
+    'utf8',
+  );
+
+  const previousRunnerOs = process.env.RUNNER_OS;
+  if (options.runnerOs === undefined) delete process.env.RUNNER_OS;
+  else process.env.RUNNER_OS = options.runnerOs;
+  try {
+    const manifest = await runCorpusScan({
+      inputFile,
+      outputDir: join(outputRoot, 'initial-output'),
+      token: 'read-only-test-token-must-not-be-persisted',
+      sourceCommit,
+      generatedAt: '2026-09-01T00:00:00.000Z',
+      fetchImpl: fakeGitHub(data.tree, data.blobs),
+      limits: options.limits,
+      sampleMethod: 'popularity-strata-round-robin-v1',
+      sampleSeed: 'candidate-seed',
+      candidateSnapshotFile,
+      sampleEvidenceFile,
+    });
+    return { directory, reproduction: manifest.reproduction };
+  } finally {
+    if (previousRunnerOs === undefined) delete process.env.RUNNER_OS;
+    else process.env.RUNNER_OS = previousRunnerOs;
+  }
+}
+
+function executeReplay(
+  directory: string,
+  reproduction: string,
+  options: { shellSetup?: string; runnerOs?: string } = {},
+): ReturnType<typeof spawnSync> {
+  const script = [
+    'corepack() { return 0; }',
+    [
+      'pnpm() {',
+      '  if [ "$1" = "exec" ]; then',
+      `    printf "RUNNER_OS=%s\\n" "\${RUNNER_OS-<unset>}" > replay-observation.txt`,
+      `    printf "CORPUS_LIMITS_JSON=%s\\n" "\${CORPUS_LIMITS_JSON-<unset>}" >> replay-observation.txt`,
+      '    printf "ARGS=" >> replay-observation.txt',
+      '    printf "<%s>" "$@" >> replay-observation.txt',
+      '    printf "\\n" >> replay-observation.txt',
+      '  fi',
+      '  return 0',
+      '}',
+    ].join('\n'),
+    options.shellSetup ?? '',
+    reproduction,
+  ].join('\n');
+  return spawnSync(posixShell(), ['-c', script], {
+    cwd: directory,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GITHUB_TOKEN: 'ephemeral-replay-test-token',
+      ...(options.runnerOs === undefined ? {} : { RUNNER_OS: options.runnerOs }),
+    },
+  });
 }
 
 describe('immutable corpus run evidence', () => {
@@ -743,20 +843,196 @@ describe('immutable corpus run evidence', () => {
     });
 
     const replayOutput = `corpus-reproduction-${SOURCE_COMMIT}`;
+    const cleanCheckout = [
+      `test "$(git rev-parse --verify HEAD)" = '${SOURCE_COMMIT}'`,
+      'git diff --quiet --',
+      'git diff --cached --quiet --',
+      `test -z "$(git status --porcelain=v1 --untracked-files=all -- '.' ':(top,literal,exclude)repos copy.txt' ':(top,literal,exclude)repository candidate'"'"'s.json' ':(top,literal,exclude)repository sample;ignored.json')"`,
+    ];
     expect(manifest.reproduction).toBe(
       [
         `: "\${GITHUB_TOKEN:?set GITHUB_TOKEN to a read-only public-repository token}"`,
         `git -c advice.detachedHead=false checkout --detach '${SOURCE_COMMIT}'`,
+        ...cleanCheckout,
+        `test "$(node --version)" = '${process.version}'`,
+        `test "$(node -p 'process.platform')" = '${process.platform}'`,
+        `test "$(node -p 'process.arch')" = '${process.arch}'`,
         'corepack enable',
         "corepack prepare 'pnpm@11.24.0' --activate",
         'pnpm install --frozen-lockfile',
+        ...cleanCheckout,
         `test ! -e '${replayOutput}'`,
         `mkdir -- '${replayOutput}'`,
-        `SCRIPTSPECT_SOURCE_COMMIT='${SOURCE_COMMIT}' CORPUS_GENERATED_AT='2026-09-01T00:00:00.000Z' CORPUS_SAMPLE_METHOD='popularity-strata-round-robin-v1' CORPUS_SAMPLE_SEED='candidate-seed' CORPUS_CANDIDATE_SNAPSHOT='repository candidate'"'"'s.json' CORPUS_SAMPLE_EVIDENCE='repository sample;ignored.json' pnpm exec tsx tools/corpus-scan.ts 'repos copy.txt' '${replayOutput}'`,
+        'unset RUNNER_OS',
+        `SCRIPTSPECT_SOURCE_COMMIT='${SOURCE_COMMIT}' CORPUS_GENERATED_AT='2026-09-01T00:00:00.000Z' CORPUS_SAMPLE_METHOD='popularity-strata-round-robin-v1' CORPUS_SAMPLE_SEED='candidate-seed' CORPUS_LIMITS_JSON='{"maxTreeEntries":20000,"maxManifests":500,"maxDepth":12,"maxFileBytes":1048576,"maxTotalBytes":10485760}' CORPUS_CANDIDATE_SNAPSHOT='repository candidate'"'"'s.json' CORPUS_SAMPLE_EVIDENCE='repository sample;ignored.json' pnpm exec tsx tools/corpus-scan.ts 'repos copy.txt' '${replayOutput}'`,
       ].join(' && '),
     );
     expect(manifest.reproduction).not.toContain('read-only-test-token-must-not-be-persisted');
     expect(manifest.reproduction).not.toContain(directory);
+  });
+
+  it('fails closed before scanning a checkout with dirty tracked, staged, or untracked files', async () => {
+    const cases = [
+      {
+        name: 'tracked worktree',
+        dirty: (directory: string) => {
+          writeFileSync(join(directory, 'tools', 'corpus-scan.ts'), 'export const dirty = true;\n');
+        },
+      },
+      {
+        name: 'staged index',
+        dirty: (directory: string) => {
+          writeFileSync(
+            join(directory, 'tools', 'corpus-scan.ts'),
+            'export const staged = true;\n',
+          );
+          git(directory, 'add', '--', 'tools/corpus-scan.ts');
+        },
+      },
+      {
+        name: 'nonignored untracked code',
+        dirty: (directory: string) => {
+          writeFileSync(join(directory, 'rogue-config.ts'), 'export const rogue = true;\n');
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const replay = await replayFixture();
+      testCase.dirty(replay.directory);
+
+      const result = executeReplay(replay.directory, replay.reproduction);
+
+      expect(result.status, `${testCase.name}: ${result.stderr}`).not.toBe(0);
+      expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+    }
+  });
+
+  it('fails closed before scanning under a different Node runtime', async () => {
+    const cases = [
+      { name: 'version', version: 'v0.0.0', platform: process.platform, arch: process.arch },
+      { name: 'platform', version: process.version, platform: 'foreign-os', arch: process.arch },
+      {
+        name: 'architecture',
+        version: process.version,
+        platform: process.platform,
+        arch: 'foreign-arch',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const replay = await replayFixture();
+      const shellSetup = [
+        'node() {',
+        `  if [ "$1" = "--version" ]; then printf '%s\\n' '${testCase.version}'`,
+        `  elif [ "$1" = "-p" ] && [ "$2" = "process.platform" ]; then printf '%s\\n' '${testCase.platform}'`,
+        `  elif [ "$1" = "-p" ] && [ "$2" = "process.arch" ]; then printf '%s\\n' '${testCase.arch}'`,
+        '  else return 64',
+        '  fi',
+        '}',
+      ].join('\n');
+
+      const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+
+      expect(result.status, `${testCase.name}: ${result.stderr}`).not.toBe(0);
+      expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+    }
+  });
+
+  it('restores defined and unset RUNNER_OS state plus exact default and custom limits', async () => {
+    const customLimits: CorpusLimits = {
+      maxTotalBytes: 50_000,
+      maxFileBytes: 4_000,
+      maxDepth: 3,
+      maxManifests: 2,
+      maxTreeEntries: 100,
+    };
+    const cases = [
+      {
+        name: 'unset runner and default limits',
+        replay: await replayFixture(),
+        outerRunnerOs: 'ConflictingRunner',
+        expectedRunnerOs: '<unset>',
+        expectedLimits: DEFAULT_CORPUS_LIMITS,
+      },
+      {
+        name: 'defined runner and custom limits',
+        replay: await replayFixture({ limits: customLimits, runnerOs: 'RecordedRunner' }),
+        outerRunnerOs: 'ConflictingRunner',
+        expectedRunnerOs: 'RecordedRunner',
+        expectedLimits: customLimits,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = executeReplay(testCase.replay.directory, testCase.replay.reproduction, {
+        runnerOs: testCase.outerRunnerOs,
+      });
+
+      expect(result.status, `${testCase.name}: ${result.stderr}`).toBe(0);
+      const observation = readFileSync(
+        join(testCase.replay.directory, 'replay-observation.txt'),
+        'utf8',
+      );
+      expect(observation).toContain(`RUNNER_OS=${testCase.expectedRunnerOs}\n`);
+      expect(observation).toContain(
+        `CORPUS_LIMITS_JSON=${JSON.stringify({
+          maxTreeEntries: testCase.expectedLimits.maxTreeEntries,
+          maxManifests: testCase.expectedLimits.maxManifests,
+          maxDepth: testCase.expectedLimits.maxDepth,
+          maxFileBytes: testCase.expectedLimits.maxFileBytes,
+          maxTotalBytes: testCase.expectedLimits.maxTotalBytes,
+        })}\n`,
+      );
+      expect(observation).toContain(
+        `<exec><tsx><tools/corpus-scan.ts><repos.txt><corpus-reproduction-${git(
+          testCase.replay.directory,
+          'rev-parse',
+          'HEAD',
+        )}>`,
+      );
+      expect(testCase.replay.reproduction).not.toContain('ephemeral-replay-test-token');
+      expect(testCase.replay.reproduction).not.toContain(testCase.replay.directory);
+    }
+  });
+
+  it('parses default and exact custom limits from the scanner CLI environment', () => {
+    const baseEnvironment = {
+      GITHUB_TOKEN: 'read-only-test-token',
+      SCRIPTSPECT_SOURCE_COMMIT: SOURCE_COMMIT,
+    };
+    const defaults = corpusScanOptionsFromCli(['repos.txt', 'default-output'], baseEnvironment);
+    expect(defaults).toMatchObject({
+      inputFile: 'repos.txt',
+      outputDir: 'default-output',
+      limits: DEFAULT_CORPUS_LIMITS,
+    });
+
+    const customJson =
+      '{"maxTotalBytes":50000,"maxDepth":3,"maxTreeEntries":100,"maxFileBytes":4000,"maxManifests":2}';
+    const custom = corpusScanOptionsFromCli(['repos.txt', 'custom-output'], {
+      ...baseEnvironment,
+      CORPUS_LIMITS_JSON: customJson,
+    });
+    expect(JSON.stringify(custom.limits)).toBe(
+      '{"maxTreeEntries":100,"maxManifests":2,"maxDepth":3,"maxFileBytes":4000,"maxTotalBytes":50000}',
+    );
+
+    for (const malformed of [
+      '{}',
+      '[]',
+      '{"maxTreeEntries":1,"maxManifests":2,"maxDepth":3,"maxFileBytes":4,"maxTotalBytes":5,"extra":6}',
+      '{"maxTreeEntries":1,"maxManifests":2,"maxDepth":-1,"maxFileBytes":4,"maxTotalBytes":5}',
+      '{"maxTreeEntries":1,"maxManifests":2,"maxDepth":3.5,"maxFileBytes":4,"maxTotalBytes":5}',
+      'not-json',
+    ]) {
+      expect(() =>
+        corpusScanOptionsFromCli(['repos.txt'], {
+          ...baseEnvironment,
+          CORPUS_LIMITS_JSON: malformed,
+        }),
+      ).toThrow(/CORPUS_LIMITS_JSON/);
+    }
   });
 
   it('rejects mismatched sample provenance before making a network request', async () => {
