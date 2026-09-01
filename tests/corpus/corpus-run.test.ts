@@ -713,6 +713,52 @@ describe('immutable corpus run evidence', () => {
     });
   });
 
+  it('emits a safe path-independent replay command for the complete provenance contract', async () => {
+    const directory = temporaryDirectory();
+    const inputFile = join(directory, 'repos copy.txt');
+    const outputDir = join(directory, 'initial output');
+    const candidateSnapshotFile = join(directory, "repository candidate's.json");
+    const sampleEvidenceFile = join(directory, 'repository sample;ignored.json');
+    const data = fixture();
+    const provenance = completeProvenance(data);
+    writeFileSync(inputFile, `example/project@${COMMIT}\n`);
+    writeFileSync(candidateSnapshotFile, provenance.candidateSnapshot);
+    writeFileSync(
+      sampleEvidenceFile,
+      `${JSON.stringify(provenance.sampleEvidence, null, 2)}\n`,
+      'utf8',
+    );
+
+    const manifest = await runCorpusScan({
+      inputFile,
+      outputDir,
+      token: 'read-only-test-token-must-not-be-persisted',
+      sourceCommit: SOURCE_COMMIT,
+      generatedAt: '2026-09-01T00:00:00.000Z',
+      fetchImpl: fakeGitHub(data.tree, data.blobs),
+      sampleMethod: 'popularity-strata-round-robin-v1',
+      sampleSeed: 'candidate-seed',
+      candidateSnapshotFile,
+      sampleEvidenceFile,
+    });
+
+    const replayOutput = `corpus-reproduction-${SOURCE_COMMIT}`;
+    expect(manifest.reproduction).toBe(
+      [
+        `: "\${GITHUB_TOKEN:?set GITHUB_TOKEN to a read-only public-repository token}"`,
+        `git -c advice.detachedHead=false checkout --detach '${SOURCE_COMMIT}'`,
+        'corepack enable',
+        "corepack prepare 'pnpm@11.24.0' --activate",
+        'pnpm install --frozen-lockfile',
+        `test ! -e '${replayOutput}'`,
+        `mkdir -- '${replayOutput}'`,
+        `SCRIPTSPECT_SOURCE_COMMIT='${SOURCE_COMMIT}' CORPUS_GENERATED_AT='2026-09-01T00:00:00.000Z' CORPUS_SAMPLE_METHOD='popularity-strata-round-robin-v1' CORPUS_SAMPLE_SEED='candidate-seed' CORPUS_CANDIDATE_SNAPSHOT='repository candidate'"'"'s.json' CORPUS_SAMPLE_EVIDENCE='repository sample;ignored.json' pnpm exec tsx tools/corpus-scan.ts 'repos copy.txt' '${replayOutput}'`,
+      ].join(' && '),
+    );
+    expect(manifest.reproduction).not.toContain('read-only-test-token-must-not-be-persisted');
+    expect(manifest.reproduction).not.toContain(directory);
+  });
+
   it('rejects mismatched sample provenance before making a network request', async () => {
     const data = fixture();
     const provenance = completeProvenance(data);

@@ -135,6 +135,44 @@ function exactSourceCommit(value: string): string {
   return value;
 }
 
+function posixShellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function reproductionCommand(options: {
+  sourceCommit: string;
+  generatedAt: string;
+  sampleMethod: string;
+  sampleSeed: string;
+  inputFile: string;
+  candidateSnapshotFile?: string;
+  sampleEvidenceFile?: string;
+}): string {
+  const outputDirectory = `corpus-reproduction-${options.sourceCommit}`;
+  const environment = [
+    `SCRIPTSPECT_SOURCE_COMMIT=${posixShellQuote(options.sourceCommit)}`,
+    `CORPUS_GENERATED_AT=${posixShellQuote(options.generatedAt)}`,
+    `CORPUS_SAMPLE_METHOD=${posixShellQuote(options.sampleMethod)}`,
+    `CORPUS_SAMPLE_SEED=${posixShellQuote(options.sampleSeed)}`,
+    ...(options.candidateSnapshotFile === undefined
+      ? []
+      : [`CORPUS_CANDIDATE_SNAPSHOT=${posixShellQuote(basename(options.candidateSnapshotFile))}`]),
+    ...(options.sampleEvidenceFile === undefined
+      ? []
+      : [`CORPUS_SAMPLE_EVIDENCE=${posixShellQuote(basename(options.sampleEvidenceFile))}`]),
+  ];
+  return [
+    `: "\${GITHUB_TOKEN:?set GITHUB_TOKEN to a read-only public-repository token}"`,
+    `git -c advice.detachedHead=false checkout --detach ${posixShellQuote(options.sourceCommit)}`,
+    'corepack enable',
+    "corepack prepare 'pnpm@11.24.0' --activate",
+    'pnpm install --frozen-lockfile',
+    `test ! -e ${posixShellQuote(outputDirectory)}`,
+    `mkdir -- ${posixShellQuote(outputDirectory)}`,
+    `${environment.join(' ')} pnpm exec tsx tools/corpus-scan.ts ${posixShellQuote(basename(options.inputFile))} ${posixShellQuote(outputDirectory)}`,
+  ].join(' && ');
+}
+
 function readLocatorSequence(inputFile: string): ReturnType<typeof parseRepoLocator>[] {
   return readFileSync(inputFile, 'utf8')
     .split(/\r?\n/u)
@@ -581,6 +619,7 @@ function renderSummary(manifest: CorpusRunManifest): string {
 export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusRunManifest> {
   if (options.token === '') throw new Error('GITHUB_TOKEN is required (read-only public access)');
   const sourceCommit = exactSourceCommit(options.sourceCommit);
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
   const limits = options.limits ?? DEFAULT_CORPUS_LIMITS;
   const fetchImpl = options.fetchImpl ?? fetch;
   const sampleMethod = options.sampleMethod ?? CORPUS_SAMPLE_METHOD;
@@ -732,7 +771,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
   }));
   const partialManifest: Omit<CorpusRunManifest, 'artifactSha256'> = {
     schemaVersion: 1,
-    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    generatedAt,
     sourceCommit,
     scannerSha256: sha256(readFileSync(scannerPath)),
     registrySha256: sha256(JSON.stringify(registryPayload)),
@@ -757,7 +796,15 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
       rootOnly: sumComplete(repositories, 'rootOnly'),
       workspaceFull: sumComplete(repositories, 'workspaceFull'),
     },
-    reproduction: `SCRIPTSPECT_SOURCE_COMMIT=${sourceCommit} pnpm exec tsx tools/corpus-scan.ts ${basename(options.inputFile)}`,
+    reproduction: reproductionCommand({
+      sourceCommit,
+      generatedAt,
+      sampleMethod,
+      sampleSeed: options.sampleSeed ?? 'none',
+      inputFile: options.inputFile,
+      candidateSnapshotFile: options.candidateSnapshotFile,
+      sampleEvidenceFile: options.sampleEvidenceFile,
+    }),
   };
   const provisional = { ...partialManifest, artifactSha256: {} } satisfies CorpusRunManifest;
   const summaryText = renderSummary(provisional);
@@ -800,6 +847,7 @@ async function main(): Promise<void> {
     outputDir: process.argv[3] ?? process.cwd(),
     token: process.env.GITHUB_TOKEN ?? '',
     sourceCommit: process.env.SCRIPTSPECT_SOURCE_COMMIT ?? process.env.GITHUB_SHA ?? '',
+    generatedAt: process.env.CORPUS_GENERATED_AT,
     sampleMethod: process.env.CORPUS_SAMPLE_METHOD,
     sampleSeed: process.env.CORPUS_SAMPLE_SEED,
     candidateSnapshotFile: process.env.CORPUS_CANDIDATE_SNAPSHOT,

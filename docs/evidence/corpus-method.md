@@ -54,12 +54,25 @@ The workflow artifact contains:
   commits/root-manifest blobs;
 - `repos.txt`: the exact immutable sample;
 - `findings.jsonl`: stable finding IDs, immutable source URLs, script SHA-256,
-  rule metadata, spans, and redacted messages—never raw script source;
+  rule metadata, spans, and source-free rule summaries—never raw script source;
 - `corpus-run.json`: selected manifest paths, scanner/source commit and hashes,
   rule-registry hash, limits, sample method/seed, hashes of the full candidate
   snapshot and sample evidence, environment, per-repository status, separate
-  scan modes, artifact hashes, and reproduction command;
+  scan modes, artifact hashes, and a directly copyable POSIX-shell reproduction
+  command;
 - `summary.md`: an explicitly unverified summary for maintainers.
+
+To replay a run, place its `repository-candidates.json`,
+`repository-sample.json`, and `repos.txt` beside the repository checkout, set
+`GITHUB_TOKEN` externally to a read-only public-repository token, and run the
+command recorded in `corpus-run.json`. The command checks out the exact source
+commit, activates the pinned pnpm version, installs from the frozen lockfile,
+and refuses to reuse its deterministic independent output directory. It binds
+the original generation timestamp, sample method and seed, candidate snapshot,
+sample evidence, repository list, and output directory to the scanner's actual
+environment variables and positional arguments. Only evidence basenames and a
+token-variable reference are recorded; neither the credential nor a local
+absolute path is persisted.
 
 The run fails if any repository fails, while still leaving `corpus-run.json`
 for diagnosis. Truncation is visible and excluded rather than silently treated
