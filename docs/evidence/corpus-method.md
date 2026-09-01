@@ -63,36 +63,62 @@ The workflow artifact contains:
 - `summary.md`: an explicitly unverified summary for maintainers.
 
 To replay a run, place its `repository-candidates.json`,
-`repository-sample.json`, and `repos.txt` beside the repository checkout, set
-`GITHUB_TOKEN` externally to a read-only public-repository token, and run the
-command recorded in `corpus-run.json`. The command checks out the exact source
-commit and fails unless HEAD, the index, and every tracked file are clean. Every
-tracked-index tag other than ordinary `H` is rejected. The preflight reads
-separate NUL-delimited `git ls-files -v` and `git ls-files -f` results so Git's
-`assume-unchanged`, `skip-worktree`, and `fsmonitor-valid` hiding flags cannot
-mask a changed file. The validator source is embedded once in the reproduction
-command rather than loaded from the checkout it is validating. It parses the
+`repository-sample.json`, and `repos.txt` as nonignored, untracked regular files
+at the root of a **fresh dedicated checkout already positioned at the recorded
+commit**. Their basenames must be safe and unique and cannot collide with
+`.git`, `node_modules`, `findings.jsonl`, `summary.md`, `corpus-run.json`, or the
+deterministic replay output directory. Before the original scan makes a network
+request, it also requires its source checkout's `HEAD` to equal the recorded
+source commit and compares the evidence basenames with that commit's raw root
+tree. A basename already tracked there is rejected instead of emitting an
+intrinsically unreplayable command. Set `GITHUB_TOKEN` externally to a read-only
+public-repository token, then run the command recorded in `corpus-run.json`.
+The command never invokes `git checkout`: a different HEAD fails closed and no
+smudge/process filter or `post-checkout` hook gets an opportunity to run first.
+
+The validator source is gzip/base64-embedded once in the reproduction command
+and decoded with Node's built-in `node:zlib` into a data-module; it is never
+loaded from the checkout being validated. Every Git subprocess forces
+`core.fsmonitor=false` and `core.hooksPath=/dev/null`, disables replacement
+objects, binds the worktree to the current checkout, and discards inherited Git
+repository/index/object/config redirection variables. The validator parses the
 raw NUL-delimited `HEAD` tree and hashes every regular file's worktree bytes
-with the repository's Git object algorithm; clean/smudge filters, EOL or
-working-tree encodings, symlink emulation, racy stat data, and hidden index bits
-therefore cannot substitute different bytes. POSIX executable bits and raw
-symlink targets must match their tree modes. Gitlinks are rejected rather than
-trusted as submodules. Git is invoked without an interpolating shell, and
-NUL-delimited output plus literal pathspec arguments preserve unusual evidence
-filenames. Working-tree, cached, and status checks explicitly do not ignore
-submodules; any Git or filesystem failure is fatal. Apart from the three named
-evidence inputs, any nonignored untracked file is also a failure. These checks
-run both before and after the frozen-lockfile install, before the scanner
-starts. Replay requires the exact recorded Node version, platform, and
-architecture; it restores the recorded `RUNNER_OS` value or explicitly unsets
-it. It also binds the complete canonical limits JSON, original generation
-timestamp, sample method and seed, candidate snapshot, sample evidence,
-repository list, and a new deterministic output directory to the scanner's
-actual environment variables and positional arguments. The command refuses to
-reuse that output directory. Only evidence basenames and a token-variable
-reference are recorded; neither the credential nor a local absolute path is
-persisted. A run recorded on another platform must therefore be replayed in a
-matching environment with the recorded Node patch version.
+with the repository's Git object algorithm. It separately parses
+NUL-delimited `git ls-files --stage` records and requires every path, mode, blob
+OID, and stage to match the `HEAD` tree exactly. This direct comparison makes
+`assume-unchanged`, `skip-worktree`, `fsmonitor-valid`, clean/smudge filters,
+EOL or working-tree encodings, and racy stat data unable to substitute other
+bytes without invoking `git diff` or `git status`. POSIX executable bits and
+raw symlink targets must match their tree modes. Gitlinks are rejected rather
+than trusted as submodules. A NUL-delimited
+`git ls-files --others --exclude-standard` enumeration must contain exactly the
+three named evidence inputs; any other nonignored untracked file or any Git or
+filesystem failure is fatal. Raw path buffers preserve unusual filenames.
+
+Before **and** after the frozen-lockfile install, each evidence input must still
+be a regular file with the exact SHA-256 recorded by the original manifest, and
+the tracked worktree/index/untracked checks must all pass. `node_modules` must
+not exist before package tooling starts (including as a broken link), while the
+second gate permits the frozen install's ignored `node_modules` output. The
+complete replay runs in a POSIX subshell. It first disables inherited shell
+`allexport`, copies `GITHUB_TOKEN` into a non-exported shell variable, and
+removes the credential from the environment before Git, Corepack, and pnpm
+install run; the token is injected as a
+single-command environment assignment
+only for the final scanner invocation. Caller environment values therefore
+survive the replay unchanged.
+
+Replay also requires the exact recorded Node version, platform, and
+architecture; inside its subshell it restores the recorded `RUNNER_OS` value or
+explicitly unsets it. It binds the complete canonical limits JSON, original
+generation timestamp, sample method and seed, candidate snapshot, sample
+evidence, repository list, and a new deterministic output directory to the
+scanner's actual environment variables and positional arguments. The command
+refuses to reuse that output directory. Only evidence basenames and their
+digests plus a token-variable reference are recorded; neither the credential
+nor a local absolute path is persisted. A run recorded on another platform
+must therefore be replayed in a matching environment with the recorded Node
+patch version.
 
 The run fails if any repository fails, while still leaving `corpus-run.json`
 for diagnosis. Truncation is visible and excluded rather than silently treated

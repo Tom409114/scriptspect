@@ -5,10 +5,12 @@
  * package manifests are downloaded, scripts are never executed, and raw
  * script source is never written to evidence artifacts.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { type AnalysisResult, analyze } from '../src/core/analyze';
 import { DEFAULT_TARGETS } from '../src/core/targets';
 import { RULES } from '../src/rules';
@@ -39,10 +41,40 @@ import {
 
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_RAW = 'https://raw.githubusercontent.com';
+const CORPUS_SOURCE_CHECKOUT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024;
+const GIT_SAFE_CONFIG = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+const GIT_REDIRECT_ENVIRONMENT = new Set([
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_CEILING_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_CONFIG',
+  'GIT_CONFIG_COUNT',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_NOSYSTEM',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_DIR',
+  'GIT_DISCOVERY_ACROSS_FILESYSTEM',
+  'GIT_INDEX_FILE',
+  'GIT_NAMESPACE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_PREFIX',
+  'GIT_QUARANTINE_PATH',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_SHALLOW_FILE',
+  'GIT_WORK_TREE',
+]);
 const CORPUS_REPLAY_CHECK_SOURCE = readFileSync(
   fileURLToPath(new URL('./corpus-replay-check.mjs', import.meta.url)),
   'utf8',
 );
+const CORPUS_REPLAY_CHECK_GZIP_BASE64 = gzipSync(Buffer.from(CORPUS_REPLAY_CHECK_SOURCE), {
+  level: 9,
+}).toString('base64');
+const CORPUS_REPLAY_BOOTSTRAP =
+  'const encoded = process.argv.splice(1, 1)[0]; if (encoded === undefined) throw new Error("missing replay check"); const { gunzipSync } = await import("node:zlib"); await import("data:text/javascript;base64," + gunzipSync(Buffer.from(encoded, "base64")).toString("base64"));';
 const CORPUS_LIMIT_KEYS = [
   'maxTreeEntries',
   'maxManifests',
@@ -50,6 +82,26 @@ const CORPUS_LIMIT_KEYS = [
   'maxFileBytes',
   'maxTotalBytes',
 ] as const satisfies readonly (keyof CorpusLimits)[];
+const CORPUS_RESERVED_BASENAMES = new Set([
+  '.git',
+  'node_modules',
+  'findings.jsonl',
+  'summary.md',
+  'corpus-run.json',
+]);
+
+type CorpusEvidenceRole = 'repository list' | 'candidate snapshot' | 'sample evidence';
+
+interface CorpusEvidencePath {
+  role: CorpusEvidenceRole;
+  path: string;
+  name: string;
+}
+
+interface CorpusEvidenceInput extends CorpusEvidencePath {
+  bytes: Buffer;
+  sha256: string;
+}
 
 interface GitHubTreeResponse {
   tree?: TreeEntry[];
@@ -134,6 +186,7 @@ export interface CorpusScanOptions {
   sampleSeed?: string;
   candidateSnapshotFile?: string;
   sampleEvidenceFile?: string;
+  sourceCheckout?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -148,6 +201,144 @@ function exactSourceCommit(value: string): string {
 
 function posixShellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function corpusFilenameKey(value: string | Buffer): string {
+  const bytes = typeof value === 'string' ? Buffer.from(value) : value;
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    return bytes.toString('hex');
+  }
+  let decoded: string;
+  try {
+    decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error('recorded source commit contains a filename unsupported on this platform');
+  }
+  return decoded.normalize('NFC').toLocaleLowerCase('en-US');
+}
+
+function sourceGit(sourceCheckout: string, arguments_: string[], description: string): Buffer {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    const normalized = key.toUpperCase();
+    if (
+      GIT_REDIRECT_ENVIRONMENT.has(normalized) ||
+      /^GIT_CONFIG_(?:KEY|VALUE)_\d+$/u.test(normalized)
+    ) {
+      delete environment[key];
+    }
+  }
+  environment.GIT_NO_REPLACE_OBJECTS = '1';
+  environment.GIT_WORK_TREE = sourceCheckout;
+  try {
+    return execFileSync('git', [...GIT_SAFE_CONFIG, '-C', sourceCheckout, ...arguments_], {
+      encoding: null,
+      env: environment,
+      maxBuffer: MAX_GIT_OUTPUT_BYTES,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    throw new Error(`recorded source checkout ${description} could not be verified`);
+  }
+}
+
+function nulRecords(output: Buffer, description: string): Buffer[] {
+  if (output.length === 0) return [];
+  if (output.at(-1) !== 0) throw new Error(`${description} was not NUL terminated`);
+  const records: Buffer[] = [];
+  let start = 0;
+  for (let index = 0; index < output.length; index += 1) {
+    if (output[index] !== 0) continue;
+    if (index === start) throw new Error(`${description} contained an empty filename`);
+    records.push(output.subarray(start, index));
+    start = index + 1;
+  }
+  return records;
+}
+
+function validateEvidenceAgainstSourceTree(
+  evidence: CorpusEvidencePath[],
+  sourceCommit: string,
+  sourceCheckout = CORPUS_SOURCE_CHECKOUT,
+): void {
+  const checkout = resolve(sourceCheckout);
+  const head = sourceGit(checkout, ['rev-parse', '--verify', 'HEAD^{commit}'], 'HEAD')
+    .toString('ascii')
+    .trim();
+  if (head !== sourceCommit) {
+    throw new Error('recorded source checkout HEAD does not match the source commit');
+  }
+  const trackedRootKeys = new Set(
+    nulRecords(
+      sourceGit(checkout, ['ls-tree', '-z', '--name-only', sourceCommit], 'root tree'),
+      'recorded source root tree',
+    ).map(corpusFilenameKey),
+  );
+  for (const input of evidence) {
+    if (trackedRootKeys.has(corpusFilenameKey(input.name))) {
+      throw new Error(`${input.role} basename is tracked at the recorded source commit root`);
+    }
+  }
+}
+
+function corpusEvidencePaths(
+  options: Pick<
+    CorpusScanOptions,
+    'inputFile' | 'candidateSnapshotFile' | 'sampleEvidenceFile' | 'sourceCommit'
+  >,
+): CorpusEvidencePath[] {
+  if (
+    (options.candidateSnapshotFile === undefined) !==
+    (options.sampleEvidenceFile === undefined)
+  ) {
+    throw new Error('candidate snapshot and sample evidence must be provided together');
+  }
+  const paths: Array<{ role: CorpusEvidenceRole; path: string | undefined }> = [
+    { role: 'repository list', path: options.inputFile },
+    { role: 'candidate snapshot', path: options.candidateSnapshotFile },
+    { role: 'sample evidence', path: options.sampleEvidenceFile },
+  ];
+  const reserved = new Set(CORPUS_RESERVED_BASENAMES);
+  if (/^[a-f0-9]{40}$/u.test(options.sourceCommit)) {
+    reserved.add(`corpus-reproduction-${options.sourceCommit}`);
+  }
+  const reservedKeys = new Set([...reserved].map(corpusFilenameKey));
+  const seen = new Set<string>();
+  const evidence: CorpusEvidencePath[] = [];
+  for (const entry of paths) {
+    if (entry.path === undefined) continue;
+    const name = entry.path.includes('\0') ? '' : basename(entry.path);
+    if (name === '' || name === '.' || name === '..') {
+      throw new Error(`${entry.role} must have a safe replay basename`);
+    }
+    const key = corpusFilenameKey(name);
+    if (reservedKeys.has(key)) {
+      throw new Error(`${entry.role} basename is reserved for corpus output or replay state`);
+    }
+    if (seen.has(key)) {
+      throw new Error('corpus evidence inputs must have unique replay basenames');
+    }
+    seen.add(key);
+    evidence.push({ role: entry.role, path: entry.path, name });
+  }
+  return evidence;
+}
+
+function readCorpusEvidence(input: CorpusEvidencePath): CorpusEvidenceInput {
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(input.path);
+  } catch {
+    throw new Error(`${input.role} could not be inspected`);
+  }
+  if (!stat.isFile()) throw new Error(`${input.role} must be a regular file`);
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(input.path);
+  } catch {
+    throw new Error(`${input.role} could not be read`);
+  }
+  return { ...input, bytes, sha256: sha256(bytes) };
 }
 
 function normalizeCorpusLimits(value: unknown, source: string): CorpusLimits {
@@ -192,23 +383,24 @@ function reproductionCommand(options: {
   sampleSeed: string;
   environment: CorpusRunManifest['environment'];
   limits: CorpusLimits;
-  inputFile: string;
-  candidateSnapshotFile?: string;
-  sampleEvidenceFile?: string;
+  input: CorpusEvidenceInput;
+  candidateSnapshot?: CorpusEvidenceInput;
+  sampleEvidence?: CorpusEvidenceInput;
 }): string {
   const outputDirectory = `corpus-reproduction-${options.sourceCommit}`;
-  const evidenceFiles = [
-    basename(options.inputFile),
-    ...(options.candidateSnapshotFile === undefined
-      ? []
-      : [basename(options.candidateSnapshotFile)]),
-    ...(options.sampleEvidenceFile === undefined ? [] : [basename(options.sampleEvidenceFile)]),
+  const evidence = [
+    options.input,
+    ...(options.candidateSnapshot === undefined ? [] : [options.candidateSnapshot]),
+    ...(options.sampleEvidence === undefined ? [] : [options.sampleEvidence]),
   ];
-  const replayCheckArguments = [options.sourceCommit, ...new Set(evidenceFiles)]
+  const replayCheckArguments = [
+    options.sourceCommit,
+    ...evidence.flatMap((value) => [value.name, value.sha256]),
+  ]
     .map(posixShellQuote)
     .join(' ');
   const cleanCheckout = [
-    `node --input-type=module -e "$SCRIPTSPECT_REPLAY_CHECK" -- ${replayCheckArguments}`,
+    `node --input-type=module -e ${posixShellQuote(CORPUS_REPLAY_BOOTSTRAP)} -- "$SCRIPTSPECT_REPLAY_CHECK" ${replayCheckArguments}`,
   ];
   const environment = [
     `SCRIPTSPECT_SOURCE_COMMIT=${posixShellQuote(options.sourceCommit)}`,
@@ -216,21 +408,24 @@ function reproductionCommand(options: {
     `CORPUS_SAMPLE_METHOD=${posixShellQuote(options.sampleMethod)}`,
     `CORPUS_SAMPLE_SEED=${posixShellQuote(options.sampleSeed)}`,
     `CORPUS_LIMITS_JSON=${posixShellQuote(JSON.stringify(options.limits))}`,
-    ...(options.candidateSnapshotFile === undefined
+    ...(options.candidateSnapshot === undefined
       ? []
-      : [`CORPUS_CANDIDATE_SNAPSHOT=${posixShellQuote(basename(options.candidateSnapshotFile))}`]),
-    ...(options.sampleEvidenceFile === undefined
+      : [`CORPUS_CANDIDATE_SNAPSHOT=${posixShellQuote(options.candidateSnapshot.name)}`]),
+    ...(options.sampleEvidence === undefined
       ? []
-      : [`CORPUS_SAMPLE_EVIDENCE=${posixShellQuote(basename(options.sampleEvidenceFile))}`]),
+      : [`CORPUS_SAMPLE_EVIDENCE=${posixShellQuote(options.sampleEvidence.name)}`]),
   ];
-  return [
-    `SCRIPTSPECT_REPLAY_CHECK=${posixShellQuote(CORPUS_REPLAY_CHECK_SOURCE)}`,
-    `: "\${GITHUB_TOKEN:?set GITHUB_TOKEN to a read-only public-repository token}"`,
-    `git -c advice.detachedHead=false checkout --detach ${posixShellQuote(options.sourceCommit)}`,
+  const commands = [
+    'set +a',
+    `SCRIPTSPECT_REPLAY_CHECK=${posixShellQuote(CORPUS_REPLAY_CHECK_GZIP_BASE64)}`,
+    'unset SCRIPTSPECT_REPLAY_TOKEN',
+    `SCRIPTSPECT_REPLAY_TOKEN="\${GITHUB_TOKEN-}"`,
+    'unset GITHUB_TOKEN',
     `test "$(node --version)" = ${posixShellQuote(options.environment.node)}`,
     `test "$(node -p 'process.platform')" = ${posixShellQuote(options.environment.platform)}`,
     `test "$(node -p 'process.arch')" = ${posixShellQuote(options.environment.arch)}`,
     ...cleanCheckout,
+    'test ! -e node_modules && test ! -L node_modules',
     'corepack enable',
     "corepack prepare 'pnpm@11.24.0' --activate",
     'pnpm install --frozen-lockfile',
@@ -240,12 +435,15 @@ function reproductionCommand(options: {
     options.environment.runnerOs === undefined
       ? 'unset RUNNER_OS'
       : `export RUNNER_OS=${posixShellQuote(options.environment.runnerOs)}`,
-    `${environment.join(' ')} pnpm exec tsx tools/corpus-scan.ts ${posixShellQuote(basename(options.inputFile))} ${posixShellQuote(outputDirectory)}`,
-  ].join(' && ');
+    'test -n "$SCRIPTSPECT_REPLAY_TOKEN"',
+    `GITHUB_TOKEN="$SCRIPTSPECT_REPLAY_TOKEN" ${environment.join(' ')} pnpm exec tsx tools/corpus-scan.ts ${posixShellQuote(options.input.name)} ${posixShellQuote(outputDirectory)}`,
+  ];
+  return `(${commands.join(' && ')})`;
 }
 
-function readLocatorSequence(inputFile: string): ReturnType<typeof parseRepoLocator>[] {
-  return readFileSync(inputFile, 'utf8')
+function readLocatorSequence(input: Buffer): ReturnType<typeof parseRepoLocator>[] {
+  return input
+    .toString('utf8')
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter((line) => line !== '' && !line.startsWith('#'))
@@ -690,6 +888,15 @@ function renderSummary(manifest: CorpusRunManifest): string {
 export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusRunManifest> {
   if (options.token === '') throw new Error('GITHUB_TOKEN is required (read-only public access)');
   const sourceCommit = exactSourceCommit(options.sourceCommit);
+  const evidencePaths = corpusEvidencePaths({ ...options, sourceCommit });
+  validateEvidenceAgainstSourceTree(evidencePaths, sourceCommit, options.sourceCheckout);
+  const evidenceByRole = new Map(
+    evidencePaths.map(readCorpusEvidence).map((input) => [input.role, input] as const),
+  );
+  const inputEvidence = evidenceByRole.get('repository list');
+  if (inputEvidence === undefined) throw new Error('repository list evidence was unavailable');
+  const candidateSnapshotEvidence = evidenceByRole.get('candidate snapshot');
+  const sampleEvidenceInput = evidenceByRole.get('sample evidence');
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const environment: CorpusRunManifest['environment'] = {
     node: process.version,
@@ -700,26 +907,15 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
   const limits = normalizeCorpusLimits(options.limits ?? DEFAULT_CORPUS_LIMITS, 'corpus limits');
   const fetchImpl = options.fetchImpl ?? fetch;
   const sampleMethod = options.sampleMethod ?? CORPUS_SAMPLE_METHOD;
-  if (
-    (options.candidateSnapshotFile === undefined) !==
-    (options.sampleEvidenceFile === undefined)
-  ) {
-    throw new Error('candidate snapshot and sample evidence must be provided together');
-  }
-  const candidateSnapshotBytes =
-    options.candidateSnapshotFile === undefined
-      ? undefined
-      : readFileSync(options.candidateSnapshotFile);
-  const sampleEvidenceBytes =
-    options.sampleEvidenceFile === undefined ? undefined : readFileSync(options.sampleEvidenceFile);
+  const candidateSnapshotBytes = candidateSnapshotEvidence?.bytes;
+  const sampleEvidenceBytes = sampleEvidenceInput?.bytes;
   const parsedCandidateSnapshot =
     candidateSnapshotBytes === undefined
       ? undefined
       : parseCorpusCandidateSnapshot(candidateSnapshotBytes);
   const candidateSnapshotSha256 = parsedCandidateSnapshot?.digest;
-  const sampleEvidenceSha256 =
-    sampleEvidenceBytes === undefined ? undefined : sha256(sampleEvidenceBytes);
-  const locatorSequence = readLocatorSequence(options.inputFile);
+  const sampleEvidenceSha256 = sampleEvidenceInput?.sha256;
+  const locatorSequence = readLocatorSequence(inputEvidence.bytes);
   if (locatorSequence.length === 0) throw new Error('repository list is empty');
   let sampleSelections = new Map<string, ValidatedSampleSelection>();
   if (
@@ -852,7 +1048,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
     sourceCommit,
     scannerSha256: sha256(readFileSync(scannerPath)),
     registrySha256: sha256(JSON.stringify(registryPayload)),
-    inputSha256: sha256(readFileSync(options.inputFile)),
+    inputSha256: inputEvidence.sha256,
     mode: 'root-and-workspace',
     targets: DEFAULT_TARGETS,
     limits,
@@ -875,9 +1071,9 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
       sampleSeed: options.sampleSeed ?? 'none',
       environment,
       limits,
-      inputFile: options.inputFile,
-      candidateSnapshotFile: options.candidateSnapshotFile,
-      sampleEvidenceFile: options.sampleEvidenceFile,
+      input: inputEvidence,
+      candidateSnapshot: candidateSnapshotEvidence,
+      sampleEvidence: sampleEvidenceInput,
     }),
   };
   const provisional = { ...partialManifest, artifactSha256: {} } satisfies CorpusRunManifest;
@@ -887,12 +1083,12 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
     artifactSha256: {
       'findings.jsonl': sha256(findingsArtifact),
       'summary.md': sha256(summaryText),
-      ...(options.candidateSnapshotFile === undefined || candidateSnapshotSha256 === undefined
+      ...(candidateSnapshotEvidence === undefined || candidateSnapshotSha256 === undefined
         ? {}
-        : { [basename(options.candidateSnapshotFile)]: candidateSnapshotSha256 }),
-      ...(options.sampleEvidenceFile === undefined || sampleEvidenceSha256 === undefined
+        : { [candidateSnapshotEvidence.name]: candidateSnapshotSha256 }),
+      ...(sampleEvidenceInput === undefined || sampleEvidenceSha256 === undefined
         ? {}
-        : { [basename(options.sampleEvidenceFile)]: sampleEvidenceSha256 }),
+        : { [sampleEvidenceInput.name]: sampleEvidenceSha256 }),
     },
   };
   writeFileSync(join(outputDir, 'findings.jsonl'), findingsArtifact, {
@@ -919,7 +1115,7 @@ export function corpusScanOptionsFromCli(
   if (inputFile === undefined) {
     throw new Error('usage: tsx tools/corpus-scan.ts repos.txt [output-directory]');
   }
-  return {
+  const options: CorpusScanOptions = {
     inputFile,
     outputDir: arguments_[1] ?? process.cwd(),
     token: environment.GITHUB_TOKEN ?? '',
@@ -931,6 +1127,8 @@ export function corpusScanOptionsFromCli(
     candidateSnapshotFile: environment.CORPUS_CANDIDATE_SNAPSHOT,
     sampleEvidenceFile: environment.CORPUS_SAMPLE_EVIDENCE,
   };
+  corpusEvidencePaths(options);
+  return options;
 }
 
 async function main(): Promise<void> {

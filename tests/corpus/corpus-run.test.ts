@@ -18,7 +18,7 @@ import { type CorpusLimits, DEFAULT_CORPUS_LIMITS, type TreeEntry } from '../../
 import { corpusScanOptionsFromCli, runCorpusScan } from '../../tools/corpus-scan';
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
-const SOURCE_COMMIT = '89abcdef0123456789abcdef0123456789abcdef';
+const SOURCE_COMMIT = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const temporaryDirectories: string[] = [];
 
 function temporaryDirectory(): string {
@@ -270,6 +270,7 @@ async function replayFixture(
   );
   writeFileSync(join(directory, 'package.json'), '{"packageManager":"pnpm@11.24.0"}\n');
   writeFileSync(join(directory, 'README.md'), 'committed replay fixture\n');
+  writeFileSync(join(directory, '.gitignore'), 'node_modules/\n');
   writeFileSync(join(directory, '.gitattributes'), 'filtered.txt filter=replay-clean\n');
   writeFileSync(join(directory, 'filtered.txt'), 'canonical\n');
   writeFileSync(join(directory, "special ' [x] ;.txt"), 'special filename\n');
@@ -292,6 +293,7 @@ async function replayFixture(
     'tools/corpus-replay-check.mjs',
     'package.json',
     'README.md',
+    '.gitignore',
     '.gitattributes',
     'filtered.txt',
     "special ' [x] ;.txt",
@@ -344,6 +346,7 @@ async function replayFixture(
       sampleSeed: 'candidate-seed',
       candidateSnapshotFile,
       sampleEvidenceFile,
+      sourceCheckout: directory,
     });
     return { directory, reproduction: manifest.reproduction };
   } finally {
@@ -355,7 +358,12 @@ async function replayFixture(
 function executeReplay(
   directory: string,
   reproduction: string,
-  options: { shellSetup?: string; runnerOs?: string } = {},
+  options: {
+    shellSetup?: string;
+    shellAfter?: string;
+    runnerOs?: string;
+    environment?: NodeJS.ProcessEnv;
+  } = {},
 ): ReturnType<typeof spawnSync> {
   const script = [
     'corepack() { return 0; }',
@@ -373,12 +381,14 @@ function executeReplay(
     ].join('\n'),
     options.shellSetup ?? '',
     reproduction,
+    options.shellAfter ?? '',
   ].join('\n');
   return spawnSync(posixShell(), ['-c', script], {
     cwd: directory,
     encoding: 'utf8',
     env: {
       ...process.env,
+      ...options.environment,
       GITHUB_TOKEN: 'ephemeral-replay-test-token',
       ...(options.runnerOs === undefined ? {} : { RUNNER_OS: options.runnerOs }),
     },
@@ -895,9 +905,19 @@ describe('immutable corpus run evidence', () => {
       sampleEvidenceFile,
     });
 
-    const preflight = `node --input-type=module -e "$SCRIPTSPECT_REPLAY_CHECK" -- '${SOURCE_COMMIT}' 'repos copy.txt' 'repository candidate'"'"'s.json' 'repository sample;ignored.json'`;
-    expect(manifest.reproduction).toMatch(/^SCRIPTSPECT_REPLAY_CHECK='/u);
-    expect(manifest.reproduction.split(preflight)).toHaveLength(3);
+    expect(manifest.reproduction).toMatch(/^\(set \+a && SCRIPTSPECT_REPLAY_CHECK='/u);
+    expect(manifest.reproduction.split('node --input-type=module -e')).toHaveLength(3);
+    for (const digest of [
+      manifest.inputSha256,
+      manifest.sampling.candidateSnapshotSha256,
+      manifest.sampling.sampleEvidenceSha256,
+    ]) {
+      expect(digest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(manifest.reproduction.split(String(digest))).toHaveLength(3);
+    }
+    expect(manifest.reproduction).toContain('test ! -e node_modules');
+    expect(manifest.reproduction).not.toMatch(/\bgit\b[^&]*\bcheckout\b/u);
+    expect(manifest.reproduction).not.toContain('tools/corpus-replay-check.mjs');
     expect(manifest.reproduction).toContain(
       `CORPUS_LIMITS_JSON='{"maxTreeEntries":20000,"maxManifests":500,"maxDepth":12,"maxFileBytes":1048576,"maxTotalBytes":10485760}'`,
     );
@@ -906,6 +926,212 @@ describe('immutable corpus run evidence', () => {
     );
     expect(manifest.reproduction).not.toContain('read-only-test-token-must-not-be-persisted');
     expect(manifest.reproduction).not.toContain(directory);
+  });
+
+  it('does not execute a local clean filter while validating a replay checkout', async () => {
+    const replay = await replayFixture();
+    const candidateEvidence = join(replay.directory, 'repository-candidates.json');
+    const originalEvidence = readFileSync(candidateEvidence);
+    git(
+      replay.directory,
+      'config',
+      'filter.replay-clean.clean',
+      'sh -c \'printf tampered > repository-candidates.json; cat >/dev/null; printf \\"canonical\\n\\"\'',
+    );
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).toBe(0);
+    expect(readFileSync(candidateEvidence)).toEqual(originalEvidence);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(true);
+  });
+
+  it('requires callers to prepare the exact commit without invoking checkout hooks', async () => {
+    const replay = await replayFixture();
+    const hook = join(replay.directory, '.git', 'hooks', 'post-checkout');
+    writeFileSync(hook, '#!/bin/sh\nprintf hook-ran > checkout-hook-ran\n');
+    chmodSync(hook, 0o755);
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).toBe(0);
+    expect(existsSync(join(replay.directory, 'checkout-hook-ran'))).toBe(false);
+    expect(replay.reproduction).not.toMatch(/\bgit\b[^&]*\bcheckout\b/u);
+  });
+
+  it('fails closed on a different clean HEAD without changing the caller checkout', async () => {
+    const replay = await replayFixture();
+    writeFileSync(join(replay.directory, 'later-commit.txt'), 'later clean commit\n');
+    git(replay.directory, 'add', '--', 'later-commit.txt');
+    git(replay.directory, 'commit', '--quiet', '-m', 'later fixture commit');
+    const laterHead = git(replay.directory, 'rev-parse', 'HEAD');
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(git(replay.directory, 'rev-parse', 'HEAD')).toBe(laterHead);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it('keeps replay environment changes inside a subshell', async () => {
+    const replay = await replayFixture();
+
+    const result = executeReplay(replay.directory, replay.reproduction, {
+      shellAfter: `printf "GITHUB_TOKEN=%s\\nRUNNER_OS=%s\\n" "\${GITHUB_TOKEN-<unset>}" "\${RUNNER_OS-<unset>}" > caller-environment.txt`,
+      runnerOs: 'CallerRunner',
+    });
+
+    expect(result.status, String(result.stderr)).toBe(0);
+    expect(readFileSync(join(replay.directory, 'caller-environment.txt'), 'utf8')).toBe(
+      'GITHUB_TOKEN=ephemeral-replay-test-token\nRUNNER_OS=CallerRunner\n',
+    );
+  });
+
+  it('rejects a pre-existing dependency install before running package tooling', async () => {
+    const replay = await replayFixture();
+    mkdirSync(join(replay.directory, 'node_modules', 'malicious'), { recursive: true });
+    writeFileSync(
+      join(replay.directory, 'node_modules', 'malicious', 'index.js'),
+      'throw new Error("pre-existing dependency executed");\n',
+    );
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it('rejects a broken node_modules link before running package tooling', async () => {
+    const replay = await replayFixture();
+    const nodeModules = join(replay.directory, 'node_modules');
+    if (process.platform === 'win32') {
+      symlinkSync(join(replay.directory, 'missing-dependency-target'), nodeModules, 'junction');
+    } else {
+      symlinkSync('missing-dependency-target', nodeModules);
+    }
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it('allows the frozen install to create an ignored dependency directory', async () => {
+    const replay = await replayFixture();
+    const shellSetup = [
+      'pnpm() {',
+      '  if [ "$1" = "install" ]; then',
+      '    mkdir -p node_modules/installed',
+      '    printf installed > node_modules/installed/package.json',
+      '  elif [ "$1" = "exec" ]; then',
+      '    printf scanner-ran > replay-observation.txt',
+      '  fi',
+      '  return 0',
+      '}',
+    ].join('\n');
+
+    const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+
+    expect(result.status, String(result.stderr)).toBe(0);
+    expect(readFileSync(join(replay.directory, 'replay-observation.txt'), 'utf8')).toBe(
+      'scanner-ran',
+    );
+  });
+
+  it('withholds the token from package setup and injects it only into the scanner command', async () => {
+    const replay = await replayFixture();
+    const shellSetup = [
+      'set -a',
+      'pnpm() {',
+      '  if [ "$1" = "install" ]; then',
+      '    if env | grep -q "^GITHUB_TOKEN=" || env | grep -q "^SCRIPTSPECT_REPLAY_TOKEN="; then',
+      '      printf leaked > package-setup-token-leak.txt',
+      '      return 97',
+      '    fi',
+      '  elif [ "$1" = "exec" ]; then',
+      '    env | grep "^GITHUB_TOKEN=" > scanner-token.txt',
+      '  fi',
+      '  return 0',
+      '}',
+    ].join('\n');
+
+    const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+
+    expect(result.status, String(result.stderr)).toBe(0);
+    expect(existsSync(join(replay.directory, 'package-setup-token-leak.txt'))).toBe(false);
+    expect(readFileSync(join(replay.directory, 'scanner-token.txt'), 'utf8')).toBe(
+      'GITHUB_TOKEN=ephemeral-replay-test-token\n',
+    );
+  });
+
+  it('ignores inherited Git repository redirection while validating the checkout', async () => {
+    const replay = await replayFixture();
+    const redirectedWorktree = temporaryDirectory();
+    for (const evidenceName of [
+      'repos.txt',
+      'repository-candidates.json',
+      'repository-sample.json',
+    ]) {
+      copyFileSync(join(replay.directory, evidenceName), join(redirectedWorktree, evidenceName));
+    }
+    writeFileSync(
+      join(replay.directory, 'unexpected-untracked.ts'),
+      'export const hidden = true;\n',
+    );
+
+    const result = executeReplay(replay.directory, replay.reproduction, {
+      environment: { GIT_WORK_TREE: redirectedWorktree },
+    });
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+  });
+
+  it.each(['repos.txt', 'repository-candidates.json', 'repository-sample.json'])(
+    'rejects changed %s evidence before the frozen install',
+    async (evidenceName) => {
+      const replay = await replayFixture();
+      writeFileSync(join(replay.directory, evidenceName), `tampered ${evidenceName}\n`);
+
+      const result = executeReplay(replay.directory, replay.reproduction);
+
+      expect(result.status, String(result.stderr)).not.toBe(0);
+      expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+    },
+  );
+
+  it.each(['repos.txt', 'repository-candidates.json', 'repository-sample.json'])(
+    'rejects lifecycle changes to %s evidence after the frozen install',
+    async (evidenceName) => {
+      const replay = await replayFixture();
+      const shellSetup = [
+        'pnpm() {',
+        '  if [ "$1" = "install" ]; then',
+        `    printf tampered > '${evidenceName}'`,
+        '  elif [ "$1" = "exec" ]; then',
+        '    printf scanner-ran > replay-observation.txt',
+        '  fi',
+        '  return 0',
+        '}',
+      ].join('\n');
+
+      const result = executeReplay(replay.directory, replay.reproduction, { shellSetup });
+
+      expect(result.status, String(result.stderr)).not.toBe(0);
+      expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
+    },
+  );
+
+  it('rejects a non-regular evidence input before the frozen install', async () => {
+    const replay = await replayFixture();
+    const evidencePath = join(replay.directory, 'repository-sample.json');
+    rmSync(evidencePath);
+    mkdirSync(evidencePath);
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
   });
 
   it('fails closed before scanning a checkout with dirty tracked, staged, or untracked files', async () => {
@@ -990,9 +1216,9 @@ describe('immutable corpus run evidence', () => {
     expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
   });
 
-  it('propagates a Git status failure instead of treating it as clean', async () => {
+  it('propagates a Git metadata failure instead of treating it as clean', async () => {
     const replay = await replayFixture();
-    git(replay.directory, 'config', 'status.showUntrackedFiles', 'invalid-mode');
+    git(replay.directory, 'config', 'core.repositoryFormatVersion', '999');
 
     const result = executeReplay(replay.directory, replay.reproduction);
 
@@ -1424,4 +1650,175 @@ describe('immutable corpus run evidence', () => {
     ).rejects.toThrow(/candidate snapshot and sample evidence must be provided together/);
     expect(networkCalled).toBe(false);
   });
+
+  it('rejects evidence paths that collapse to duplicate replay basenames before network access', async () => {
+    const directory = temporaryDirectory();
+    const inputDirectory = join(directory, 'input');
+    const candidateDirectory = join(directory, 'candidate');
+    const sampleDirectory = join(directory, 'sample');
+    mkdirSync(inputDirectory);
+    mkdirSync(candidateDirectory);
+    mkdirSync(sampleDirectory);
+    const inputFile = join(inputDirectory, 'evidence.json');
+    const candidateSnapshotFile = join(candidateDirectory, 'evidence.json');
+    const sampleEvidenceFile = join(sampleDirectory, 'repository-sample.json');
+    const data = fixture();
+    const provenance = completeProvenance(data);
+    writeFileSync(inputFile, `example/project@${COMMIT}\n`);
+    writeFileSync(candidateSnapshotFile, provenance.candidateSnapshot);
+    writeFileSync(sampleEvidenceFile, `${JSON.stringify(provenance.sampleEvidence, null, 2)}\n`);
+    let networkCalled = false;
+
+    await expect(
+      runCorpusScan({
+        inputFile,
+        outputDir: join(directory, 'out'),
+        token: 'read-only-test-token',
+        sourceCommit: SOURCE_COMMIT,
+        fetchImpl: (async () => {
+          networkCalled = true;
+          return new Response('unexpected');
+        }) as typeof fetch,
+        candidateSnapshotFile,
+        sampleEvidenceFile,
+      }),
+    ).rejects.toThrow(/unique.*basename|basename.*unique/iu);
+    expect(networkCalled).toBe(false);
+  });
+
+  it('rejects an evidence basename tracked at the recorded source commit before network access', async () => {
+    const directory = temporaryDirectory();
+    const inputFile = join(directory, 'package.json');
+    const candidateSnapshotFile = join(directory, 'repository-candidates.json');
+    const sampleEvidenceFile = join(directory, 'repository-sample.json');
+    const data = fixture();
+    const provenance = completeProvenance(data);
+    const sourceCommit = git(process.cwd(), 'rev-parse', 'HEAD');
+    writeFileSync(inputFile, `example/project@${COMMIT}\n`);
+    writeFileSync(candidateSnapshotFile, provenance.candidateSnapshot);
+    writeFileSync(sampleEvidenceFile, `${JSON.stringify(provenance.sampleEvidence, null, 2)}\n`);
+    let networkCalled = false;
+
+    await expect(
+      runCorpusScan({
+        inputFile,
+        outputDir: join(directory, 'out'),
+        token: 'read-only-test-token',
+        sourceCommit,
+        fetchImpl: (async () => {
+          networkCalled = true;
+          return new Response('unexpected');
+        }) as typeof fetch,
+        candidateSnapshotFile,
+        sampleEvidenceFile,
+      }),
+    ).rejects.toThrow(/basename.*tracked.*source commit|tracked.*source commit.*basename/iu);
+    expect(networkCalled).toBe(false);
+  });
+
+  it.each([
+    ['repository list', 'findings.jsonl', 'repository-candidates.json', 'repository-sample.json'],
+    ['candidate snapshot', 'repos.txt', 'summary.md', 'repository-sample.json'],
+    ['sample evidence', 'repos.txt', 'repository-candidates.json', 'corpus-run.json'],
+    [
+      'repository list',
+      `corpus-reproduction-${SOURCE_COMMIT}`,
+      'repository-candidates.json',
+      'repository-sample.json',
+    ],
+    ['repository list', 'node_modules', 'repository-candidates.json', 'repository-sample.json'],
+  ])(
+    'rejects a %s basename reserved for corpus output before network access',
+    async (_role, inputName, candidateName, sampleName) => {
+      const directory = temporaryDirectory();
+      const inputFile = join(directory, inputName);
+      const candidateSnapshotFile = join(directory, candidateName);
+      const sampleEvidenceFile = join(directory, sampleName);
+      const data = fixture();
+      const provenance = completeProvenance(data);
+      writeFileSync(inputFile, `example/project@${COMMIT}\n`);
+      writeFileSync(candidateSnapshotFile, provenance.candidateSnapshot);
+      writeFileSync(sampleEvidenceFile, `${JSON.stringify(provenance.sampleEvidence, null, 2)}\n`);
+      let networkCalled = false;
+
+      await expect(
+        runCorpusScan({
+          inputFile,
+          outputDir: join(directory, 'out'),
+          token: 'read-only-test-token',
+          sourceCommit: SOURCE_COMMIT,
+          fetchImpl: (async () => {
+            networkCalled = true;
+            return new Response('unexpected');
+          }) as typeof fetch,
+          candidateSnapshotFile,
+          sampleEvidenceFile,
+        }),
+      ).rejects.toThrow(/reserved.*corpus output|corpus output.*reserved/iu);
+      expect(networkCalled).toBe(false);
+    },
+  );
+
+  it('applies replay basename collision checks to CLI-derived options', () => {
+    const environment = {
+      GITHUB_TOKEN: 'read-only-test-token',
+      SCRIPTSPECT_SOURCE_COMMIT: SOURCE_COMMIT,
+      CORPUS_CANDIDATE_SNAPSHOT: 'candidate/evidence.json',
+      CORPUS_SAMPLE_EVIDENCE: 'sample/evidence.json',
+    };
+    expect(() => corpusScanOptionsFromCli(['input/repos.txt'], environment)).toThrow(
+      /unique.*basename|basename.*unique/iu,
+    );
+    expect(() =>
+      corpusScanOptionsFromCli(['input/findings.jsonl'], {
+        ...environment,
+        CORPUS_CANDIDATE_SNAPSHOT: 'repository-candidates.json',
+        CORPUS_SAMPLE_EVIDENCE: 'repository-sample.json',
+      }),
+    ).toThrow(/reserved.*corpus output|corpus output.*reserved/iu);
+  });
+
+  it.each(['repository list', 'candidate snapshot', 'sample evidence'])(
+    'requires the %s input to be a regular file before network access',
+    async (role) => {
+      const directory = temporaryDirectory();
+      const inputFile = join(directory, 'repos.txt');
+      const candidateSnapshotFile = join(directory, 'repository-candidates.json');
+      const sampleEvidenceFile = join(directory, 'repository-sample.json');
+      const data = fixture();
+      const provenance = completeProvenance(data);
+      const paths = new Map([
+        ['repository list', inputFile],
+        ['candidate snapshot', candidateSnapshotFile],
+        ['sample evidence', sampleEvidenceFile],
+      ]);
+      for (const [currentRole, path] of paths) {
+        if (currentRole === role) mkdirSync(path);
+        else if (currentRole === 'repository list') {
+          writeFileSync(path, `example/project@${COMMIT}\n`);
+        } else if (currentRole === 'candidate snapshot') {
+          writeFileSync(path, provenance.candidateSnapshot);
+        } else {
+          writeFileSync(path, `${JSON.stringify(provenance.sampleEvidence, null, 2)}\n`);
+        }
+      }
+      let networkCalled = false;
+
+      await expect(
+        runCorpusScan({
+          inputFile,
+          outputDir: join(directory, 'out'),
+          token: 'read-only-test-token',
+          sourceCommit: SOURCE_COMMIT,
+          fetchImpl: (async () => {
+            networkCalled = true;
+            return new Response('unexpected');
+          }) as typeof fetch,
+          candidateSnapshotFile,
+          sampleEvidenceFile,
+        }),
+      ).rejects.toThrow(new RegExp(`${role}.*regular file`, 'iu'));
+      expect(networkCalled).toBe(false);
+    },
+  );
 });
