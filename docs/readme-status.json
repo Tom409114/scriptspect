@@ -3,7 +3,7 @@
   "releaseState": "pre-release",
   "packageName": "scriptspect",
   "packageVersion": "0.0.0",
-  "sourceCommit": "bf37b4132508c685a91cc16a9c0a3058c252502e",
+  "sourceCommit": "c9c671c8e150705d78d9169d4c5a8f22cb37fad0",
   "nodeMajor": 22,
   "repository": "https://github.com/Tom409114/scriptspect"
 }

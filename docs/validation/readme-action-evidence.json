@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-09-01T03:46:10Z",
-  "sourceCommit": "bf37b4132508c685a91cc16a9c0a3058c252502e",
+  "capturedAt": "2026-09-01T07:33:33Z",
+  "sourceCommit": "c9c671c8e150705d78d9169d4c5a8f22cb37fad0",
   "workflowRun": {
-    "id": 33467290054,
+    "id": 33482453059,
     "name": "CI",
-    "url": "https://github.com/Tom409114/scriptspect/actions/runs/33467290054",
+    "url": "https://github.com/Tom409114/scriptspect/actions/runs/33482453059",
     "conclusion": "success"
   },
   "checkRun": {
-    "id": 99729679961,
+    "id": 99774890433,
     "name": "Bundled Action consumer",
-    "url": "https://github.com/Tom409114/scriptspect/actions/runs/33467290054/job/99729679961",
+    "url": "https://github.com/Tom409114/scriptspect/actions/runs/33482453059/job/99774890433",
     "annotationCount": 2,
     "summarySha256": "6f404488da1babb4ba885e873c5187e4e1c5179a2c868bc5324a2e3b8c71c404"
   },

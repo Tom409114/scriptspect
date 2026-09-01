@@ -483,3 +483,17 @@
 | 组合回归 | `LOCAL PASS / HOSTED PENDING` | 稳定共享树上 69 个 test files：`1,074 passed / 8 skipped`；90% parser/rule coverage floor、typecheck、改动文件 Biome、Actionlint、README parity、生成物与 diff check 均通过。PR 与准确 merge-SHA 的 GitHub-hosted checks 仍需随后产生。 |
 
 该候选关闭了本轮新发现的仓库可修高/中项，但在其 PR 和准确 `main` SHA 的 hosted checks 成功前，不得把 `LOCAL PASS` 提升为 `HOSTED PASS`。M8 的 ≥100 人工裁决、shared-corpus adjudication、真实外部兴趣/onboarding/downstream 与时间型 KPI 继续保持 `EXTERNAL + TIME OPEN`。
+
+## PR #80 终审闭环（2026-09-01，追加）
+
+本节只更新上一节明确标为 `HOSTED PENDING` 的候选状态，不把绿色 CI 扩写成发布或外部采用证据。
+
+| 项目 | 最终状态 | 准确远程证据与仍开放边界 |
+|---|---|---|
+| workspace 与 Action root 边界 | `HOSTED PASS` | [PR #80](https://github.com/Tom409114/scriptspect/pull/80) 合并静态 glob base、动态 match 与 Action 向上 root search 的 fail-closed containment；PR required checks 全绿，merge commit `c9c671c8e150705d78d9169d4c5a8f22cb37fad0` 的 [main CI run `33482453059`](https://github.com/Tom409114/scriptspect/actions/runs/33482453059) 在 Windows/macOS/Linux × Node 22/24 上 success。 |
+| 1–1,000 corpus source contract | `HOSTED PASS / 1,000-REPO RUN OPEN` | collector/resolver/scanner 的分页、v2 evidence、v1 replay、数值边界与 rate-limit header fail-closed 回归已随上述准确 main run 通过；这只证明能力，不冒充一次已经完成的 1,000-repository 托管扫描。 |
+| 月度 evidence draft | `HOSTED CONTRACT PASS / REVIEWED DRAFT OPEN` | 只读、artifact-only workflow、missing/partial/null 语义、partial-run failure、双输出独占写入与 rollback 测试已随准确 main run 通过；首次真实 scheduled artifact 与人工 reviewer approval 仍未发生。 |
+| 组合回归 | `LOCAL + HOSTED PASS` | 合并前完整本地结果为 `69 test files / 1,074 passed / 8 skipped`，parser/rule 四项 coverage floor 均超过 90%；PR #80 checks 与准确 merge-SHA push CI 均 success。 |
+| README 可复制证据 | `REFRESHED` | 首页源码评估与本地 Action pin 更新到 exact source commit `c9c671c8e150705d78d9169d4c5a8f22cb37fad0`；真实 `uses: ./` clean/broken consumer、2 条 annotations 与 job summary 来自 main run `33482453059` 的 `Bundled Action consumer` job。 |
+
+[PR #66](https://github.com/Tom409114/scriptspect/pull/66) 仍为 OPEN/BLOCKED；PR #80 合并后 release-please 将其推进到 head `bdc8e1990096db8ca096a8462e3307322d7c9f65`，对应 run [`33482502821`](https://github.com/Tom409114/scriptspect/actions/runs/33482502821) 仍为 `action_required`。npm 404、0 tags、0 releases、Trusted Publishing、tag creation/floating alias policy 与 M8 外部/时间证据均未被本次工程闭环改变。因此总体仍是 **NOT RELEASE READY**。

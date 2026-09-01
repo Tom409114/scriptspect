@@ -31,7 +31,7 @@ are pinned in [`comparison/toolchain.json`](../comparison/toolchain.json).
 | Target shell matrix | every finding lists affected shells (posix-sh / cmd / powershell); default matrix = npm defaults (sh + cmd) |
 | Confidence + severity | every rule has confidence (high/medium) and severity (error/warn/advisory); any configured `error` is in the failure universe, and the warning budget is evaluated before display filtering |
 | Rule provenance | each rule documents shell-behavior evidence and real failure classes with good/bad examples |
-| Monorepo first-class | npm/pnpm/Yarn/Bun workspace discovery and per-package reporting; the controlled hosted 100-package/2-second benchmark passed in [run `33476006926`](https://github.com/Tom409114/scriptspect/actions/runs/33476006926) at exact `main` commit `50d02d44abdbfb3489516f39f4251481dfec1548`, but it is implementation evidence rather than an external-corpus performance or adoption claim |
+| Monorepo first-class | npm/pnpm/Yarn/Bun workspace discovery and per-package reporting; the controlled hosted 100-package/2-second benchmark passed in [run `33482453059`](https://github.com/Tom409114/scriptspect/actions/runs/33482453059) at exact `main` commit `c9c671c8e150705d78d9169d4c5a8f22cb37fad0`, but it is implementation evidence rather than an external-corpus performance or adoption claim |
 | Safe fix engine | safe / conditional / manual; `--fix` applies only replacements whose structural and dependency preconditions are proved; idempotency and formatting are regression-tested |
 | No execution | static only — safe to run on untrusted PRs |
 | GitHub-native | first-class Action, PR annotations, job summary; SARIF planned |

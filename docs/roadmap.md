@@ -4,13 +4,15 @@ The links below record when each implementation slice first landed. A merged
 slice is not the same as satisfying its exit condition: release, hosted-CI,
 corpus, and adoption gates stay open until their public evidence exists.
 
-The latest hosted `main` snapshot is the merged [homepage/release hardening
-PR #78](https://github.com/Tom409114/scriptspect/pull/78) plus [CodeQL follow-up
-PR #79](https://github.com/Tom409114/scriptspect/pull/79). Its exact `main`
-commit passed [CI run `33476006926`](https://github.com/Tom409114/scriptspect/actions/runs/33476006926).
+The latest hosted `main` snapshot includes the merged [homepage/release hardening
+PR #78](https://github.com/Tom409114/scriptspect/pull/78), [CodeQL follow-up
+PR #79](https://github.com/Tom409114/scriptspect/pull/79), and [final spec-audit
+PR #80](https://github.com/Tom409114/scriptspect/pull/80). Exact `main` commit
+`c9c671c8e150705d78d9169d4c5a8f22cb37fad0` passed [CI run
+`33482453059`](https://github.com/Tom409114/scriptspect/actions/runs/33482453059).
 The still-open [v0.1.0 release PR #66](https://github.com/Tom409114/scriptspect/pull/66)
 has since advanced; its latest bot-authored run is
-[`action_required`](https://github.com/Tom409114/scriptspect/actions/runs/33476042317)
+[`action_required`](https://github.com/Tom409114/scriptspect/actions/runs/33482502821)
 under the documented manual-approval policy, so an older green PR-head run is
 not presented as current release evidence. The [DoD
 ledger](validation/v0.1-dod-2026-09-01.md) records the remaining approval,

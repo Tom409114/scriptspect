@@ -12,9 +12,12 @@
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-6f7bf7.svg"></a>
 </p>
 
-<p align="center"><strong>同一条脚本，多种 shell 解释；每条 finding 都明确指出真正会出错的 target。</strong></p>
+<p align="center"><strong>在 CI 或用户踩坑之前，先让 package.json scripts 在 macOS、Linux 与 Windows 上真正可用。</strong></p>
 
-ScriptSpect 会静态检查 npm 风格的 `package.json` scripts，并且不会运行它们。它识别在 `posix-sh`、Windows `cmd` 或可选 `powershell` 下含义不同的结构，精确指向相关 span，并只在安全条件得到证明后提供自动修复。
+ScriptSpect 是 npm 风格 `package.json` scripts 的跨平台预检工具。把一个
+Node.js 项目或 monorepo 交给它，它不会执行 scripts，而是直接指出哪一段
+命令会在 `posix-sh`、Windows `cmd` 或可选 `powershell` 下出错、影响哪个
+平台、为什么出错，并且只在安全条件得到证明时提供修复。
 
 <!-- readme-state:overview:start -->
 > [!IMPORTANT]
@@ -22,6 +25,27 @@ ScriptSpect 会静态检查 npm 风格的 `package.json` scripts，并且不会�
 
 **[查看真实 demo](#修复前分析结果与修复后)** · **[从源码评估](#从源码评估evaluate-from-source-pre-release)** · **[GitHub Actions](#github-actions-预览pre-release)** · **[规则列表](docs/rules/README.md)**
 <!-- readme-state:overview:end -->
+
+<!-- readme-section: purpose -->
+## 它到底做什么、谁适合用、怎么工作
+
+如果你维护 JS/TS 应用、库、CLI 或 monorepo，负责 CI/release，或者需要
+同时支持不同操作系统的贡献者，就适合使用 ScriptSpect。它解决的是最常见
+的那类故障：脚本在作者的 Mac/Linux 上正常，到了 Windows 用户或 Windows
+CI 就失败；反过来，Windows-only 写法也可能在 Unix CI 中出错。
+
+| 问题 | 直接答案 |
+| --- | --- |
+| **谁来用？** | JS/TS 维护者、monorepo 负责人、Windows 贡献者，以及 CI/release 团队。 |
+| **解决什么问题？** | 找出 shell-specific 的环境变量写法、`rm`/`cp`/`mv` 等命令、expansion、redirection、operator、path、显式 shell 依赖与未声明 executable。 |
+| **怎么检查？** | 自动发现根 package 与 workspaces，按所选 target shell 对每条 script 做结构化静态分析，绝不执行目标命令。 |
+| **最后得到什么？** | 精确 rule ID、package/script 名、source span、受影响 shell/OS、severity、confidence、解释，以及终端/JSON/PR annotation。 |
+| **怎么帮助修复？** | `--fix-dry-run` 先展示 patch；`--fix` 只应用已证明安全或满足前置条件的修改，模糊情况保持 manual。 |
+
+它的工作路径很简单：**repository → target-shell 静态分析 → 精确 findings →
+可审查的修复计划**。当前预发布版请先按[从源码评估](#从源码评估evaluate-from-source-pre-release)
+完成准备，再运行 `node dist/cli.mjs <your-project>`；加上 `--fix-dry-run`
+可以先看修改。PR 中使用时，复制 [GitHub Actions 预览](#github-actions-预览pre-release)。
 
 <!-- readme-section: why -->
 ## 为什么值得使用
@@ -31,6 +55,10 @@ ScriptSpect 会静态检查 npm 风格的 `package.json` scripts，并且不会�
 | 在另一种操作系统真正执行前，找出依赖特定 shell 的命令、operator、expansion、redirection、path 与未声明 executable。 | 每条 finding 都带有稳定 rule ID、package/script path、source span、severity、confidence 与受影响 targets。 | `safe`、`conditional`、`manual` 三类安全级别，避免在无法证明等价时进行“热心”改写。 |
 
 ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正则表达式扫描 quoted text。它有意不做完整 shell interpreter；finding 仍应由拥有该 script 的项目审查。
+
+[`scripts-doctor`](docs/comparison.md) 是相邻的 analyzer 基线。`cross-env`、
+`shx` 与 `rimraf` 是 ScriptSpect 在满足前置条件时可能推荐的修复手段，
+不是静态分析竞品。
 
 <!-- readme-section: demo -->
 ## 修复前、分析结果与修复后
@@ -81,7 +109,7 @@ ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正�
 ```bash
 git clone https://github.com/Tom409114/scriptspect.git
 cd scriptspect
-git checkout bf37b4132508c685a91cc16a9c0a3058c252502e
+git checkout c9c671c8e150705d78d9169d4c5a8f22cb37fad0
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
@@ -129,7 +157,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: Tom409114/scriptspect
-          ref: bf37b4132508c685a91cc16a9c0a3058c252502e
+          ref: c9c671c8e150705d78d9169d4c5a8f22cb37fad0
           path: .scriptspect
           persist-credentials: false
       - uses: ./.scriptspect
@@ -140,11 +168,11 @@ jobs:
 Action 会先写入 annotations、job summary 以及名为 `exit-code`、`packages`、`scripts`、`errors`、`warnings`、`advisories` 的数字 outputs，再把 finding run 标记为失败。默认模式只读。
 <!-- readme-state:action:end -->
 
-**真实托管证据——不是模拟截图。** 在 `main` 的 `bf37b413` 上，公开的 [CI run #33467290054](https://github.com/Tom409114/scriptspect/actions/runs/33467290054) 使用 `uses: ./` 分别消费 clean 与 broken fixture。clean consumer 返回 `1 package · 1 script · 0 errors`；broken fixture 产生 2 条 check annotations，其中包括落在 `package.json` 上的 `PS010: scripts.clean`。
+**真实托管证据——不是模拟截图。** 在 `main` 的 `c9c671c8` 上，公开的 [CI run #33482453059](https://github.com/Tom409114/scriptspect/actions/runs/33482453059) 使用 `uses: ./` 分别消费 clean 与 broken fixture。clean consumer 返回 `1 package · 1 script · 0 errors`；broken fixture 产生 2 条 check annotations，其中包括落在 `package.json` 上的 `PS010: scripts.clean`。
 
 ![根据真实托管 Action run 生成的验证卡片](docs/assets/demo/action.svg)
 
-[可选择的 Action 证据文本](docs/assets/demo/action.txt) · [提交进仓库的源证据](docs/validation/readme-action-evidence.json) · [打开托管 job](https://github.com/Tom409114/scriptspect/actions/runs/33467290054/job/99729679961)
+[可选择的 Action 证据文本](docs/assets/demo/action.txt) · [提交进仓库的源证据](docs/validation/readme-action-evidence.json) · [打开托管 job](https://github.com/Tom409114/scriptspect/actions/runs/33482453059/job/99774890433)
 
 <!-- readme-section: config -->
 ## 最小配置
