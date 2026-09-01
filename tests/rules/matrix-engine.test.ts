@@ -173,7 +173,8 @@ const AUTOMATIC_COMMAND_FIXTURE_CASES = [
     caret: 'rm -rf foo^ bar',
     backslash: 'rm -rf foo\\bar',
     quotedBackslash: 'rm -rf "foo\\bar"',
-    powershellComment: 'rm -rf dist # comment',
+    posixComment: 'rm -rf dist # comment',
+    unterminatedOperand: 'rm -rf "dist',
   },
   {
     ruleId: 'PS011',
@@ -183,7 +184,8 @@ const AUTOMATIC_COMMAND_FIXTURE_CASES = [
     caret: 'cp -r src foo^ bar',
     backslash: 'cp -r src foo\\bar',
     quotedBackslash: 'cp -r src "foo\\bar"',
-    powershellComment: 'cp -r src dist # comment',
+    posixComment: 'cp -r src dist # comment',
+    unterminatedOperand: 'cp -r src "dist',
   },
   {
     ruleId: 'PS012',
@@ -193,7 +195,8 @@ const AUTOMATIC_COMMAND_FIXTURE_CASES = [
     caret: 'mv src foo^ bar',
     backslash: 'mv src foo\\bar',
     quotedBackslash: 'mv src "foo\\bar"',
-    powershellComment: 'mv src dist # comment',
+    posixComment: 'mv src dist # comment',
+    unterminatedOperand: 'mv src "dist',
   },
   {
     ruleId: 'PS013',
@@ -203,7 +206,8 @@ const AUTOMATIC_COMMAND_FIXTURE_CASES = [
     caret: 'mkdir -p foo^ bar',
     backslash: 'mkdir -p foo\\bar',
     quotedBackslash: 'mkdir -p "foo\\bar"',
-    powershellComment: 'mkdir -p dist # comment',
+    posixComment: 'mkdir -p dist # comment',
+    unterminatedOperand: 'mkdir -p "dist',
   },
   {
     ruleId: 'PS017',
@@ -213,7 +217,8 @@ const AUTOMATIC_COMMAND_FIXTURE_CASES = [
     caret: 'grep TODO foo^ bar',
     backslash: 'grep TODO foo\\bar',
     quotedBackslash: 'grep TODO "foo\\bar"',
-    powershellComment: 'grep TODO file # comment',
+    posixComment: 'grep TODO file # comment',
+    unterminatedOperand: 'grep TODO "file',
   },
   {
     ruleId: 'PS018',
@@ -223,17 +228,8 @@ const AUTOMATIC_COMMAND_FIXTURE_CASES = [
     caret: 'sed "s/a/b/" foo^ bar',
     backslash: 'sed "s/a/b/" foo\\bar',
     quotedBackslash: 'sed "s/a/b/" "foo\\bar"',
-    powershellComment: 'sed "s/a/b/" file # comment',
-  },
-  {
-    ruleId: 'PS019',
-    dependency: 'shx',
-    supported: 'cat file',
-    semicolon: 'cat file; echo hi',
-    caret: 'cat foo^ bar',
-    backslash: 'cat foo\\bar',
-    quotedBackslash: 'cat "foo\\bar"',
-    powershellComment: 'cat file # comment',
+    posixComment: 'sed "s/a/b/" file # comment',
+    unterminatedOperand: 'sed "s/a/b/" "file',
   },
 ] as const;
 
@@ -266,7 +262,7 @@ describe('automatic command replacements require one cross-target command shape'
       expect(findings[0]?.fix?.replacement).toBeDefined();
     });
 
-    it(`${fixture.ruleId} retains a fully double-quoted backslash path when all graphs agree`, () => {
+    it(`${fixture.ruleId} withholds a fully double-quoted backslash path`, () => {
       const findings = automaticCommandFindings(
         fixture.quotedBackslash,
         fixture.ruleId,
@@ -274,18 +270,28 @@ describe('automatic command replacements require one cross-target command shape'
         ['posix-sh', 'cmd', 'powershell'],
       );
       expect(findings).toHaveLength(1);
-      expect(findings[0]?.fix?.replacement).toBeDefined();
+      expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
     });
 
     it.each([
       ['semicolon boundary', fixture.semicolon, ['posix-sh', 'cmd']],
       ['cmd caret escape', fixture.caret, ['posix-sh', 'cmd']],
       ['backslash escape/path boundary', fixture.backslash, ['posix-sh', 'cmd']],
-      ['PowerShell comment boundary', fixture.powershellComment, ['posix-sh', 'cmd', 'powershell']],
+      ['POSIX comment boundary', fixture.posixComment, ['posix-sh', 'cmd']],
     ] as const)(`${fixture.ruleId} withholds replacement at %s`, (_label, script, targets) => {
       const findings = automaticCommandFindings(script, fixture.ruleId, fixture.dependency, [
         ...targets,
       ]);
+      expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
+    });
+
+    it(`${fixture.ruleId} withholds replacement when an operand diagnostic intersects the command`, () => {
+      const findings = automaticCommandFindings(
+        fixture.unterminatedOperand,
+        fixture.ruleId,
+        fixture.dependency,
+        ['posix-sh', 'cmd'],
+      );
       expect(findings.every((finding) => finding.fix?.replacement === undefined)).toBe(true);
     });
   }

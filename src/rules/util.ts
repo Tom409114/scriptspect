@@ -68,6 +68,7 @@ export function availabilityRule(
 ): RuleModule {
   return {
     ...rule,
+    ...(options.fix === undefined ? {} : { automaticReplacementKind: 'command' as const }),
     check(matrix: ParseMatrix, ctx: RuleContext): Finding[] {
       const findings: Finding[] = [];
       for (const target of rule.affectedTargets) {

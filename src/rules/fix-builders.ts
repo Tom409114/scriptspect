@@ -41,6 +41,7 @@ export const STATIC_PATH_REJECTION_CATEGORIES = [
   'absolute-or-drive',
   'parent-traversal',
   'home-relative',
+  'backslash',
   'glob',
   'runtime-expansion',
   'dash-prefixed-or-stdin',
@@ -102,14 +103,6 @@ export const AUTOMATIC_COMMAND_FIXERS = [
     pathSafetyPolicy: 'static-project-relative',
     rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES,
   },
-  {
-    ruleId: 'PS019',
-    command: 'cat',
-    primaryDependency: 'shx',
-    pathOperandPolicy: 'all-positionals',
-    pathSafetyPolicy: 'static-project-relative',
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES,
-  },
 ] as const;
 
 type AutomaticCommandFixerMetadata = (typeof AUTOMATIC_COMMAND_FIXERS)[number];
@@ -154,11 +147,6 @@ const SHX_CONTRACTS: Readonly<Record<string, ShxCommandContract>> = {
     allowedFlags: new Set(['i']),
     minPositionals: 1,
     validate: validateLiteralSed,
-  },
-  PS019: {
-    metadata: metadataFor('PS019'),
-    allowedFlags: new Set(['n']),
-    minPositionals: 1,
   },
 };
 
@@ -304,6 +292,7 @@ function staticPathRejectionCategory(token: Token): StaticPathRejectionCategory 
   if (slashNormalized.startsWith('/') || /^[A-Za-z]:/.test(slashNormalized)) {
     return 'absolute-or-drive';
   }
+  if (token.value.includes('\\')) return 'backslash';
   if (slashNormalized.startsWith('~')) return 'home-relative';
   if (GLOB_META.test(slashNormalized)) return 'glob';
 
@@ -328,6 +317,9 @@ function validateLiteralGrep(args: ParsedShxArgs): string | null {
   if (args.positionals.length > 2) {
     return 'grep with multiple explicit files changes filename-prefix output under ShellJS';
   }
+  if (args.flags.includes('l') && args.positionals.length === 1) {
+    return 'grep -l with implicit stdin has different pseudo-file output under ShellJS';
+  }
   return null;
 }
 
@@ -346,6 +338,9 @@ function validateLiteralSed(args: ParsedShxArgs): string | null {
   if (args.flags.includes('i') && args.positionals.length < 2) {
     return 'sed -i requires an expression and at least one real file operand';
   }
+  if (args.positionals.length > 2) {
+    return 'sed with multiple explicit files has different stream-boundary behavior under ShellJS';
+  }
   return null;
 }
 
@@ -362,6 +357,9 @@ export function rimrafFix(cmd: CommandNode, ctx: RuleContext): FixCandidate {
   const first = cmd.argv[0];
   if (first === undefined) {
     return manual('PS010', 'missing rm command token');
+  }
+  if (first.value !== SHX_RM_CONTRACT.metadata.command) {
+    return manual('PS010', 'automatic rewrite requires the canonical lowercase rm executable');
   }
 
   const parsed = parseShxArgs(cmd, SHX_RM_CONTRACT);
@@ -392,7 +390,7 @@ export function shxPrefixFix(ruleId: string, cmd: CommandNode, ctx: RuleContext)
   if (first === undefined) return manual(ruleId, 'missing command token');
 
   const contract = SHX_CONTRACTS[ruleId];
-  if (contract === undefined || first.value.toLowerCase() !== contract.metadata.command) {
+  if (contract === undefined || first.value !== contract.metadata.command) {
     return manual(ruleId, 'no declared ShellJS contract for this command');
   }
 

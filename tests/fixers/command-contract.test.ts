@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TARGETS } from '../../src/core/targets';
 import { applicableFixes, applyToScript } from '../../src/fixers/apply';
-import { analyzeScript } from '../../src/rules';
+import { AUTOMATIC_COMMAND_RULE_IDS, analyzeScript } from '../../src/rules';
 import {
   AUTOMATIC_COMMAND_FIXERS,
   STATIC_PATH_REJECTION_CATEGORIES,
@@ -17,6 +17,7 @@ interface CommandContractCase {
   ruleId: AutomaticCommandRule;
   dependency: 'rimraf' | 'shx';
   supported: { before: string; after: string };
+  nonCanonicalExecutable: string;
   unsupportedOption: string;
   semanticBoundary: string;
 }
@@ -32,6 +33,7 @@ const COMMAND_CONTRACTS: readonly CommandContractCase[] = [
     ruleId: 'PS010',
     dependency: 'rimraf',
     supported: { before: 'rm -rf dist', after: 'rimraf dist' },
+    nonCanonicalExecutable: 'RM -rf dist',
     unsupportedOption: 'rm --no-preserve-root -rf /',
     semanticBoundary: 'rm -rf ../shared',
   },
@@ -39,6 +41,7 @@ const COMMAND_CONTRACTS: readonly CommandContractCase[] = [
     ruleId: 'PS011',
     dependency: 'shx',
     supported: { before: 'cp -r src dist', after: 'shx cp -r src dist' },
+    nonCanonicalExecutable: 'CP -r src dist',
     unsupportedOption: 'cp -a src dist',
     semanticBoundary: 'cp -p src dist',
   },
@@ -46,6 +49,7 @@ const COMMAND_CONTRACTS: readonly CommandContractCase[] = [
     ruleId: 'PS012',
     dependency: 'shx',
     supported: { before: 'mv old.txt new.txt', after: 'shx mv old.txt new.txt' },
+    nonCanonicalExecutable: 'MV old.txt new.txt',
     unsupportedOption: 'mv -T old.txt new.txt',
     semanticBoundary: 'mv -n old.txt new.txt',
   },
@@ -53,6 +57,7 @@ const COMMAND_CONTRACTS: readonly CommandContractCase[] = [
     ruleId: 'PS013',
     dependency: 'shx',
     supported: { before: 'mkdir -p dist/assets', after: 'shx mkdir -p dist/assets' },
+    nonCanonicalExecutable: 'MKDIR -p dist/assets',
     unsupportedOption: 'mkdir --parents dist/assets',
     semanticBoundary: 'mkdir -p',
   },
@@ -63,6 +68,7 @@ const COMMAND_CONTRACTS: readonly CommandContractCase[] = [
       before: 'grep -in TODO src/app.ts',
       after: 'shx grep -in TODO src/app.ts',
     },
+    nonCanonicalExecutable: 'GREP -in TODO src/app.ts',
     unsupportedOption: 'grep -r TODO src',
     semanticBoundary: 'grep "[[:digit:]]" data.txt',
   },
@@ -70,15 +76,9 @@ const COMMAND_CONTRACTS: readonly CommandContractCase[] = [
     ruleId: 'PS018',
     dependency: 'shx',
     supported: { before: 'sed "s/a/b/g" x.txt', after: 'shx sed "s/a/b/g" x.txt' },
+    nonCanonicalExecutable: 'SED "s/a/b/g" x.txt',
     unsupportedOption: 'sed -n "s/a/b/" x.txt',
     semanticBoundary: "sed 's/a/b/' x.txt",
-  },
-  {
-    ruleId: 'PS019',
-    dependency: 'shx',
-    supported: { before: 'cat -n a.txt', after: 'shx cat -n a.txt' },
-    unsupportedOption: 'cat -A a.txt',
-    semanticBoundary: "cat 'a b.txt'",
   },
 ];
 
@@ -94,7 +94,7 @@ function run(script: string, deps: string[] = []): Finding[] {
   return analyzeScript(script, ctx);
 }
 
-function finding(script: string, ruleId: AutomaticCommandRule, deps: string[] = []): Finding {
+function finding(script: string, ruleId: string, deps: string[] = []): Finding {
   const match = run(script, deps).find((candidate) => candidate.ruleId === ruleId);
   expect(match, `expected ${ruleId} for ${JSON.stringify(script)}`).toBeDefined();
   return match as Finding;
@@ -104,7 +104,7 @@ function fixed(script: string, deps: string[] = []): string {
   return applyToScript(script, run(script, deps)).script;
 }
 
-function expectManual(script: string, ruleId: AutomaticCommandRule): void {
+function expectManual(script: string, ruleId: string): void {
   const candidate = finding(script, ruleId, ['rimraf', 'shx']);
   expect(candidate.fix).toMatchObject({ safety: 'manual' });
   expect(candidate.fix?.replacement).toBeUndefined();
@@ -112,6 +112,10 @@ function expectManual(script: string, ruleId: AutomaticCommandRule): void {
 }
 
 describe('automatic command fixer contract coverage', () => {
+  it('derives replacement-capable command rules from the production rule factory', () => {
+    expect(new Set(AUTOMATIC_COMMAND_RULE_IDS)).toEqual(new Set(AUTOMATIC_COMMAND_RULES));
+  });
+
   it('has exactly one complete contract row for every production automatic command rule', () => {
     expect(COMMAND_CONTRACTS).toHaveLength(AUTOMATIC_COMMAND_FIXERS.length);
     expect(new Set(COMMAND_CONTRACTS.map(({ ruleId }) => ruleId))).toEqual(
@@ -158,6 +162,10 @@ describe('automatic command fixer contract coverage', () => {
         });
         expect(candidate.fix?.replacement).toBeUndefined();
         expect(fixed(contract.supported.before)).toBe(contract.supported.before);
+      });
+
+      it('requires the canonical lowercase executable spelling', () => {
+        expectManual(contract.nonCanonicalExecutable, contract.ruleId);
       });
 
       it('refuses an option outside the replacement tool contract', () => {
@@ -234,6 +242,7 @@ const UNSAFE_PATH_CASES = [
   ['drive-relative path', 'C:temp/file', 'absolute-or-drive'],
   ['slash-form UNC path', '//server/share/file', 'absolute-or-drive'],
   ['backslash-form UNC path', '\\\\server\\share\\file', 'absolute-or-drive'],
+  ['quoted backslash path', '"safe\\nested"', 'backslash'],
   ['parent traversal', 'safe/../outside', 'parent-traversal'],
   ['current directory', './.', 'empty-or-current-directory'],
   ['home path', '~/file', 'home-relative'],
@@ -267,7 +276,6 @@ const PATH_OPERAND_COMMANDS: readonly {
   { ruleId: 'PS013', scripts: (path) => [`mkdir -p ${path}`] },
   { ruleId: 'PS017', scripts: (path) => [`grep TODO ${path}`] },
   { ruleId: 'PS018', scripts: (path) => [`sed "s/a/b/" ${path}`] },
-  { ruleId: 'PS019', scripts: (path) => [`cat ${path}`] },
 ];
 
 describe('shared static project-relative path boundary', () => {
@@ -324,6 +332,30 @@ describe('documented ShellJS subset boundaries', () => {
   it('refuses grep with multiple explicit files because shx changes filename prefixes', () => {
     expectManual('grep TODO src/a.ts src/b.ts', 'PS017');
   });
+
+  it.each(['grep -l TODO', 'echo TODO | grep -l TODO'])(
+    'refuses grep -l with implicit stdin because shx injects a pseudo-file: %s',
+    (script) => {
+      expectManual(script, 'PS017');
+    },
+  );
+
+  it.each(['sed "s/a/b/" src/a.ts src/b.ts', 'sed -i "s/a/b/" src/a.ts src/b.ts'])(
+    'refuses sed with multiple explicit input files: %s',
+    (script) => {
+      expectManual(script, 'PS018');
+    },
+  );
+
+  it.each(['cat README.md', 'cat assets/logo.png'])(
+    'keeps cat manual because the analyzer cannot prove text-only file contents: %s',
+    (script) => {
+      const candidate = run(script, ['shx']).find((entry) => entry.ruleId === 'PS019');
+      expect(candidate?.fix).toMatchObject({ safety: 'manual' });
+      expect(candidate?.fix?.replacement).toBeUndefined();
+      expect(fixed(script, ['shx'])).toBe(script);
+    },
+  );
 
   it('requires sed -i to have both an expression and a real file operand', () => {
     expectManual('sed -i "s/a/b/"', 'PS018');

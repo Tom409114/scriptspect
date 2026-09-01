@@ -13362,7 +13362,10 @@ function tokenizeDialect(src, target) {
   let i = 0;
   while (i < n) {
     const ch = src.charAt(i);
-    if (ch === "#" && target === "powershell") break;
+    if (ch === "#" && (target === "posix-sh" || target === "powershell")) {
+      while (i < n && src.charAt(i) !== "\n") i += 1;
+      continue;
+    }
     if (ch === "\n") {
       tokens.push({
         kind: "operator",
@@ -14262,310 +14265,6 @@ function translateNode(node, offset) {
   }
 }
 
-// src/rules/fix-builders.ts
-var CONTEXT_FLAGS = /* @__PURE__ */ new Set(["A", "B", "C"]);
-var REGEX_META = /[\\^$.*+?()[\]{}|]/;
-var SED_REPLACEMENT_META = /[\\$&]/;
-var GLOB_META = /[*?[\]{}]|[@+!]\(/;
-var STATIC_PATH_REJECTION_CATEGORIES = [
-  "empty-or-current-directory",
-  "absolute-or-drive",
-  "parent-traversal",
-  "home-relative",
-  "glob",
-  "runtime-expansion",
-  "dash-prefixed-or-stdin"
-];
-var AUTOMATIC_COMMAND_FIXERS = [
-  {
-    ruleId: "PS010",
-    command: "rm",
-    primaryDependency: "rimraf",
-    pathOperandPolicy: "all-positionals",
-    pathSafetyPolicy: "static-project-relative",
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
-  },
-  {
-    ruleId: "PS011",
-    command: "cp",
-    primaryDependency: "shx",
-    pathOperandPolicy: "all-positionals",
-    pathSafetyPolicy: "static-project-relative",
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
-  },
-  {
-    ruleId: "PS012",
-    command: "mv",
-    primaryDependency: "shx",
-    pathOperandPolicy: "all-positionals",
-    pathSafetyPolicy: "static-project-relative",
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
-  },
-  {
-    ruleId: "PS013",
-    command: "mkdir",
-    primaryDependency: "shx",
-    pathOperandPolicy: "all-positionals",
-    pathSafetyPolicy: "static-project-relative",
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
-  },
-  {
-    ruleId: "PS017",
-    command: "grep",
-    primaryDependency: "shx",
-    pathOperandPolicy: "after-pattern",
-    pathSafetyPolicy: "static-project-relative",
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
-  },
-  {
-    ruleId: "PS018",
-    command: "sed",
-    primaryDependency: "shx",
-    pathOperandPolicy: "after-expression",
-    pathSafetyPolicy: "static-project-relative",
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
-  },
-  {
-    ruleId: "PS019",
-    command: "cat",
-    primaryDependency: "shx",
-    pathOperandPolicy: "all-positionals",
-    pathSafetyPolicy: "static-project-relative",
-    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
-  }
-];
-function metadataFor(ruleId) {
-  const metadata = AUTOMATIC_COMMAND_FIXERS.find((entry) => entry.ruleId === ruleId);
-  if (metadata === void 0) throw new Error(`missing automatic fixer metadata for ${ruleId}`);
-  return metadata;
-}
-var SHX_CONTRACTS = {
-  PS011: {
-    metadata: metadataFor("PS011"),
-    allowedFlags: /* @__PURE__ */ new Set(["f", "n", "r", "R", "L", "P"]),
-    minPositionals: 2,
-    incompatibleFlagPairs: [
-      ["f", "n"],
-      ["L", "P"]
-    ]
-  },
-  PS012: {
-    metadata: metadataFor("PS012"),
-    allowedFlags: /* @__PURE__ */ new Set(["f"]),
-    minPositionals: 2
-  },
-  PS013: {
-    metadata: metadataFor("PS013"),
-    allowedFlags: /* @__PURE__ */ new Set(["p"]),
-    minPositionals: 1
-  },
-  PS017: {
-    metadata: metadataFor("PS017"),
-    allowedFlags: /* @__PURE__ */ new Set(["v", "l", "i", "n", "B", "A", "C"]),
-    valueFlags: CONTEXT_FLAGS,
-    minPositionals: 1,
-    incompatibleFlagPairs: [["v", "l"]],
-    validate: validateLiteralGrep
-  },
-  PS018: {
-    metadata: metadataFor("PS018"),
-    allowedFlags: /* @__PURE__ */ new Set(["i"]),
-    minPositionals: 1,
-    validate: validateLiteralSed
-  },
-  PS019: {
-    metadata: metadataFor("PS019"),
-    allowedFlags: /* @__PURE__ */ new Set(["n"]),
-    minPositionals: 1
-  }
-};
-var SHX_RM_CONTRACT = {
-  metadata: metadataFor("PS010"),
-  allowedFlags: /* @__PURE__ */ new Set(["f", "r", "R"]),
-  minPositionals: 1
-};
-function manual(ruleId, reason) {
-  return {
-    ruleId,
-    safety: "manual",
-    description: `manual rewrite required: ${reason}`
-  };
-}
-function conditional(ruleId, dependency) {
-  return {
-    ruleId,
-    safety: "conditional",
-    description: `add ${dependency} as a devDependency, then re-run --fix`,
-    requiresDependency: dependency
-  };
-}
-function safePrefix(ruleId, first) {
-  return {
-    ruleId,
-    safety: "safe",
-    description: "prefix with shx (already a dependency)",
-    replacement: { span: [first.span[0], first.span[0]], text: "shx " }
-  };
-}
-function parseShxArgs(cmd, contract) {
-  const command = contract.metadata.command;
-  const args = cmd.argv.slice(1);
-  let positionals = args;
-  let flags = [];
-  const firstArg = args[0];
-  if (firstArg?.value === "--") {
-    return `option terminator is outside the proven ShellJS ${command} invocation contract`;
-  } else if (firstArg?.value.startsWith("-")) {
-    if (!/^-[A-Za-z]+$/.test(firstArg.value)) {
-      return `option ${JSON.stringify(firstArg.raw)} is outside the ShellJS ${command} contract`;
-    }
-    flags = firstArg.value.slice(1).split("");
-    const unknown = flags.find((flag) => !contract.allowedFlags.has(flag));
-    if (unknown !== void 0) {
-      return `option -${unknown} is not supported by ShellJS ${command}`;
-    }
-    positionals = args.slice(1);
-  }
-  if (positionals.some((token) => token.value.startsWith("-"))) {
-    return "ShellJS accepts only one leading short-option string; use -- for dash-prefixed paths";
-  }
-  for (const [left, right] of contract.incompatibleFlagPairs ?? []) {
-    if (flags.includes(left) && flags.includes(right)) {
-      return `combined -${left}/-${right} semantics are not provably equivalent`;
-    }
-  }
-  const valueFlags = flags.filter((flag) => contract.valueFlags?.has(flag) === true);
-  if (valueFlags.length > 1) {
-    return "multiple context flags require distinct values that shx cannot infer from one option string";
-  }
-  if (valueFlags.length === 1) {
-    const value = positionals[0];
-    if (value === void 0 || !/^\d+$/.test(value.value)) {
-      return `-${valueFlags[0]} requires a non-negative integer argument`;
-    }
-    positionals = positionals.slice(1);
-  }
-  if (positionals.length < contract.minPositionals) {
-    return `${command} requires at least ${contract.minPositionals} positional argument(s)`;
-  }
-  if (cmd.argv.slice(1).some(hasUnportableArgumentSyntax)) {
-    return "single-quoted or runtime-expanded arguments are not equivalent across npm script shells";
-  }
-  const parsed = { flags, positionals };
-  const semanticError = contract.validate?.(parsed);
-  if (semanticError !== void 0 && semanticError !== null) return semanticError;
-  const pathError = validateStaticPathOperands(parsed, contract.metadata);
-  return pathError ?? parsed;
-}
-function hasUnportableArgumentSyntax(token) {
-  return token.raw.includes("'") || token.raw.includes("`") || token.expansions.length > 0 || token.raw.includes("$") || token.raw.includes("%") || /![^!\s]+!/.test(token.raw);
-}
-function pathOperands(args, metadata) {
-  switch (metadata.pathOperandPolicy) {
-    case "all-positionals":
-      return args.positionals;
-    case "after-pattern":
-    case "after-expression":
-      return args.positionals.slice(1);
-  }
-}
-function validateStaticPathOperands(args, metadata) {
-  for (const token of pathOperands(args, metadata)) {
-    const category = staticPathRejectionCategory(token);
-    if (category !== null) {
-      return `${metadata.command} file operand is outside the static project-relative path contract (${category})`;
-    }
-  }
-  return null;
-}
-function staticPathRejectionCategory(token) {
-  if (hasUnportableArgumentSyntax(token)) return "runtime-expansion";
-  if (token.value === "-" || token.value.startsWith("-")) return "dash-prefixed-or-stdin";
-  const slashNormalized = token.value.replace(/\\/g, "/");
-  if (slashNormalized === "") return "empty-or-current-directory";
-  if (slashNormalized.startsWith("/") || /^[A-Za-z]:/.test(slashNormalized)) {
-    return "absolute-or-drive";
-  }
-  if (slashNormalized.startsWith("~")) return "home-relative";
-  if (GLOB_META.test(slashNormalized)) return "glob";
-  const collapsed = slashNormalized.replace(/\/+/g, "/");
-  const segments = collapsed.split("/");
-  if (segments.includes("..")) return "parent-traversal";
-  const lastSegment = [...segments].reverse().find((segment) => segment !== "");
-  if (lastSegment === ".") return "empty-or-current-directory";
-  if (lastSegment === "..") return "parent-traversal";
-  const resolvedSegments = segments.filter((segment) => segment !== "" && segment !== ".");
-  return resolvedSegments.length === 0 ? "empty-or-current-directory" : null;
-}
-function validateLiteralGrep(args) {
-  const pattern = args.positionals[0]?.value ?? "";
-  if (pattern === "" || REGEX_META.test(pattern)) {
-    return "grep pattern is outside the literal subset shared by POSIX grep and JavaScript RegExp";
-  }
-  if (args.positionals.length > 2) {
-    return "grep with multiple explicit files changes filename-prefix output under ShellJS";
-  }
-  return null;
-}
-function validateLiteralSed(args) {
-  const expression = args.positionals[0]?.value ?? "";
-  const match = /^s\/([^/]*)\/([^/]*)\/(g?)$/.exec(expression);
-  if (match === null) {
-    return "sed expression is outside the shx s/search/replacement/[g] grammar";
-  }
-  const search = match[1] ?? "";
-  const replacement = match[2] ?? "";
-  if (search === "" || REGEX_META.test(search) || SED_REPLACEMENT_META.test(replacement)) {
-    return "sed expression is outside the provably equivalent literal substitution subset";
-  }
-  if (args.flags.includes("i") && args.positionals.length < 2) {
-    return "sed -i requires an expression and at least one real file operand";
-  }
-  return null;
-}
-function rimrafEquivalent(args) {
-  const recursive = args.flags.includes("r") || args.flags.includes("R");
-  const force = args.flags.includes("f");
-  if (!recursive || !force) return false;
-  return args.positionals.every((token) => !GLOB_META.test(token.value));
-}
-function rimrafFix(cmd, ctx) {
-  const first = cmd.argv[0];
-  if (first === void 0) {
-    return manual("PS010", "missing rm command token");
-  }
-  const parsed = parseShxArgs(cmd, SHX_RM_CONTRACT);
-  if (typeof parsed === "string") return manual("PS010", parsed);
-  if (rimrafEquivalent(parsed)) {
-    if (ctx.dependencies.has("rimraf")) {
-      const firstTarget = parsed.positionals[0];
-      if (firstTarget === void 0) return manual("PS010", "missing removal target");
-      return {
-        ruleId: "PS010",
-        safety: "safe",
-        description: "rewrite as `rimraf \u2026` (rimraf is already a dependency)",
-        replacement: { span: [first.span[0], firstTarget.span[0]], text: "rimraf " }
-      };
-    }
-    if (ctx.dependencies.has("shx")) return safePrefix("PS010", first);
-    return conditional("PS010", "rimraf");
-  }
-  if (ctx.dependencies.has("shx")) return safePrefix("PS010", first);
-  return conditional("PS010", "shx");
-}
-function shxPrefixFix(ruleId, cmd, ctx) {
-  const first = cmd.argv[0];
-  if (first === void 0) return manual(ruleId, "missing command token");
-  const contract = SHX_CONTRACTS[ruleId];
-  if (contract === void 0 || first.value.toLowerCase() !== contract.metadata.command) {
-    return manual(ruleId, "no declared ShellJS contract for this command");
-  }
-  const parsed = parseShxArgs(cmd, contract);
-  if (typeof parsed === "string") return manual(ruleId, parsed);
-  if (ctx.dependencies.has("shx")) return safePrefix(ruleId, first);
-  return conditional(ruleId, "shx");
-}
-
 // src/rules/util.ts
 var PORTABILITY_TOOLS = /* @__PURE__ */ new Set(["cross-env", "cross-env-shell", "shx", "rimraf"]);
 function commandsOf(matrix, target = "posix-sh") {
@@ -14575,6 +14274,7 @@ function commandsOf(matrix, target = "posix-sh") {
 function availabilityRule(rule, options) {
   return {
     ...rule,
+    ...options.fix === void 0 ? {} : { automaticReplacementKind: "command" },
     check(matrix, ctx) {
       const findings = [];
       for (const target of rule.affectedTargets) {
@@ -14764,6 +14464,308 @@ var PS003 = {
     return findings;
   }
 };
+
+// src/rules/fix-builders.ts
+var CONTEXT_FLAGS = /* @__PURE__ */ new Set(["A", "B", "C"]);
+var REGEX_META = /[\\^$.*+?()[\]{}|]/;
+var SED_REPLACEMENT_META = /[\\$&]/;
+var GLOB_META = /[*?[\]{}]|[@+!]\(/;
+var STATIC_PATH_REJECTION_CATEGORIES = [
+  "empty-or-current-directory",
+  "absolute-or-drive",
+  "parent-traversal",
+  "home-relative",
+  "backslash",
+  "glob",
+  "runtime-expansion",
+  "dash-prefixed-or-stdin"
+];
+var AUTOMATIC_COMMAND_FIXERS = [
+  {
+    ruleId: "PS010",
+    command: "rm",
+    primaryDependency: "rimraf",
+    pathOperandPolicy: "all-positionals",
+    pathSafetyPolicy: "static-project-relative",
+    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
+  },
+  {
+    ruleId: "PS011",
+    command: "cp",
+    primaryDependency: "shx",
+    pathOperandPolicy: "all-positionals",
+    pathSafetyPolicy: "static-project-relative",
+    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
+  },
+  {
+    ruleId: "PS012",
+    command: "mv",
+    primaryDependency: "shx",
+    pathOperandPolicy: "all-positionals",
+    pathSafetyPolicy: "static-project-relative",
+    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
+  },
+  {
+    ruleId: "PS013",
+    command: "mkdir",
+    primaryDependency: "shx",
+    pathOperandPolicy: "all-positionals",
+    pathSafetyPolicy: "static-project-relative",
+    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
+  },
+  {
+    ruleId: "PS017",
+    command: "grep",
+    primaryDependency: "shx",
+    pathOperandPolicy: "after-pattern",
+    pathSafetyPolicy: "static-project-relative",
+    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
+  },
+  {
+    ruleId: "PS018",
+    command: "sed",
+    primaryDependency: "shx",
+    pathOperandPolicy: "after-expression",
+    pathSafetyPolicy: "static-project-relative",
+    rejectedPathCategories: STATIC_PATH_REJECTION_CATEGORIES
+  }
+];
+function metadataFor(ruleId) {
+  const metadata = AUTOMATIC_COMMAND_FIXERS.find((entry) => entry.ruleId === ruleId);
+  if (metadata === void 0) throw new Error(`missing automatic fixer metadata for ${ruleId}`);
+  return metadata;
+}
+var SHX_CONTRACTS = {
+  PS011: {
+    metadata: metadataFor("PS011"),
+    allowedFlags: /* @__PURE__ */ new Set(["f", "n", "r", "R", "L", "P"]),
+    minPositionals: 2,
+    incompatibleFlagPairs: [
+      ["f", "n"],
+      ["L", "P"]
+    ]
+  },
+  PS012: {
+    metadata: metadataFor("PS012"),
+    allowedFlags: /* @__PURE__ */ new Set(["f"]),
+    minPositionals: 2
+  },
+  PS013: {
+    metadata: metadataFor("PS013"),
+    allowedFlags: /* @__PURE__ */ new Set(["p"]),
+    minPositionals: 1
+  },
+  PS017: {
+    metadata: metadataFor("PS017"),
+    allowedFlags: /* @__PURE__ */ new Set(["v", "l", "i", "n", "B", "A", "C"]),
+    valueFlags: CONTEXT_FLAGS,
+    minPositionals: 1,
+    incompatibleFlagPairs: [["v", "l"]],
+    validate: validateLiteralGrep
+  },
+  PS018: {
+    metadata: metadataFor("PS018"),
+    allowedFlags: /* @__PURE__ */ new Set(["i"]),
+    minPositionals: 1,
+    validate: validateLiteralSed
+  }
+};
+var SHX_RM_CONTRACT = {
+  metadata: metadataFor("PS010"),
+  allowedFlags: /* @__PURE__ */ new Set(["f", "r", "R"]),
+  minPositionals: 1
+};
+function manual(ruleId, reason) {
+  return {
+    ruleId,
+    safety: "manual",
+    description: `manual rewrite required: ${reason}`
+  };
+}
+function conditional(ruleId, dependency) {
+  return {
+    ruleId,
+    safety: "conditional",
+    description: `add ${dependency} as a devDependency, then re-run --fix`,
+    requiresDependency: dependency
+  };
+}
+function safePrefix(ruleId, first) {
+  return {
+    ruleId,
+    safety: "safe",
+    description: "prefix with shx (already a dependency)",
+    replacement: { span: [first.span[0], first.span[0]], text: "shx " }
+  };
+}
+function parseShxArgs(cmd, contract) {
+  const command = contract.metadata.command;
+  const args = cmd.argv.slice(1);
+  let positionals = args;
+  let flags = [];
+  const firstArg = args[0];
+  if (firstArg?.value === "--") {
+    return `option terminator is outside the proven ShellJS ${command} invocation contract`;
+  } else if (firstArg?.value.startsWith("-")) {
+    if (!/^-[A-Za-z]+$/.test(firstArg.value)) {
+      return `option ${JSON.stringify(firstArg.raw)} is outside the ShellJS ${command} contract`;
+    }
+    flags = firstArg.value.slice(1).split("");
+    const unknown = flags.find((flag) => !contract.allowedFlags.has(flag));
+    if (unknown !== void 0) {
+      return `option -${unknown} is not supported by ShellJS ${command}`;
+    }
+    positionals = args.slice(1);
+  }
+  if (positionals.some((token) => token.value.startsWith("-"))) {
+    return "ShellJS accepts only one leading short-option string; use -- for dash-prefixed paths";
+  }
+  for (const [left, right] of contract.incompatibleFlagPairs ?? []) {
+    if (flags.includes(left) && flags.includes(right)) {
+      return `combined -${left}/-${right} semantics are not provably equivalent`;
+    }
+  }
+  const valueFlags = flags.filter((flag) => contract.valueFlags?.has(flag) === true);
+  if (valueFlags.length > 1) {
+    return "multiple context flags require distinct values that shx cannot infer from one option string";
+  }
+  if (valueFlags.length === 1) {
+    const value = positionals[0];
+    if (value === void 0 || !/^\d+$/.test(value.value)) {
+      return `-${valueFlags[0]} requires a non-negative integer argument`;
+    }
+    positionals = positionals.slice(1);
+  }
+  if (positionals.length < contract.minPositionals) {
+    return `${command} requires at least ${contract.minPositionals} positional argument(s)`;
+  }
+  if (cmd.argv.slice(1).some(hasUnportableArgumentSyntax)) {
+    return "single-quoted or runtime-expanded arguments are not equivalent across npm script shells";
+  }
+  const parsed = { flags, positionals };
+  const semanticError = contract.validate?.(parsed);
+  if (semanticError !== void 0 && semanticError !== null) return semanticError;
+  const pathError = validateStaticPathOperands(parsed, contract.metadata);
+  return pathError ?? parsed;
+}
+function hasUnportableArgumentSyntax(token) {
+  return token.raw.includes("'") || token.raw.includes("`") || token.expansions.length > 0 || token.raw.includes("$") || token.raw.includes("%") || /![^!\s]+!/.test(token.raw);
+}
+function pathOperands(args, metadata) {
+  switch (metadata.pathOperandPolicy) {
+    case "all-positionals":
+      return args.positionals;
+    case "after-pattern":
+    case "after-expression":
+      return args.positionals.slice(1);
+  }
+}
+function validateStaticPathOperands(args, metadata) {
+  for (const token of pathOperands(args, metadata)) {
+    const category = staticPathRejectionCategory(token);
+    if (category !== null) {
+      return `${metadata.command} file operand is outside the static project-relative path contract (${category})`;
+    }
+  }
+  return null;
+}
+function staticPathRejectionCategory(token) {
+  if (hasUnportableArgumentSyntax(token)) return "runtime-expansion";
+  if (token.value === "-" || token.value.startsWith("-")) return "dash-prefixed-or-stdin";
+  const slashNormalized = token.value.replace(/\\/g, "/");
+  if (slashNormalized === "") return "empty-or-current-directory";
+  if (slashNormalized.startsWith("/") || /^[A-Za-z]:/.test(slashNormalized)) {
+    return "absolute-or-drive";
+  }
+  if (token.value.includes("\\")) return "backslash";
+  if (slashNormalized.startsWith("~")) return "home-relative";
+  if (GLOB_META.test(slashNormalized)) return "glob";
+  const collapsed = slashNormalized.replace(/\/+/g, "/");
+  const segments = collapsed.split("/");
+  if (segments.includes("..")) return "parent-traversal";
+  const lastSegment = [...segments].reverse().find((segment) => segment !== "");
+  if (lastSegment === ".") return "empty-or-current-directory";
+  if (lastSegment === "..") return "parent-traversal";
+  const resolvedSegments = segments.filter((segment) => segment !== "" && segment !== ".");
+  return resolvedSegments.length === 0 ? "empty-or-current-directory" : null;
+}
+function validateLiteralGrep(args) {
+  const pattern = args.positionals[0]?.value ?? "";
+  if (pattern === "" || REGEX_META.test(pattern)) {
+    return "grep pattern is outside the literal subset shared by POSIX grep and JavaScript RegExp";
+  }
+  if (args.positionals.length > 2) {
+    return "grep with multiple explicit files changes filename-prefix output under ShellJS";
+  }
+  if (args.flags.includes("l") && args.positionals.length === 1) {
+    return "grep -l with implicit stdin has different pseudo-file output under ShellJS";
+  }
+  return null;
+}
+function validateLiteralSed(args) {
+  const expression = args.positionals[0]?.value ?? "";
+  const match = /^s\/([^/]*)\/([^/]*)\/(g?)$/.exec(expression);
+  if (match === null) {
+    return "sed expression is outside the shx s/search/replacement/[g] grammar";
+  }
+  const search = match[1] ?? "";
+  const replacement = match[2] ?? "";
+  if (search === "" || REGEX_META.test(search) || SED_REPLACEMENT_META.test(replacement)) {
+    return "sed expression is outside the provably equivalent literal substitution subset";
+  }
+  if (args.flags.includes("i") && args.positionals.length < 2) {
+    return "sed -i requires an expression and at least one real file operand";
+  }
+  if (args.positionals.length > 2) {
+    return "sed with multiple explicit files has different stream-boundary behavior under ShellJS";
+  }
+  return null;
+}
+function rimrafEquivalent(args) {
+  const recursive = args.flags.includes("r") || args.flags.includes("R");
+  const force = args.flags.includes("f");
+  if (!recursive || !force) return false;
+  return args.positionals.every((token) => !GLOB_META.test(token.value));
+}
+function rimrafFix(cmd, ctx) {
+  const first = cmd.argv[0];
+  if (first === void 0) {
+    return manual("PS010", "missing rm command token");
+  }
+  if (first.value !== SHX_RM_CONTRACT.metadata.command) {
+    return manual("PS010", "automatic rewrite requires the canonical lowercase rm executable");
+  }
+  const parsed = parseShxArgs(cmd, SHX_RM_CONTRACT);
+  if (typeof parsed === "string") return manual("PS010", parsed);
+  if (rimrafEquivalent(parsed)) {
+    if (ctx.dependencies.has("rimraf")) {
+      const firstTarget = parsed.positionals[0];
+      if (firstTarget === void 0) return manual("PS010", "missing removal target");
+      return {
+        ruleId: "PS010",
+        safety: "safe",
+        description: "rewrite as `rimraf \u2026` (rimraf is already a dependency)",
+        replacement: { span: [first.span[0], firstTarget.span[0]], text: "rimraf " }
+      };
+    }
+    if (ctx.dependencies.has("shx")) return safePrefix("PS010", first);
+    return conditional("PS010", "rimraf");
+  }
+  if (ctx.dependencies.has("shx")) return safePrefix("PS010", first);
+  return conditional("PS010", "shx");
+}
+function shxPrefixFix(ruleId, cmd, ctx) {
+  const first = cmd.argv[0];
+  if (first === void 0) return manual(ruleId, "missing command token");
+  const contract = SHX_CONTRACTS[ruleId];
+  if (contract === void 0 || first.value !== contract.metadata.command) {
+    return manual(ruleId, "no declared ShellJS contract for this command");
+  }
+  const parsed = parseShxArgs(cmd, contract);
+  if (typeof parsed === "string") return manual(ruleId, parsed);
+  if (ctx.dependencies.has("shx")) return safePrefix(ruleId, first);
+  return conditional(ruleId, "shx");
+}
 
 // src/rules/PS010.ts
 var PS010 = availabilityRule(
@@ -15053,7 +15055,7 @@ var PS019 = availabilityRule(
       `node -e "process.stdout.write(require('fs').readFileSync('f'))"`
     ],
     falsePositiveNotes: "PowerShell has a cat alias, but the default Windows npm script shell is cmd.exe (type). Not reported for `shx cat \u2026`.",
-    fixSafety: "conditional",
+    fixSafety: "manual",
     provenance: [
       {
         source: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/type",
@@ -15064,8 +15066,7 @@ var PS019 = availabilityRule(
   {
     names: /* @__PURE__ */ new Set(["cat"]),
     message: () => "`cat` is not available in native Windows npm scripts",
-    fixSummary: "use shx cat or Node fs",
-    fix: (cmd, ctx) => shxPrefixFix("PS019", cmd, ctx)
+    fixSummary: "manually choose a byte-preserving Node implementation, or shx cat only for proven text files"
   }
 );
 
@@ -15881,9 +15882,6 @@ var PS051 = {
 };
 
 // src/rules/index.ts
-var AUTOMATIC_COMMAND_FIXER_IDS = new Set(
-  AUTOMATIC_COMMAND_FIXERS.map(({ ruleId }) => ruleId)
-);
 var RULES = [
   PS001,
   PS002,
@@ -15913,6 +15911,10 @@ var RULES = [
   PS050,
   PS051
 ];
+var AUTOMATIC_COMMAND_RULE_IDS = RULES.filter(
+  (rule) => rule.automaticReplacementKind === "command"
+).map(({ id }) => id);
+var AUTOMATIC_COMMAND_FIXER_IDS = new Set(AUTOMATIC_COMMAND_RULE_IDS);
 function getRule(id) {
   return RULES.find((r) => r.id === id);
 }
@@ -15968,8 +15970,14 @@ function shouldGateReplacement(matrix, finding) {
   for (const target of matrix.activeTargets) {
     const parsed = matrix.byTarget.get(target);
     if (parsed === void 0) return true;
+    const guardedSpans = [finding.span, replacement.span];
+    if (AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId)) {
+      guardedSpans.push(
+        ...findCommandMatches(parsed.root, finding.span).map(({ command }) => command.span)
+      );
+    }
     if (parsed.diagnostics.some(
-      (diagnostic) => spansIntersect(diagnostic.span, finding.span) || spansIntersect(diagnostic.span, replacement.span)
+      (diagnostic) => guardedSpans.some((span) => spansIntersect(diagnostic.span, span))
     )) {
       return true;
     }

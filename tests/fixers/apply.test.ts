@@ -60,14 +60,18 @@ describe('fix engine: rimraf (PS010)', () => {
   });
 });
 
-describe('fix engine: shx prefixes (PS011-PS019)', () => {
-  it('prefixes cp/mv/mkdir -p/grep/sed/cat with shx when installed', () => {
+describe('fix engine: shx prefixes (PS011-PS018)', () => {
+  it('prefixes the proven cp/mv/mkdir -p/grep/sed subsets with shx when installed', () => {
     expect(fix('cp -r src dist', ['shx'])).toBe('shx cp -r src dist');
     expect(fix('mv a b', ['shx'])).toBe('shx mv a b');
     expect(fix('mkdir -p dist/assets', ['shx'])).toBe('shx mkdir -p dist/assets');
     expect(fix('grep -in TODO src/app.ts', ['shx'])).toBe('shx grep -in TODO src/app.ts');
     expect(fix('sed "s/a/b/" x', ['shx'])).toBe('shx sed "s/a/b/" x');
-    expect(fix('cat a.json > b.json', ['shx'])).toBe('shx cat a.json > b.json');
+  });
+
+  it('does not prefix cat because file contents may be binary', () => {
+    expect(fix('cat a.json > b.json', ['shx'])).toBe('cat a.json > b.json');
+    expect(fix('cat assets/logo.png', ['shx'])).toBe('cat assets/logo.png');
   });
 
   it('plans (no rewrite) when shx is missing', () => {

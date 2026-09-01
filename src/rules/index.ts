@@ -9,7 +9,6 @@ import { ALL_TARGETS } from '../core/targets';
 import type { CommandNode, ParseMatrix, ScriptNode, ShellTarget } from '../parser/ir';
 import { walkCommands } from '../parser/ir';
 import { parseMatrix } from '../parser/parse';
-import { AUTOMATIC_COMMAND_FIXERS } from './fix-builders';
 import { PS001 } from './PS001';
 import { PS002 } from './PS002';
 import { PS003 } from './PS003';
@@ -38,10 +37,6 @@ import { PS041 } from './PS041';
 import { PS050 } from './PS050';
 import { PS051 } from './PS051';
 import type { Finding, RuleContext, RuleModule, Severity } from './types';
-
-const AUTOMATIC_COMMAND_FIXER_IDS: ReadonlySet<string> = new Set(
-  AUTOMATIC_COMMAND_FIXERS.map(({ ruleId }) => ruleId),
-);
 
 export const RULES: readonly RuleModule[] = [
   PS001,
@@ -72,6 +67,13 @@ export const RULES: readonly RuleModule[] = [
   PS050,
   PS051,
 ];
+
+/** Derived from the rule factory so a command fixer cannot bypass safety gates by registry omission. */
+export const AUTOMATIC_COMMAND_RULE_IDS: readonly string[] = RULES.filter(
+  (rule) => rule.automaticReplacementKind === 'command',
+).map(({ id }) => id);
+
+const AUTOMATIC_COMMAND_FIXER_IDS: ReadonlySet<string> = new Set(AUTOMATIC_COMMAND_RULE_IDS);
 
 export function getRule(id: string): RuleModule | undefined {
   return RULES.find((r) => r.id === id);
@@ -146,11 +148,15 @@ function shouldGateReplacement(matrix: ParseMatrix, finding: Finding): boolean {
   for (const target of matrix.activeTargets) {
     const parsed = matrix.byTarget.get(target);
     if (parsed === undefined) return true;
+    const guardedSpans: [number, number][] = [finding.span, replacement.span];
+    if (AUTOMATIC_COMMAND_FIXER_IDS.has(finding.ruleId)) {
+      guardedSpans.push(
+        ...findCommandMatches(parsed.root, finding.span).map(({ command }) => command.span),
+      );
+    }
     if (
-      parsed.diagnostics.some(
-        (diagnostic) =>
-          spansIntersect(diagnostic.span, finding.span) ||
-          spansIntersect(diagnostic.span, replacement.span),
+      parsed.diagnostics.some((diagnostic) =>
+        guardedSpans.some((span) => spansIntersect(diagnostic.span, span)),
       )
     ) {
       return true;
