@@ -14,6 +14,12 @@ import { DEFAULT_TARGETS } from '../src/core/targets';
 import { RULES } from '../src/rules';
 import type { Finding } from '../src/rules/types';
 import {
+  CORPUS_SAMPLE_METHOD,
+  type CorpusCandidateSnapshot,
+  type OrderedCandidate,
+  parseCorpusCandidateSnapshot,
+} from './corpus-candidates';
+import {
   type CorpusLimits,
   DEFAULT_CORPUS_LIMITS,
   gitBlobOid,
@@ -36,7 +42,7 @@ const GITHUB_RAW = 'https://raw.githubusercontent.com';
 
 interface GitHubTreeResponse {
   tree?: TreeEntry[];
-  truncated?: boolean;
+  truncated?: unknown;
 }
 
 interface CountSummary {
@@ -75,6 +81,12 @@ interface FindingEvidence {
   affectedTargets: Finding['affectedTargets'];
   span: Finding['span'];
   message: string;
+}
+
+interface ValidatedSampleSelection extends OrderedCandidate {
+  commit: string;
+  rootManifestOid: string;
+  rootManifestBytes: number;
 }
 
 interface CorpusRunManifest {
@@ -140,58 +152,219 @@ function sortedUniqueLocators(
   );
 }
 
+function exactEvidenceRecord(
+  value: unknown,
+  keys: readonly string[],
+  description: string,
+): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`corpus sample evidence ${description} was invalid`);
+  }
+  const record = value as Record<string, unknown>;
+  const actualKeys = Object.keys(record).toSorted();
+  const expectedKeys = [...keys].toSorted();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    !actualKeys.every((key, index) => key === expectedKeys[index])
+  ) {
+    throw new Error(`corpus sample evidence ${description} was invalid`);
+  }
+  return record;
+}
+
+function evidenceInteger(value: unknown, description: string, minimum = 0): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) {
+    throw new Error(`corpus sample evidence ${description} was invalid`);
+  }
+  return value;
+}
+
+function evidenceOid(value: unknown, description: string): string {
+  if (typeof value !== 'string' || !/^[a-f0-9]{40}$/.test(value)) {
+    throw new Error(`corpus sample evidence ${description} was invalid`);
+  }
+  return value;
+}
+
+function evidenceCandidateIdentity(
+  record: Record<string, unknown>,
+  snapshot: CorpusCandidateSnapshot,
+  description: string,
+): OrderedCandidate {
+  const position = evidenceInteger(record.position, `${description} position`, 1);
+  const expected = snapshot.orderedCandidates[position - 1];
+  if (
+    expected === undefined ||
+    record.stratum !== expected.stratum ||
+    record.rank !== expected.rank ||
+    record.repository !== expected.repository
+  ) {
+    throw new Error(`corpus sample evidence ${description} did not match the candidate snapshot`);
+  }
+  return expected;
+}
+
 function validateSampleEvidence(
   bytes: Buffer,
   candidateSnapshotSha256: string,
   sampleMethod: string,
   inputLocators: readonly ReturnType<typeof parseRepoLocator>[],
-): void {
+  candidateSnapshot: CorpusCandidateSnapshot,
+): Map<string, ValidatedSampleSelection> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(bytes.toString('utf8'));
   } catch {
     throw new Error('corpus sample evidence was not valid JSON');
   }
-  if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error('corpus sample evidence was invalid');
+  const evidence = exactEvidenceRecord(
+    parsed,
+    [
+      'schemaVersion',
+      'method',
+      'candidateSnapshotSha256',
+      'requested',
+      'actual',
+      'candidatesConsidered',
+      'status',
+      'api',
+      'selected',
+      'exclusions',
+    ],
+    'root object',
+  );
+  if (
+    evidence.schemaVersion !== 2 ||
+    evidence.status !== 'complete' ||
+    evidence.method !== sampleMethod ||
+    evidence.method !== CORPUS_SAMPLE_METHOD ||
+    evidence.candidateSnapshotSha256 !== candidateSnapshotSha256
+  ) {
+    throw new Error('corpus sample evidence header did not match the scanner provenance');
   }
-  const evidence = parsed as {
-    status?: unknown;
-    method?: unknown;
-    candidateSnapshotSha256?: unknown;
-    selected?: unknown;
-  };
-  if (evidence.status !== 'complete') {
-    throw new Error('corpus sample evidence status was not complete');
+  const requested = evidenceInteger(evidence.requested, 'requested count', 1);
+  const actual = evidenceInteger(evidence.actual, 'actual count', 1);
+  const candidatesConsidered = evidenceInteger(
+    evidence.candidatesConsidered,
+    'candidatesConsidered',
+    1,
+  );
+  if (requested > 100 || actual !== requested || candidatesConsidered < actual) {
+    throw new Error('corpus sample evidence requested/actual contract was invalid');
   }
-  if (evidence.method !== sampleMethod) {
-    throw new Error('corpus sample evidence method did not match the scanner method');
+
+  const api = exactEvidenceRecord(
+    evidence.api,
+    ['transport', 'batchSize', 'requests', 'cost', 'rateLimit'],
+    'api object',
+  );
+  const requests = evidenceInteger(api.requests, 'api.requests', 1);
+  const cost = evidenceInteger(api.cost, 'api.cost', 1);
+  const rateLimit = exactEvidenceRecord(
+    api.rateLimit,
+    ['limit', 'remaining', 'used', 'resetAt'],
+    'api.rateLimit object',
+  );
+  const limit = evidenceInteger(rateLimit.limit, 'api.rateLimit.limit', 1);
+  const remaining = evidenceInteger(rateLimit.remaining, 'api.rateLimit.remaining');
+  const used = evidenceInteger(rateLimit.used, 'api.rateLimit.used');
+  if (
+    api.transport !== 'github-graphql-batch-v1' ||
+    api.batchSize !== 20 ||
+    requests !== Math.ceil(candidatesConsidered / 20) ||
+    cost < requests ||
+    remaining > limit ||
+    used > limit ||
+    typeof rateLimit.resetAt !== 'string' ||
+    Number.isNaN(Date.parse(rateLimit.resetAt))
+  ) {
+    throw new Error('corpus sample evidence api contract was invalid');
   }
-  if (evidence.candidateSnapshotSha256 !== candidateSnapshotSha256) {
-    throw new Error('corpus sample evidence candidate snapshot digest did not match');
+  if (!Array.isArray(evidence.selected) || !Array.isArray(evidence.exclusions)) {
+    throw new Error('corpus sample evidence selected/exclusions were invalid');
   }
-  if (!Array.isArray(evidence.selected)) {
-    throw new Error('corpus sample evidence selected locators were invalid');
-  }
-  const selectedLocators = evidence.selected.map((value) => {
-    if (typeof value !== 'object' || value === null) {
-      throw new Error('corpus sample evidence selected locators were invalid');
+
+  const selected = evidence.selected.map((value, index): ValidatedSampleSelection => {
+    const record = exactEvidenceRecord(
+      value,
+      [
+        'position',
+        'stratum',
+        'rank',
+        'repository',
+        'commit',
+        'rootManifestOid',
+        'rootManifestBytes',
+      ],
+      `selected item ${index + 1}`,
+    );
+    const identity = evidenceCandidateIdentity(
+      record,
+      candidateSnapshot,
+      `selected item ${index + 1}`,
+    );
+    const commit = evidenceOid(record.commit, `selected item ${index + 1} commit`);
+    const rootManifestOid = evidenceOid(
+      record.rootManifestOid,
+      `selected item ${index + 1} rootManifestOid`,
+    );
+    const rootManifestBytes = evidenceInteger(
+      record.rootManifestBytes,
+      `selected item ${index + 1} rootManifestBytes`,
+    );
+    if (rootManifestBytes > DEFAULT_CORPUS_LIMITS.maxFileBytes) {
+      throw new Error(
+        `corpus sample evidence selected item ${index + 1} root manifest was oversized`,
+      );
     }
-    const selected = value as { repository?: unknown; commit?: unknown };
-    if (typeof selected.repository !== 'string' || typeof selected.commit !== 'string') {
-      throw new Error('corpus sample evidence selected locators were invalid');
-    }
-    try {
-      return parseRepoLocator(`${selected.repository}@${selected.commit}`);
-    } catch {
-      throw new Error('corpus sample evidence selected locators were invalid');
-    }
+    return { ...identity, commit, rootManifestOid, rootManifestBytes };
   });
-  const selectedSequence = selectedLocators.map((value) => `${value.repo}@${value.commit}`);
+  const exclusions = evidence.exclusions.map((value, index) => {
+    const record = exactEvidenceRecord(
+      value,
+      ['position', 'stratum', 'rank', 'repository', 'commit', 'reason'],
+      `exclusion item ${index + 1}`,
+    );
+    const identity = evidenceCandidateIdentity(
+      record,
+      candidateSnapshot,
+      `exclusion item ${index + 1}`,
+    );
+    const commit = evidenceOid(record.commit, `exclusion item ${index + 1} commit`);
+    if (record.reason !== 'root-package-json-unavailable') {
+      throw new Error(`corpus sample evidence exclusion item ${index + 1} reason was invalid`);
+    }
+    return { ...identity, commit };
+  });
+  if (
+    selected.length !== actual ||
+    selected.length + exclusions.length !== candidatesConsidered ||
+    candidatesConsidered > candidateSnapshot.orderedCandidates.length
+  ) {
+    throw new Error('corpus sample evidence candidate accounting was invalid');
+  }
+  const considered = [...selected, ...exclusions].toSorted(
+    (left, right) => left.position - right.position,
+  );
+  if (
+    considered.some((candidate, index) => candidate.position !== index + 1) ||
+    selected.some((candidate, index) => {
+      const previous = selected[index - 1];
+      return previous !== undefined && candidate.position <= previous.position;
+    }) ||
+    exclusions.some((candidate, index) => {
+      const previous = exclusions[index - 1];
+      return previous !== undefined && candidate.position <= previous.position;
+    })
+  ) {
+    throw new Error('corpus sample evidence candidate sequence was invalid');
+  }
+  const selectedSequence = selected.map((value) => `${value.repository}@${value.commit}`);
   const inputSequence = inputLocators.map((value) => `${value.repo}@${value.commit}`);
   if (JSON.stringify(selectedSequence) !== JSON.stringify(inputSequence)) {
     throw new Error('corpus sample evidence selected locators did not match repos.txt');
   }
+  return new Map(selected.map((value) => [`${value.repository}@${value.commit}`, value]));
 }
 
 async function fetchJson<T>(
@@ -356,7 +529,7 @@ function findingEvidence(
     confidence: finding.confidence,
     affectedTargets: finding.affectedTargets,
     span: finding.span,
-    message: redactCorpusText(finding.message),
+    message: `${finding.ruleId} matched a portability rule at the recorded span.`,
   };
 }
 
@@ -410,29 +583,40 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
   const sourceCommit = exactSourceCommit(options.sourceCommit);
   const limits = options.limits ?? DEFAULT_CORPUS_LIMITS;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const sampleMethod = options.sampleMethod ?? 'popularity-strata-round-robin-v1';
+  const sampleMethod = options.sampleMethod ?? CORPUS_SAMPLE_METHOD;
+  if (
+    (options.candidateSnapshotFile === undefined) !==
+    (options.sampleEvidenceFile === undefined)
+  ) {
+    throw new Error('candidate snapshot and sample evidence must be provided together');
+  }
   const candidateSnapshotBytes =
     options.candidateSnapshotFile === undefined
       ? undefined
       : readFileSync(options.candidateSnapshotFile);
   const sampleEvidenceBytes =
     options.sampleEvidenceFile === undefined ? undefined : readFileSync(options.sampleEvidenceFile);
-  const candidateSnapshotSha256 =
-    candidateSnapshotBytes === undefined ? undefined : sha256(candidateSnapshotBytes);
+  const parsedCandidateSnapshot =
+    candidateSnapshotBytes === undefined
+      ? undefined
+      : parseCorpusCandidateSnapshot(candidateSnapshotBytes);
+  const candidateSnapshotSha256 = parsedCandidateSnapshot?.digest;
   const sampleEvidenceSha256 =
     sampleEvidenceBytes === undefined ? undefined : sha256(sampleEvidenceBytes);
   const locatorSequence = readLocatorSequence(options.inputFile);
   if (locatorSequence.length === 0) throw new Error('repository list is empty');
+  let sampleSelections = new Map<string, ValidatedSampleSelection>();
   if (
-    candidateSnapshotBytes !== undefined &&
+    parsedCandidateSnapshot !== undefined &&
     candidateSnapshotSha256 !== undefined &&
     sampleEvidenceBytes !== undefined
   ) {
-    validateSampleEvidence(
+    sampleSelections = validateSampleEvidence(
       sampleEvidenceBytes,
       candidateSnapshotSha256,
       sampleMethod,
       locatorSequence,
+      parsedCandidateSnapshot.snapshot,
     );
   }
   const locators = sortedUniqueLocators(locatorSequence);
@@ -452,12 +636,17 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
       if (!Array.isArray(treeResponse.tree)) {
         throw invalidGitHubResponse(treeUrl, 'GitHub tree response had no tree', treeHttpResponse);
       }
+      if (typeof treeResponse.truncated !== 'boolean') {
+        throw invalidGitHubResponse(
+          treeUrl,
+          'GitHub tree response truncated flag was not boolean',
+          treeHttpResponse,
+        );
+      }
       const selected = selectCorpusFiles(treeResponse.tree, limits);
       truncations = [...selected.truncations];
-      if (treeResponse.truncated === true) truncations.unshift('github-tree-truncated');
+      if (treeResponse.truncated) truncations.unshift('github-tree-truncated');
       manifestPaths = selected.files.map((entry) => entry.path);
-      if (!manifestPaths.includes('package.json'))
-        throw new Error('root package.json was unavailable');
       if (truncations.length !== 0) {
         repositories.push({
           repository: locator.repo,
@@ -470,6 +659,22 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
         });
         continue;
       }
+      const sampleSelection = sampleSelections.get(`${locator.repo}@${locator.commit}`);
+      if (sampleSelection !== undefined) {
+        const rootEntries = treeResponse.tree.filter((entry) => entry.path === 'package.json');
+        const rootEntry = rootEntries[0];
+        if (
+          rootEntries.length !== 1 ||
+          rootEntry?.type !== 'blob' ||
+          (rootEntry.mode !== '100644' && rootEntry.mode !== '100755') ||
+          rootEntry.sha !== sampleSelection.rootManifestOid ||
+          rootEntry.size !== sampleSelection.rootManifestBytes
+        ) {
+          throw new Error('root package.json tree entry did not match corpus sample evidence');
+        }
+      }
+      if (!manifestPaths.includes('package.json'))
+        throw new Error('root package.json was unavailable');
       await downloadSelectedFiles(
         locator.repo,
         locator.commit,

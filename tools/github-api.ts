@@ -100,6 +100,27 @@ export function invalidGitHubResponse(
   });
 }
 
+/** Persist a semantic GitHub failure even when GraphQL returns HTTP 200. */
+export function classifiedGitHubError(
+  kind: GitHubFailureKind,
+  url: string,
+  message: string,
+  response?: Response,
+): GitHubRequestError {
+  return new GitHubRequestError(message, {
+    kind,
+    url,
+    ...(response === undefined
+      ? {
+          status: null,
+          rateLimit: { limit: null, remaining: null, reset: null, used: null, resource: null },
+          retryAfter: null,
+          requestId: null,
+        }
+      : responseHeaders(response)),
+  });
+}
+
 export function githubFailureEvidence(error: unknown): GitHubFailureEvidence | undefined {
   return error instanceof GitHubRequestError ? error.evidence : undefined;
 }

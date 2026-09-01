@@ -40,6 +40,7 @@ function searchApi(): typeof fetch {
   return (async (input: string | URL | Request) => {
     const url = new URL(String(input));
     const query = url.searchParams.get('q');
+    expect(query).toContain('is:public');
     const items = query?.includes('language:typescript')
       ? [
           { full_name: 'alpha/shared', stargazers_count: 100 },
@@ -65,6 +66,10 @@ function searchApi(): typeof fetch {
   }) as typeof fetch;
 }
 
+function invalidSearchApi(body: unknown): typeof fetch {
+  return (async () => Response.json(body)) as typeof fetch;
+}
+
 it('persists both ranked strata and a deterministic round-robin candidate universe', async () => {
   const directory = temporaryDirectory();
   const outputFile = join(directory, 'repository-candidates.json');
@@ -83,7 +88,7 @@ it('persists both ranked strata and a deterministic round-robin candidate univer
     strata: [
       {
         id: 'typescript',
-        query: 'language:typescript stars:>2000',
+        query: 'is:public language:typescript stars:>2000',
         sort: 'stars',
         order: 'desc',
         perPage: 100,
@@ -95,7 +100,7 @@ it('persists both ranked strata and a deterministic round-robin candidate univer
       },
       {
         id: 'javascript',
-        query: 'language:javascript stars:>5000',
+        query: 'is:public language:javascript stars:>5000',
         sort: 'stars',
         order: 'desc',
         perPage: 100,
@@ -190,4 +195,54 @@ it('distinguishes a permission denial from primary rate exhaustion', async () =>
       requestId: 'SEARCH-PERMISSION-1',
     },
   });
+});
+
+it('rejects Search responses without a valid total_count', async () => {
+  const directory = temporaryDirectory();
+
+  await expect(
+    (await collector())({
+      outputFile: join(directory, 'repository-candidates.json'),
+      token: 'read-only-test-token',
+      fetchImpl: invalidSearchApi({
+        incomplete_results: false,
+        items: [{ full_name: 'alpha/project', stargazers_count: 100 }],
+      }),
+    }),
+  ).rejects.toThrow(/search response was incomplete or invalid/);
+});
+
+it('rejects Search responses whose item count does not match the bounded total', async () => {
+  const directory = temporaryDirectory();
+
+  await expect(
+    (await collector())({
+      outputFile: join(directory, 'repository-candidates.json'),
+      token: 'read-only-test-token',
+      fetchImpl: invalidSearchApi({
+        total_count: 2,
+        incomplete_results: false,
+        items: [{ full_name: 'alpha/project', stargazers_count: 100 }],
+      }),
+    }),
+  ).rejects.toThrow(/search response was incomplete or invalid/);
+});
+
+it('rejects Search candidates that are not sorted by non-increasing stars', async () => {
+  const directory = temporaryDirectory();
+
+  await expect(
+    (await collector())({
+      outputFile: join(directory, 'repository-candidates.json'),
+      token: 'read-only-test-token',
+      fetchImpl: invalidSearchApi({
+        total_count: 2,
+        incomplete_results: false,
+        items: [
+          { full_name: 'alpha/project', stargazers_count: 100 },
+          { full_name: 'beta/project', stargazers_count: 101 },
+        ],
+      }),
+    }),
+  ).rejects.toThrow(/ranked by stars/);
 });

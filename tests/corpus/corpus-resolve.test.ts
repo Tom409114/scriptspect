@@ -52,7 +52,7 @@ function candidateSnapshot(): string {
       strata: [
         {
           id: 'typescript',
-          query: 'language:typescript stars:>2000',
+          query: 'is:public language:typescript stars:>2000',
           sort: 'stars',
           order: 'desc',
           perPage: 100,
@@ -64,7 +64,7 @@ function candidateSnapshot(): string {
         },
         {
           id: 'javascript',
-          query: 'language:javascript stars:>5000',
+          query: 'is:public language:javascript stars:>5000',
           sort: 'stars',
           order: 'desc',
           perPage: 100,
@@ -262,6 +262,7 @@ it('hard-fails a rate exhaustion and persists non-secret response metadata', asy
   expect(JSON.parse(evidenceText)).toMatchObject({
     schemaVersion: 2,
     status: 'failed',
+    api: { requests: 1 },
     failure: {
       kind: 'primary-rate-limit-exhausted',
       status: 403,
@@ -278,6 +279,100 @@ it('hard-fails a rate exhaustion and persists non-secret response metadata', asy
     },
   });
 });
+
+it('counts an emitted GraphQL request when GitHub responds with HTTP 429', async () => {
+  const directory = temporaryDirectory();
+  const candidateFile = join(directory, 'repository-candidates.json');
+  const outputFile = join(directory, 'repos.txt');
+  const evidenceFile = join(directory, 'repository-sample.json');
+  writeFileSync(candidateFile, candidateSnapshot(), 'utf8');
+
+  await expect(
+    (await resolver())({
+      candidateFile,
+      outputFile,
+      evidenceFile,
+      requested: 1,
+      token: 'read-only-test-token',
+      fetchImpl: (async () =>
+        new Response('{"message":"slow down"}', {
+          status: 429,
+          headers: { 'retry-after': '30', 'x-github-request-id': 'REQ-429' },
+        })) as typeof fetch,
+    }),
+  ).rejects.toThrow('GitHub API 429');
+
+  expect(JSON.parse(readFileSync(evidenceFile, 'utf8'))).toMatchObject({
+    status: 'failed',
+    api: { requests: 1 },
+    failure: {
+      kind: 'secondary-rate-limit',
+      status: 429,
+      retryAfter: '30',
+      requestId: 'REQ-429',
+    },
+  });
+});
+
+it.each([
+  {
+    graphQlType: 'RATE_LIMITED',
+    expectedKind: 'primary-rate-limit-exhausted',
+    remaining: '0',
+  },
+  {
+    graphQlType: 'RATE_LIMITED',
+    expectedKind: 'secondary-rate-limit',
+    remaining: '4999',
+  },
+  { graphQlType: 'FORBIDDEN', expectedKind: 'permission-denied', remaining: '4999' },
+  { graphQlType: 'UNAUTHORIZED', expectedKind: 'authentication-failed', remaining: '4999' },
+])(
+  'classifies a GraphQL 200 $graphQlType error',
+  async ({ graphQlType, expectedKind, remaining }) => {
+    const directory = temporaryDirectory();
+    const candidateFile = join(directory, 'repository-candidates.json');
+    const evidenceFile = join(directory, 'repository-sample.json');
+    writeFileSync(candidateFile, candidateSnapshot(), 'utf8');
+
+    await expect(
+      (await resolver())({
+        candidateFile,
+        outputFile: join(directory, 'repos.txt'),
+        evidenceFile,
+        requested: 1,
+        token: 'read-only-test-token',
+        fetchImpl: (async () =>
+          Response.json(
+            {
+              data: null,
+              errors: [{ type: graphQlType, message: 'controlled GraphQL failure' }],
+            },
+            {
+              headers: {
+                'x-ratelimit-limit': '5000',
+                'x-ratelimit-remaining': remaining,
+                'x-ratelimit-reset': '1788224400',
+                'x-ratelimit-used': remaining === '0' ? '5000' : '1',
+                'x-ratelimit-resource': 'graphql',
+                'x-github-request-id': `GRAPHQL-${graphQlType}`,
+              },
+            },
+          )) as typeof fetch,
+      }),
+    ).rejects.toThrow(/GitHub GraphQL/);
+
+    expect(JSON.parse(readFileSync(evidenceFile, 'utf8'))).toMatchObject({
+      status: 'failed',
+      api: { requests: 1 },
+      failure: {
+        kind: expectedKind,
+        status: 200,
+        requestId: `GRAPHQL-${graphQlType}`,
+      },
+    });
+  },
+);
 
 it('rejects a snapshot whose ordered universe does not reproduce its ranked strata', async () => {
   const directory = temporaryDirectory();
@@ -302,5 +397,79 @@ it('rejects a snapshot whose ordered universe does not reproduce its ranked stra
       }) as typeof fetch,
     }),
   ).rejects.toThrow('candidate snapshot ordering did not match its ranked strata');
+  expect(called).toBe(false);
+});
+
+it('rejects a snapshot with more than 100 candidates in one Search stratum', async () => {
+  const directory = temporaryDirectory();
+  const candidateFile = join(directory, 'repository-candidates.json');
+  const snapshot = JSON.parse(candidateSnapshot()) as {
+    strata: Array<{ candidates: Array<Record<string, unknown>> }>;
+  };
+  const [typescript, javascript] = snapshot.strata;
+  if (typescript === undefined || javascript === undefined) {
+    throw new Error('candidate snapshot test fixture was incomplete');
+  }
+  typescript.candidates = Array.from({ length: 101 }, (_, index) => ({
+    rank: index + 1,
+    repository: `typescript/project-${index}`,
+    stars: 1_000 - index,
+  }));
+  javascript.candidates = [];
+  writeFileSync(candidateFile, `${JSON.stringify(snapshot)}\n`, 'utf8');
+  let called = false;
+
+  await expect(
+    (await resolver())({
+      candidateFile,
+      outputFile: join(directory, 'repos.txt'),
+      evidenceFile: join(directory, 'repository-sample.json'),
+      requested: 1,
+      token: 'read-only-test-token',
+      fetchImpl: (async () => {
+        called = true;
+        return new Response('unexpected');
+      }) as typeof fetch,
+    }),
+  ).rejects.toThrow(/stratum exceeded 100 candidates/);
+  expect(called).toBe(false);
+});
+
+it('rejects a snapshot whose raw Search candidate budget exceeds 200', async () => {
+  const directory = temporaryDirectory();
+  const candidateFile = join(directory, 'repository-candidates.json');
+  const snapshot = JSON.parse(candidateSnapshot()) as {
+    strata: Array<{ candidates: Array<Record<string, unknown>> }>;
+  };
+  const [typescript, javascript] = snapshot.strata;
+  if (typescript === undefined || javascript === undefined) {
+    throw new Error('candidate snapshot test fixture was incomplete');
+  }
+  typescript.candidates = Array.from({ length: 101 }, (_, index) => ({
+    rank: index + 1,
+    repository: `typescript/project-${index}`,
+    stars: 2_000 - index,
+  }));
+  javascript.candidates = Array.from({ length: 100 }, (_, index) => ({
+    rank: index + 1,
+    repository: `javascript/project-${index}`,
+    stars: 1_000 - index,
+  }));
+  writeFileSync(candidateFile, `${JSON.stringify(snapshot)}\n`, 'utf8');
+  let called = false;
+
+  await expect(
+    (await resolver())({
+      candidateFile,
+      outputFile: join(directory, 'repos.txt'),
+      evidenceFile: join(directory, 'repository-sample.json'),
+      requested: 1,
+      token: 'read-only-test-token',
+      fetchImpl: (async () => {
+        called = true;
+        return new Response('unexpected');
+      }) as typeof fetch,
+    }),
+  ).rejects.toThrow(/candidate budget exceeded 200/);
   expect(called).toBe(false);
 });

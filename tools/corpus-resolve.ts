@@ -3,15 +3,13 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  type CandidateStratum,
-  CORPUS_CANDIDATE_STRATA,
   CORPUS_SAMPLE_METHOD,
-  type CorpusCandidateSnapshot,
-  interleaveCandidateStrata,
   type OrderedCandidate,
+  parseCorpusCandidateSnapshot,
 } from './corpus-candidates';
-import { DEFAULT_CORPUS_LIMITS, redactCorpusText, sha256 } from './corpus-lib';
+import { DEFAULT_CORPUS_LIMITS, redactCorpusText } from './corpus-lib';
 import {
+  classifiedGitHubError,
   type GitHubFailureEvidence,
   githubApiResponse,
   githubFailureEvidence,
@@ -63,6 +61,39 @@ interface GraphQlRepository {
 interface GraphQlResponse {
   data?: Record<string, unknown> & { rateLimit?: GraphQlRateLimit };
   errors?: GraphQlError[];
+}
+
+function classifiedGraphQlFailure(
+  errors: readonly GraphQlError[],
+  response: Response,
+):
+  | {
+      kind:
+        | 'primary-rate-limit-exhausted'
+        | 'secondary-rate-limit'
+        | 'authentication-failed'
+        | 'permission-denied';
+      type: 'RATE_LIMITED' | 'UNAUTHORIZED' | 'FORBIDDEN';
+    }
+  | undefined {
+  for (const error of errors) {
+    if (error.type === 'RATE_LIMITED') {
+      return {
+        kind:
+          response.headers.get('x-ratelimit-remaining') === '0'
+            ? 'primary-rate-limit-exhausted'
+            : 'secondary-rate-limit',
+        type: error.type,
+      };
+    }
+    if (error.type === 'UNAUTHORIZED') {
+      return { kind: 'authentication-failed', type: error.type };
+    }
+    if (error.type === 'FORBIDDEN') {
+      return { kind: 'permission-denied', type: error.type };
+    }
+  }
+  return undefined;
 }
 
 interface ApiEvidence {
@@ -117,13 +148,6 @@ export interface CorpusResolveOptions {
   fetchImpl?: typeof fetch;
 }
 
-function validRepositoryName(value: string): boolean {
-  const match = /^([A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38})\/[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99}))$/.exec(
-    value,
-  );
-  return match !== null && !value.includes('..') && !value.endsWith('.');
-}
-
 function exactOid(value: unknown, description: string): string {
   if (typeof value !== 'string' || !/^[a-f0-9]{40}$/.test(value)) {
     throw invalidGitHubResponse(GRAPHQL_URL, `${description} was not an exact 40-character oid`);
@@ -136,81 +160,6 @@ function safeInteger(value: unknown, description: string): number {
     throw invalidGitHubResponse(GRAPHQL_URL, `${description} was invalid`);
   }
   return value;
-}
-
-function validateStratum(value: unknown, index: number): CandidateStratum {
-  if (typeof value !== 'object' || value === null) throw new Error('candidate stratum was invalid');
-  const stratum = value as Partial<CandidateStratum>;
-  const expected = CORPUS_CANDIDATE_STRATA[index];
-  if (
-    expected === undefined ||
-    stratum.id !== expected.id ||
-    stratum.query !== expected.query ||
-    stratum.sort !== expected.sort ||
-    stratum.order !== expected.order ||
-    stratum.perPage !== expected.perPage ||
-    typeof stratum.responseSha256 !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(stratum.responseSha256) ||
-    !Array.isArray(stratum.candidates)
-  ) {
-    throw new Error('candidate stratum metadata was invalid');
-  }
-  const candidates = stratum.candidates.map((candidate, index) => {
-    if (
-      typeof candidate !== 'object' ||
-      candidate === null ||
-      candidate.rank !== index + 1 ||
-      typeof candidate.repository !== 'string' ||
-      !validRepositoryName(candidate.repository) ||
-      typeof candidate.stars !== 'number' ||
-      !Number.isSafeInteger(candidate.stars) ||
-      candidate.stars < 0
-    ) {
-      throw new Error(`${stratum.id}: ranked candidate ${index + 1} was invalid`);
-    }
-    return candidate;
-  });
-  return { ...stratum, candidates } as CandidateStratum;
-}
-
-function readCandidateSnapshot(candidateFile: string): {
-  snapshot: CorpusCandidateSnapshot;
-  digest: string;
-} {
-  const bytes = readFileSync(candidateFile);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bytes.toString('utf8'));
-  } catch {
-    throw new Error('candidate snapshot was not valid JSON');
-  }
-  if (typeof parsed !== 'object' || parsed === null)
-    throw new Error('candidate snapshot was invalid');
-  const candidate = parsed as Partial<CorpusCandidateSnapshot>;
-  if (
-    candidate.schemaVersion !== 1 ||
-    candidate.status !== 'complete' ||
-    candidate.method !== CORPUS_SAMPLE_METHOD ||
-    !Array.isArray(candidate.strata) ||
-    !Array.isArray(candidate.orderedCandidates)
-  ) {
-    throw new Error('candidate snapshot was incomplete or incompatible');
-  }
-  if (candidate.strata.length !== CORPUS_CANDIDATE_STRATA.length) {
-    throw new Error('candidate snapshot did not contain the required popularity strata');
-  }
-  const strata = candidate.strata.map(validateStratum);
-  if (new Set(strata.map((stratum) => stratum.id)).size !== strata.length) {
-    throw new Error('candidate snapshot contained duplicate strata');
-  }
-  const expected = interleaveCandidateStrata(strata);
-  if (JSON.stringify(candidate.orderedCandidates) !== JSON.stringify(expected)) {
-    throw new Error('candidate snapshot ordering did not match its ranked strata');
-  }
-  return {
-    snapshot: { ...candidate, strata, orderedCandidates: expected } as CorpusCandidateSnapshot,
-    digest: sha256(bytes),
-  };
 }
 
 function graphQlQuery(candidates: readonly OrderedCandidate[]): string {
@@ -374,7 +323,7 @@ export async function resolveCorpusSample(
   ) {
     throw new Error('requested repository count must be an integer from 1 through 100');
   }
-  const { snapshot, digest } = readCandidateSnapshot(options.candidateFile);
+  const { snapshot, digest } = parseCorpusCandidateSnapshot(readFileSync(options.candidateFile));
   if (snapshot.orderedCandidates.length < options.requested) {
     throw new Error(
       `requested ${options.requested} repositories but only ${snapshot.orderedCandidates.length} ordered candidates were captured`,
@@ -396,6 +345,7 @@ export async function resolveCorpusSample(
   try {
     for (let offset = 0; offset < snapshot.orderedCandidates.length; offset += GRAPHQL_BATCH_SIZE) {
       const batch = snapshot.orderedCandidates.slice(offset, offset + GRAPHQL_BATCH_SIZE);
+      api.requests += 1;
       const response = await githubApiResponse(
         fetchImpl,
         GRAPHQL_URL,
@@ -404,19 +354,27 @@ export async function resolveCorpusSample(
         { method: 'POST', body: JSON.stringify({ query: graphQlQuery(batch) }) },
       );
       lastApiResponse = response;
-      api.requests += 1;
       let payload: GraphQlResponse;
       try {
         payload = (await response.json()) as GraphQlResponse;
       } catch {
         throw invalidGitHubResponse(GRAPHQL_URL, 'GitHub GraphQL response was not valid JSON');
       }
-      if (typeof payload.data !== 'object' || payload.data === null) {
-        throw invalidGitHubResponse(GRAPHQL_URL, 'GitHub GraphQL response had no data');
-      }
       const errors = payload.errors ?? [];
       if (!Array.isArray(errors)) {
         throw invalidGitHubResponse(GRAPHQL_URL, 'GitHub GraphQL errors were invalid');
+      }
+      const classifiedFailure = classifiedGraphQlFailure(errors, response);
+      if (classifiedFailure !== undefined) {
+        throw classifiedGitHubError(
+          classifiedFailure.kind,
+          GRAPHQL_URL,
+          `GitHub GraphQL returned ${classifiedFailure.type}`,
+          response,
+        );
+      }
+      if (typeof payload.data !== 'object' || payload.data === null) {
+        throw invalidGitHubResponse(GRAPHQL_URL, 'GitHub GraphQL response had no data');
       }
       const unrelatedError = errors.find(
         (error) =>
