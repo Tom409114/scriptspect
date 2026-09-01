@@ -32,6 +32,8 @@ interface ShxCommandContract {
 }
 
 const CONTEXT_FLAGS = new Set(['A', 'B', 'C']);
+/** Apple grep stores context counts in a signed int; ShellJS accepts wider Numbers. */
+const MAX_PORTABLE_GREP_CONTEXT = 2_147_483_647;
 const REGEX_META = /[\\^$.*+?()[\]{}|]/;
 const SED_REPLACEMENT_META = /[\\$&]/;
 const GLOB_META = /[*?[\]{}]|[@+!]\(/;
@@ -225,8 +227,13 @@ function parseShxArgs(cmd: CommandNode, contract: ShxCommandContract): ParsedShx
   if (valueFlags.length === 1) {
     const value = positionals[0];
     const numericValue = value === undefined ? Number.NaN : Number(value.value);
-    if (value === undefined || !/^\d+$/.test(value.value) || !Number.isSafeInteger(numericValue)) {
-      return `-${valueFlags[0]} requires an exactly representable integer from 0 to ${Number.MAX_SAFE_INTEGER}`;
+    if (
+      value === undefined ||
+      !/^\d+$/.test(value.value) ||
+      !Number.isSafeInteger(numericValue) ||
+      numericValue > MAX_PORTABLE_GREP_CONTEXT
+    ) {
+      return `-${valueFlags[0]} requires a portable integer from 0 to ${MAX_PORTABLE_GREP_CONTEXT}`;
     }
     positionals = positionals.slice(1);
   }

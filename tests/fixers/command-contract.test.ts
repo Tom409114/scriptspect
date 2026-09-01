@@ -306,22 +306,39 @@ describe('documented ShellJS subset boundaries', () => {
   it.each([
     ['grep -B 0 TODO app.txt', 'shx grep -B 0 TODO app.txt'],
     [
-      'grep -A 9007199254740991 TODO app.txt && echo done',
-      'shx grep -A 9007199254740991 TODO app.txt && echo done',
+      'grep -A 2147483647 TODO app.txt && echo done',
+      'shx grep -A 2147483647 TODO app.txt && echo done',
     ],
-    ['grep -inC 9007199254740991 TODO app.txt', 'shx grep -inC 9007199254740991 TODO app.txt'],
-  ])('accepts an exactly representable grep context boundary: %s', (script, expected) => {
+    ['grep -inB 2147483647 TODO app.txt', 'shx grep -inB 2147483647 TODO app.txt'],
+    ['grep -inC 2147483647 TODO app.txt', 'shx grep -inC 2147483647 TODO app.txt'],
+  ])('accepts the portable grep context boundary: %s', (script, expected) => {
     expect(fixed(script, ['shx'])).toBe(expected);
   });
 
   for (const { label, script } of [
     {
-      label: 'separate -A one above Number.MAX_SAFE_INTEGER',
-      script: 'grep -A 9007199254740992 TODO app.txt',
+      label: 'separate -A one above INT_MAX',
+      script: 'grep -A 2147483648 TODO app.txt',
     },
     {
-      label: 'combined -inB overflow before a boolean operator',
-      script: 'grep -inB 9007199254740992 TODO app.txt && echo done',
+      label: 'separate -B one above INT_MAX',
+      script: 'grep -B 2147483648 TODO app.txt',
+    },
+    {
+      label: 'separate -C one above INT_MAX',
+      script: 'grep -C 2147483648 TODO app.txt',
+    },
+    {
+      label: 'combined -inA one above INT_MAX',
+      script: 'grep -inA 2147483648 TODO app.txt',
+    },
+    {
+      label: 'combined -inB one above INT_MAX',
+      script: 'grep -inB 2147483648 TODO app.txt',
+    },
+    {
+      label: 'combined -inC one above INT_MAX before a boolean operator',
+      script: 'grep -inC 2147483648 TODO app.txt && echo done',
     },
     {
       label: '400-digit -C value that coerces to Infinity',

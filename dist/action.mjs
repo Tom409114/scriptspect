@@ -14467,6 +14467,7 @@ var PS003 = {
 
 // src/rules/fix-builders.ts
 var CONTEXT_FLAGS = /* @__PURE__ */ new Set(["A", "B", "C"]);
+var MAX_PORTABLE_GREP_CONTEXT = 2147483647;
 var REGEX_META = /[\\^$.*+?()[\]{}|]/;
 var SED_REPLACEMENT_META = /[\\$&]/;
 var GLOB_META = /[*?[\]{}]|[@+!]\(/;
@@ -14632,8 +14633,8 @@ function parseShxArgs(cmd, contract) {
   if (valueFlags.length === 1) {
     const value = positionals[0];
     const numericValue = value === void 0 ? Number.NaN : Number(value.value);
-    if (value === void 0 || !/^\d+$/.test(value.value) || !Number.isSafeInteger(numericValue)) {
-      return `-${valueFlags[0]} requires an exactly representable integer from 0 to ${Number.MAX_SAFE_INTEGER}`;
+    if (value === void 0 || !/^\d+$/.test(value.value) || !Number.isSafeInteger(numericValue) || numericValue > MAX_PORTABLE_GREP_CONTEXT) {
+      return `-${valueFlags[0]} requires a portable integer from 0 to ${MAX_PORTABLE_GREP_CONTEXT}`;
     }
     positionals = positionals.slice(1);
   }
