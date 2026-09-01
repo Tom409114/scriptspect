@@ -112,9 +112,20 @@ describe('pull-request trust boundary', () => {
       expect(source).not.toContain('secrets.');
       expect(source).not.toContain('pull_request_target:');
     }
-    for (const name of workflowNames()) {
-      expect(workflowSource(name)).not.toContain('pull_request_target:');
-    }
+
+    const targetWorkflows = workflowNames().filter((name) =>
+      Object.hasOwn(workflow(name).on ?? {}, 'pull_request_target'),
+    );
+    expect(targetWorkflows).toEqual(['release-readiness.yml']);
+    const trustedGate = workflow('release-readiness.yml');
+    expect(trustedGate.permissions).toEqual({ contents: 'read' });
+    const trustedSource = workflowSource('release-readiness.yml');
+    expect(trustedSource).toContain('github.event.pull_request.base.sha');
+    expect(trustedSource).not.toContain('github.event.pull_request.head.sha');
+    expect(trustedSource).not.toContain('github.event.pull_request.head.ref');
+    expect(trustedSource).not.toContain('secrets.');
+    expect(trustedSource).not.toMatch(/git\s+push/);
+    expect(trustedSource).not.toContain('contents: write');
   });
 
   it('uses immutable third-party Action revisions in every workflow', () => {

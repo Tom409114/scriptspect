@@ -21,7 +21,7 @@ import {
 
 const integrityModes = new Set(['exact-bytes', 'canonical-tree-v1']);
 
-function requireIntegrityContract(value) {
+export function verifyIntegrityContract(value) {
   const contract = requireExactKeys(
     value,
     'npm integrity contract',
@@ -76,7 +76,10 @@ function requireIntegrityContract(value) {
     }
   }
   return {
+    schemaVersion: 1,
+    package: 'scriptspect',
     integrityMode,
+    comparatorAlgorithm: CANONICAL_TREE_ALGORITHM,
     comparatorAlgorithmDigest,
     bootstrapVersion: requireString(
       contract.bootstrapVersion,
@@ -98,6 +101,10 @@ function requireIntegrityContract(value) {
       'npm integrity contract reviewedAt',
       /^[0-9]{4}-[0-9]{2}-[0-9]{2}T/u,
     ),
+    latestUnchanged: true,
+    ...(contract.nextRequiredActions === undefined
+      ? {}
+      : { nextRequiredActions: contract.nextRequiredActions }),
   };
 }
 
@@ -121,7 +128,7 @@ export function verifyPackageIntegrity(input) {
     'candidateNpmSRI',
     'registryNpmSRI',
   ]);
-  const contract = requireIntegrityContract(request.contract);
+  const contract = verifyIntegrityContract(request.contract);
   const candidatePath = requireString(request.candidatePath, 'candidate tarball path');
   const registryPath = requireString(request.registryPath, 'registry tarball path');
   const expectedCandidateSri = requireNpmSri(
@@ -209,6 +216,13 @@ function parseFlags(arguments_) {
 
 async function main() {
   const flags = parseFlags(process.argv.slice(2));
+  if (Object.hasOwn(flags, 'contract-only')) {
+    if (Object.keys(flags).length !== 1) {
+      throw new ReleaseToolError('--contract-only cannot be combined with package tarball flags');
+    }
+    emitJson(verifyIntegrityContract(readJson(flags['contract-only'], 'npm integrity contract')));
+    return;
+  }
   const allowed = new Set(['contract', 'candidate', 'registry', 'candidate-sri', 'registry-sri']);
   for (const key of Object.keys(flags)) {
     if (!allowed.has(key)) throw new ReleaseToolError(`unknown --${key} flag`);
