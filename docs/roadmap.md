@@ -4,19 +4,18 @@ The links below record when each implementation slice first landed. A merged
 slice is not the same as satisfying its exit condition: release, hosted-CI,
 corpus, and adoption gates stay open until their public evidence exists.
 
-The latest hosted `main` snapshot includes the merged [homepage/release hardening
-PR #78](https://github.com/Tom409114/scriptspect/pull/78), [CodeQL follow-up
-PR #79](https://github.com/Tom409114/scriptspect/pull/79), and [final spec-audit
-PR #80](https://github.com/Tom409114/scriptspect/pull/80). Exact `main` commit
-`c9c671c8e150705d78d9169d4c5a8f22cb37fad0` passed [CI run
-`33482453059`](https://github.com/Tom409114/scriptspect/actions/runs/33482453059).
-The still-open [v0.1.0 release PR #66](https://github.com/Tom409114/scriptspect/pull/66)
-has since advanced; its latest bot-authored run is
-[`action_required`](https://github.com/Tom409114/scriptspect/actions/runs/33482502821)
-under the documented manual-approval policy, so an older green PR-head run is
-not presented as current release evidence. The [DoD
-ledger](validation/v0.1-dod-2026-09-01.md) records the remaining approval,
-publication, tag-actor, and external-evidence gates.
+The latest implementation candidate is draft [PR
+#82](https://github.com/Tom409114/scriptspect/pull/82) at exact source commit
+`b514d367b9922b1180e1b1efa500ff22bd014902`. Its full [PR CI run
+`33501069632`](https://github.com/Tom409114/scriptspect/actions/runs/33501069632)
+and [release-readiness run
+`33501069825`](https://github.com/Tom409114/scriptspect/actions/runs/33501069825)
+both completed successfully. The candidate is not yet `main`, and the separate
+[v0.1.0 release PR #66](https://github.com/Tom409114/scriptspect/pull/66)
+remains unmerged while npm ownership and Trusted Publishing are unfinished.
+Repository tag permissions are now configured and fail closed; the [DoD
+ledger](validation/v0.1-dod-2026-09-01.md) records the exact rulesets and the
+remaining publication and external/time evidence gates.
 
 | Milestone | Theme | Key deliverables | Exit condition | Status |
 | --- | --- | --- | --- | --- |
@@ -27,8 +26,8 @@ publication, tag-actor, and external-evidence gates.
 | M4 | Safe fixer | fix safety model, dry-run, cross-env/rimraf/shx conditional fixes | idempotency, concurrency, rollback, and recovery tests pass | recovery and race suites verified on hosted matrix |
 | M5 | Workspaces | npm/pnpm/Yarn/Bun discovery; PS040 workspace-bin awareness | real manager fixtures and a hosted 100-package benchmark under 2 seconds | manager fixtures and hosted 100-package benchmark verified |
 | M6 | GitHub Action | bundled Node Action + annotations + job summary; 3-OS matrix | immutable released reference runs in an external repository | bundled consumer, annotations, and 3-OS matrix verified; released reference pending |
-| M7 | Release | npm trusted publishing, provenance, release notes, checksums | one immutable tarball reaches npm and GitHub Release through Actions | workflow/recovery contracts and latest `main` CI verified; current release PR awaits workflow approval and first release remains pending |
-| M8 | Validation and real corpus | read-only public scan, human sampling, false-positive ledger, public validation report | two-week gate, at least 100 reviewed findings, shared-corpus comparison, and real interest evidence | partial: the historical first report landed in PR #64; source tooling now supports 1–1,000 repositories and unreviewed monthly API drafts, while the last hosted run sampled 100 and human/external/time gates remain open |
+| M7 | Release | npm trusted publishing, provenance, release notes, checksums | one immutable tarball reaches npm and GitHub Release through Actions | workflow/recovery contracts, exact candidate CI/readiness, semantic/floating tag controls, and recovery key isolation verified; npm ownership/OIDC and the first public release remain pending |
+| M8 | Validation and real corpus | read-only public scan, human sampling, false-positive ledger, public validation report | two-week gate, at least 100 reviewed findings, shared-corpus comparison, and real interest evidence | partial: the historical first report landed in PR #64; the reviewed fixed shared-corpus comparison is complete and a hosted 500-repository collection succeeded, while ≥100 public-corpus adjudication and external/time gates remain open |
 
 ## v0.1 validation gates (kill-or-commit)
 
@@ -51,3 +50,13 @@ publication, tag-actor, and external-evidence gates.
 | Onboarding | ⏳ pending | requires the v0.1 npm publish |
 
 Full report: [docs/validation/corpus-2026-08.md](validation/corpus-2026-08.md).
+
+### Current candidate evidence — 2026-09-01
+
+| Gate or contract | Status | Evidence |
+| --- | --- | --- |
+| Candidate CI | hosted pass, PR open | Draft PR #82 source `b514d367b9922b1180e1b1efa500ff22bd014902` passed exact [CI run `33501069632`](https://github.com/Tom409114/scriptspect/actions/runs/33501069632) and [release-readiness run `33501069825`](https://github.com/Tom409114/scriptspect/actions/runs/33501069825) |
+| Competitive edge | reviewed fixed-corpus evidence complete | The [versioned comparison review](comparison.md#reviewed-shared-fixture-result), run on Node `22.23.2` at the exact candidate source, judged ScriptSpect correct on 7/7 questions; `scripts-doctor@1.0.0` had 2 correct, 2 false positives, and 3 false negatives, with 14/14 independent secondary decisions agreeing |
+| Public-corpus collection | hosted pass, adjudication open | The read-only 500-repository [run `33501028186`](https://github.com/Tom409114/scriptspect/actions/runs/33501028186) completed successfully; its artifact is still a draft until at least 100 findings receive the required primary and secondary human review |
+| Monthly evidence | artifact produced, review open | [Run `33501032020`](https://github.com/Tom409114/scriptspect/actions/runs/33501032020) completed successfully. Its draft is intentionally partial only for npm package/download observations: both returned 404 while the complete GitHub Releases observation found 0 public releases |
+| External interest and onboarding | time/user evidence open | No publication, independent adoption, or onboarding result is inferred from repository-controlled runs |
