@@ -116,7 +116,7 @@ if (status.releaseState === 'pre-release') {
   }
 } else if (status.releaseState === 'published') {
   const escapedPackage = status.packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const escapedVersion = status.packageVersion.replace(/\./g, '\\.');
+  const escapedVersion = status.packageVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (const homepage of [english, chinese]) {
     if (homepage.includes('Evaluate from source (pre-release)')) {
       fail('published homepage still contains the pre-release evaluation block');
