@@ -119,8 +119,14 @@ describe('pull-request trust boundary', () => {
     expect(targetWorkflows).toEqual(['release-readiness.yml']);
     const trustedGate = workflow('release-readiness.yml');
     expect(trustedGate.permissions).toEqual({ contents: 'read' });
+    const trustedCheckout = allSteps(trustedGate).find((step) =>
+      step.uses?.startsWith('actions/checkout@'),
+    );
+    expect(trustedCheckout).toBeDefined();
+    expect(trustedCheckout?.with ?? {}).not.toHaveProperty('ref');
+    expect(trustedCheckout?.with).toMatchObject({ 'persist-credentials': false });
     const trustedSource = workflowSource('release-readiness.yml');
-    expect(trustedSource).toContain('github.event.pull_request.base.sha');
+    expect(trustedSource).not.toContain('github.event.pull_request.base.sha');
     expect(trustedSource).not.toContain('github.event.pull_request.head.sha');
     expect(trustedSource).not.toContain('github.event.pull_request.head.ref');
     expect(trustedSource).not.toContain('secrets.');
