@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Tom409114/scriptspect/main/docs/evidence/monthly-draft.schema.json",
+  "title": "scriptspect monthly evidence draft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "repository",
+    "package",
+    "period",
+    "collectedAt",
+    "generation",
+    "sources",
+    "ledger",
+    "review",
+    "warnings"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "scriptspect-monthly-evidence-draft/v1" },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "package": { "type": "string", "minLength": 1 },
+    "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+    "collectedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$"
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "automated", "commitSha", "workflowRunUrl"],
+      "properties": {
+        "status": { "enum": ["complete", "partial"] },
+        "automated": { "const": true },
+        "commitSha": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "workflowRunUrl": {
+          "type": ["string", "null"],
+          "pattern": "^https://github\\.com/[^/]+/[^/]+/actions/runs/[0-9]+$"
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adoption", "community", "maintenance", "quality", "impact", "aiLeverage"],
+      "properties": {
+        "adoption": { "$ref": "#/$defs/category" },
+        "community": { "$ref": "#/$defs/category" },
+        "maintenance": { "$ref": "#/$defs/category" },
+        "quality": { "$ref": "#/$defs/category" },
+        "impact": { "$ref": "#/$defs/category" },
+        "aiLeverage": { "$ref": "#/$defs/category" }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reviewer", "reviewedAt", "approvedForPublication"],
+      "properties": {
+        "state": { "const": "unreviewed" },
+        "reviewer": { "type": "null" },
+        "reviewedAt": { "type": "null" },
+        "approvedForPublication": { "const": false }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "status", "sources", "note"],
+      "properties": {
+        "value": {
+          "anyOf": [{ "type": "number" }, { "type": "string" }, { "type": "null" }]
+        },
+        "status": {
+          "enum": ["observed", "missing", "partial", "not-collected", "not-applicable"]
+        },
+        "sources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "note": { "type": "string", "minLength": 1 }
+      }
+    },
+    "category": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewState", "reviewer", "reviewedAt", "metrics"],
+      "properties": {
+        "reviewState": { "const": "unreviewed" },
+        "reviewer": { "type": "null" },
+        "reviewedAt": { "type": "null" },
+        "metrics": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/metric" }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "provider",
+        "method",
+        "url",
+        "query",
+        "completeness",
+        "httpStatus",
+        "response",
+        "note"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "provider": { "enum": ["github", "npm"] },
+        "method": { "const": "GET" },
+        "url": { "type": "string", "pattern": "^https://" },
+        "query": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "completeness": { "enum": ["complete", "partial", "missing"] },
+        "httpStatus": {
+          "type": ["integer", "null"],
+          "minimum": 100,
+          "maximum": 599
+        },
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sha256", "byteLength", "jsonType", "topLevelKeys", "recordCount"],
+          "properties": {
+            "sha256": {
+              "type": ["string", "null"],
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "byteLength": { "type": ["integer", "null"], "minimum": 0 },
+            "jsonType": { "enum": ["object", "array", null] },
+            "topLevelKeys": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string" }
+            },
+            "recordCount": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        "note": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@ on:
         description: How many popular JS/TS repositories to sample
         required: false
         default: '100'
+        type: number
   schedule:
     - cron: '17 3 1 * *'
 
@@ -16,9 +17,11 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
@@ -30,11 +33,12 @@ jobs:
       - name: Collect the ranked repository candidate snapshot
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: pnpm exec tsx tools/corpus-candidates.ts repository-candidates.json
+          REPO_COUNT: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.repo-count) || '100' }}
+        run: pnpm exec tsx tools/corpus-candidates.ts repository-candidates.json "$REPO_COUNT"
       - name: Resolve the exact root-eligible repository sample
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          REPO_COUNT: ${{ inputs.repo-count || '100' }}
+          REPO_COUNT: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.repo-count) || '100' }}
         run: pnpm exec tsx tools/corpus-resolve.ts repository-candidates.json repos.txt repository-sample.json "$REPO_COUNT"
       - name: Scan scripts without writing to sampled repositories
         env:

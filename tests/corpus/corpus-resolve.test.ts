@@ -86,6 +86,69 @@ function candidateSnapshot(): string {
   )}\n`;
 }
 
+function thousandCandidateSnapshot(): string {
+  const strata = (['typescript', 'javascript'] as const).map((id) => {
+    const pages = Array.from({ length: 5 }, (_, index) => ({
+      page: index + 1,
+      itemCount: 100,
+      responseSha256: (id === 'typescript' ? 'e' : 'f').repeat(64),
+    }));
+    const responseSha256 = createHash('sha256')
+      .update(
+        pages.map((page) => `${page.page}:${page.itemCount}:${page.responseSha256}`).join('\n'),
+      )
+      .digest('hex');
+    return {
+      id,
+      query: `is:public language:${id} stars:>${id === 'typescript' ? '2000' : '5000'}`,
+      sort: 'stars',
+      order: 'desc',
+      perPage: 100,
+      totalCount: 500,
+      responseSha256,
+      pages,
+      candidates: Array.from({ length: 500 }, (_, index) => ({
+        rank: index + 1,
+        repository: `${id}/project-${String(index + 1).padStart(4, '0')}`,
+        stars: 10_000 - index,
+      })),
+    };
+  });
+  const orderedCandidates = Array.from({ length: 500 }, (_, index) =>
+    strata.map((stratum) => ({
+      position: index * 2 + (stratum.id === 'typescript' ? 1 : 2),
+      stratum: stratum.id,
+      rank: index + 1,
+      repository: `${stratum.id}/project-${String(index + 1).padStart(4, '0')}`,
+    })),
+  ).flat();
+  return `${JSON.stringify(
+    {
+      schemaVersion: 2,
+      status: 'complete',
+      method: 'popularity-strata-round-robin-v1',
+      candidateTargetPerStratum: 500,
+      api: {
+        transport: 'github-search-rest-v1',
+        perPage: 100,
+        resultCeiling: 1000,
+        requests: 10,
+        rateLimit: {
+          limit: 30,
+          remaining: 20,
+          reset: 1788220800,
+          used: 10,
+          resource: 'search',
+        },
+      },
+      strata,
+      orderedCandidates,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 function candidateApi(): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
     expect(String(input)).toBe('https://api.github.com/graphql');
@@ -226,6 +289,90 @@ it('interleaves popularity strata, replaces rootless candidates, and hashes the 
       },
     ],
   });
+});
+
+it('resolves an exact 1000-repository sample in deterministic GraphQL batches', async () => {
+  const directory = temporaryDirectory();
+  const candidateFile = join(directory, 'repository-candidates.json');
+  const outputFile = join(directory, 'repos.txt');
+  const evidenceFile = join(directory, 'repository-sample.json');
+  writeFileSync(candidateFile, thousandCandidateSnapshot(), 'utf8');
+  let requests = 0;
+
+  const fetchImpl = (async (_input: string | URL | Request, init?: RequestInit) => {
+    requests += 1;
+    const body = JSON.parse(String(init?.body)) as { query: string };
+    expect(body.query).toMatch(/^query CorpusEligibility/);
+    expect(body.query).not.toContain('mutation');
+    const repositories = [
+      ...body.query.matchAll(/r(\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\)/g),
+    ];
+    expect(repositories).toHaveLength(20);
+    const data: Record<string, unknown> = {};
+    for (const [, alias, owner, name] of repositories) {
+      if (alias === undefined || owner === undefined || name === undefined) {
+        throw new Error('GraphQL query fixture was incomplete');
+      }
+      const ordinal = Number(name.slice('project-'.length));
+      const globalOrdinal = (owner === 'typescript' ? 0 : 500) + ordinal;
+      const commit = globalOrdinal.toString(16).padStart(40, '0');
+      const blob = (globalOrdinal + 2_000).toString(16).padStart(40, '0');
+      data[`r${alias}`] = {
+        nameWithOwner: `${owner}/${name}`,
+        defaultBranchRef: {
+          name: 'main',
+          target: {
+            __typename: 'Commit',
+            oid: commit,
+            file: {
+              name: 'package.json',
+              mode: 33188,
+              type: 'blob',
+              oid: blob,
+              object: { __typename: 'Blob', oid: blob, byteSize: 42, isBinary: false },
+            },
+          },
+        },
+      };
+    }
+    data.rateLimit = {
+      cost: 1,
+      limit: 5000,
+      remaining: 5000 - requests,
+      used: requests,
+      resetAt: '2026-09-01T01:00:00Z',
+    };
+    return Response.json({ data });
+  }) as typeof fetch;
+
+  await (await resolver())({
+    candidateFile,
+    outputFile,
+    evidenceFile,
+    requested: 1000,
+    token: 'read-only-test-token',
+    fetchImpl,
+  });
+
+  const locators = readFileSync(outputFile, 'utf8').trim().split('\n');
+  const evidence = JSON.parse(readFileSync(evidenceFile, 'utf8')) as {
+    requested: number;
+    actual: number;
+    candidatesConsidered: number;
+    api: { requests: number; cost: number; rateLimit: { remaining: number } };
+    selected: unknown[];
+  };
+  expect(locators).toHaveLength(1000);
+  expect(locators[0]).toMatch(/^typescript\/project-0001@[a-f0-9]{40}$/);
+  expect(locators[1]).toMatch(/^javascript\/project-0001@[a-f0-9]{40}$/);
+  expect(evidence).toMatchObject({
+    requested: 1000,
+    actual: 1000,
+    candidatesConsidered: 1000,
+    api: { requests: 50, cost: 50, rateLimit: { remaining: 4950 } },
+  });
+  expect(evidence.selected).toHaveLength(1000);
+  expect(requests).toBe(50);
 });
 
 it('hard-fails a rate exhaustion and persists non-secret response metadata', async () => {

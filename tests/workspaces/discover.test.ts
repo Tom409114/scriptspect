@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseConfig } from '../../src/config/load';
 import type { PackageUnit } from '../../src/core/analyze';
 import { AnalyzeError, analyze } from '../../src/core/analyze';
@@ -11,6 +11,7 @@ import {
   visibleWorkspaceBins,
   workspaceBinNames,
 } from '../../src/workspaces/discover';
+import { workspaceGlobEngine } from '../../src/workspaces/glob';
 import { npmWorkspaceGlobs } from '../../src/workspaces/npm';
 import { pnpmWorkspaceGlobs } from '../../src/workspaces/pnpm';
 
@@ -34,6 +35,21 @@ function makeProject(files: Record<string, string>): string {
 
 const itWithFileSymlinks = process.platform === 'win32' ? it.skip : it;
 
+const UNSAFE_WORKSPACE_GLOBS = [
+  ['parent traversal', '../outside/*'],
+  ['nested parent traversal', 'packages/../../outside/*'],
+  ['POSIX absolute path', '/outside/*'],
+  ['Windows drive path', 'C:/outside/*'],
+  ['Windows drive-relative path', 'C:outside/*'],
+  ['Windows UNC path', String.raw`\\server\share\*`],
+  ['slash-form UNC path', '//server/share/*'],
+  ['negated traversal', '!../outside/**'],
+  ['brace-hidden traversal', 'packages/{safe,../../outside/**}'],
+  ['brace-composed traversal', '.{.,safe}/outside/**'],
+  ['brace-hidden absolute path', '{packages/*,/outside/*}'],
+  ['brace-composed Windows drive path', 'C{:,safe}/outside/**'],
+] as const;
+
 describe('npm/Yarn/Bun workspaces field parsing', () => {
   it('accepts the array form', () => {
     expect(npmWorkspaceGlobs(['packages/*', 'tools'])).toEqual(['packages/*', 'tools']);
@@ -49,6 +65,30 @@ describe('npm/Yarn/Bun workspaces field parsing', () => {
     expect(npmWorkspaceGlobs({ packages: 'nope' })).toEqual([]);
     expect(npmWorkspaceGlobs([1, 'ok', null])).toEqual(['ok']);
   });
+
+  it.each(UNSAFE_WORKSPACE_GLOBS)(
+    'rejects %s before the pattern can reach filesystem discovery',
+    (_label, pattern) => {
+      expect(() => npmWorkspaceGlobs([pattern])).toThrow(AnalyzeError);
+      expect(() => npmWorkspaceGlobs([pattern])).toThrow(/unsafe workspace glob/i);
+    },
+  );
+
+  it('preserves safe negation and brace patterns inside the workspace root', () => {
+    expect(
+      npmWorkspaceGlobs([
+        'packages/**',
+        '!packages/legacy/**',
+        'packages/{api,web}',
+        'packages/{api,web}/src/**',
+      ]),
+    ).toEqual([
+      'packages/**',
+      '!packages/legacy/**',
+      'packages/{api,web}',
+      'packages/{api,web}/src/**',
+    ]);
+  });
 });
 
 describe('pnpm-workspace.yaml parsing', () => {
@@ -56,6 +96,46 @@ describe('pnpm-workspace.yaml parsing', () => {
     const root = makeProject({ 'pnpm-workspace.yaml': 'packages:\n  - "packages/**"\n' });
     expect(pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toEqual(['packages/**']);
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each(UNSAFE_WORKSPACE_GLOBS)(
+    'rejects %s before the pattern can reach filesystem discovery',
+    (_label, pattern) => {
+      const yamlPattern = pattern.replaceAll("'", "''");
+      const root = makeProject({
+        'pnpm-workspace.yaml': `packages:\n  - '${yamlPattern}'\n`,
+      });
+      try {
+        const file = join(root, 'pnpm-workspace.yaml');
+        expect(() => pnpmWorkspaceGlobs(file)).toThrow(AnalyzeError);
+        expect(() => pnpmWorkspaceGlobs(file)).toThrow(/unsafe workspace glob/i);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('preserves safe negation and brace patterns inside the workspace root', () => {
+    const root = makeProject({
+      'pnpm-workspace.yaml': [
+        'packages:',
+        "  - 'packages/**'",
+        "  - '!packages/legacy/**'",
+        "  - 'packages/{api,web}'",
+        "  - 'packages/{api,web}/src/**'",
+        '',
+      ].join('\n'),
+    });
+    try {
+      expect(pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toEqual([
+        'packages/**',
+        '!packages/legacy/**',
+        'packages/{api,web}',
+        'packages/{api,web}/src/**',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('returns empty when the workspace manifest does not exist', () => {
@@ -180,6 +260,78 @@ describe('workspace discovery', () => {
     rmSync(outside, { recursive: true, force: true });
   });
 
+  it.each(['packages/link/*', 'packages/link/missing/*', 'packages/{link,real}/*'])(
+    'rejects an escaping symlink in static glob base %s before fast-glob runs',
+    (pattern) => {
+      const root = makeProject({
+        'package.json': pkg('root', {}, { workspaces: [pattern] }),
+        'packages/real/child/package.json': pkg('inside'),
+      });
+      const outside = makeProject({ 'child/package.json': pkg('outside') });
+      symlinkSync(
+        outside,
+        join(root, 'packages/link'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      const globSync = vi.spyOn(workspaceGlobEngine, 'sync');
+
+      try {
+        expect(() => discoverPackages(root)).toThrow(/outside the project root|escapes/i);
+        expect(globSync).not.toHaveBeenCalled();
+      } finally {
+        globSync.mockRestore();
+        rmSync(root, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('allows a static glob base symlink that canonicalizes inside the root', () => {
+    const root = makeProject({
+      'package.json': pkg('root', {}, { workspaces: ['packages/link/*'] }),
+      'packages/real/child/package.json': pkg('inside'),
+    });
+    symlinkSync(
+      join(root, 'packages/real'),
+      join(root, 'packages/link'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    try {
+      expect(discoverPackages(root).packages.map((unit) => unit.relPath)).toEqual([
+        'package.json',
+        'packages/real/child/package.json',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps safe dynamic, negated, brace, and extglob workspace patterns', () => {
+    const root = makeProject({
+      'package.json': pkg(
+        'root',
+        {},
+        {
+          workspaces: ['packages/{api,web}/*', 'packages/@(api|web)/*', '!packages/web/legacy/*'],
+        },
+      ),
+      'packages/api/tool/package.json': pkg('api-tool'),
+      'packages/web/tool/package.json': pkg('web-tool'),
+      'packages/web/legacy/old/package.json': pkg('legacy'),
+    });
+
+    try {
+      expect(discoverPackages(root).packages.map((unit) => unit.relPath)).toEqual([
+        'package.json',
+        'packages/api/tool/package.json',
+        'packages/web/tool/package.json',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('finds root + workspace packages (npm array form)', () => {
     const root = makeProject({
       'package.json': pkg('root', {}, { workspaces: ['packages/*'] }),
@@ -193,6 +345,21 @@ describe('workspace discovery', () => {
       'packages/web/package.json',
     ]);
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('finds a package nested more than one directory below a workspace glob', () => {
+    const root = makeProject({
+      'package.json': pkg('root', {}, { workspaces: ['packages/**'] }),
+      'packages/group/tool/package.json': pkg('nested-tool'),
+    });
+    try {
+      expect(discoverPackages(root).packages.map((unit) => unit.relPath)).toEqual([
+        'package.json',
+        'packages/group/tool/package.json',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('supports the packages-object form (Yarn/Bun style)', () => {

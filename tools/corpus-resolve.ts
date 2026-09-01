@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CORPUS_SAMPLE_METHOD,
+  MAX_CORPUS_REPOSITORIES,
   type OrderedCandidate,
   parseCorpusCandidateSnapshot,
 } from './corpus-candidates';
@@ -319,9 +320,11 @@ export async function resolveCorpusSample(
   if (
     !Number.isSafeInteger(options.requested) ||
     options.requested < 1 ||
-    options.requested > 100
+    options.requested > MAX_CORPUS_REPOSITORIES
   ) {
-    throw new Error('requested repository count must be an integer from 1 through 100');
+    throw new Error(
+      `requested repository count must be an integer from 1 through ${MAX_CORPUS_REPOSITORIES}`,
+    );
   }
   const { snapshot, digest } = parseCorpusCandidateSnapshot(readFileSync(options.candidateFile));
   if (snapshot.orderedCandidates.length < options.requested) {

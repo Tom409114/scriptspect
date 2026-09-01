@@ -9,11 +9,11 @@
  */
 import { lstatSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import fg from 'fast-glob';
 import type { PackageManifest, PackageUnit } from '../core/analyze';
 import { readManifest, toPosix } from '../core/analyze';
 import { AnalyzeError } from '../core/errors';
 import { canonicalizeRoot, RootBoundaryError, resolveContainedPath } from '../core/root';
+import { assertWorkspaceGlobBasesContained, workspaceGlobEngine } from './glob';
 import { npmWorkspaceGlobs } from './npm';
 import { pnpmWorkspaceGlobs } from './pnpm';
 
@@ -52,7 +52,9 @@ export function discoverPackages(root: string): DiscoveryResult {
   const seen = new Set<string>([rootManifest]);
 
   if (globs.size > 0) {
-    const dirs = fg.sync([...globs], {
+    const patterns = [...globs];
+    assertWorkspaceGlobBasesContained(rootReal, patterns);
+    const dirs = workspaceGlobEngine.sync(patterns, {
       cwd: rootReal,
       onlyDirectories: true,
       ignore: EXCLUDED_DIRS,
@@ -62,7 +64,6 @@ export function discoverPackages(root: string): DiscoveryResult {
     });
     for (const dir of dirs.sort()) {
       const abs = resolve(rootReal, dir);
-      if (!manifestExists(join(abs, 'package.json'))) continue; // glob matched a non-package dir
       let real: string;
       try {
         real = resolveContainedPath(rootReal, abs);
@@ -75,6 +76,7 @@ export function discoverPackages(root: string): DiscoveryResult {
         continue;
       }
       const manifestFile = join(real, 'package.json');
+      if (!manifestExists(manifestFile)) continue; // glob matched a non-package dir
       const realFile = containedPath(rootReal, manifestFile, 'workspace manifest');
       if (seen.has(realFile)) continue; // dedupe (incl. symlink loops)
       seen.add(realFile);
