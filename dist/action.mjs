@@ -13245,17 +13245,20 @@ import { join } from "path";
 import { realpathSync as realpathSync2 } from "fs";
 import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2, sep as sep2 } from "path";
 var RootBoundaryError = class extends Error {
-  constructor(message) {
+  constructor(message, kind = "boundary") {
     super(message);
+    this.kind = kind;
     this.name = "RootBoundaryError";
   }
+  kind;
 };
 function canonicalizeRoot(root) {
   try {
     return realpathSync2(root);
   } catch (error) {
     throw new RootBoundaryError(
-      `cannot resolve analysis root: ${error instanceof Error ? error.message : String(error)}`
+      `cannot resolve analysis root: ${error instanceof Error ? error.message : String(error)}`,
+      "filesystem"
     );
   }
 }
@@ -13267,7 +13270,8 @@ function resolveContainedPath(root, candidate) {
     canonicalPath = realpathSync2(logicalPath);
   } catch (error) {
     throw new RootBoundaryError(
-      `cannot resolve path inside the analysis root: ${error instanceof Error ? error.message : String(error)}`
+      `cannot resolve path inside the analysis root: ${error instanceof Error ? error.message : String(error)}`,
+      "filesystem"
     );
   }
   const rel = relative2(canonicalRoot2, canonicalPath);
@@ -15962,14 +15966,22 @@ function isIgnored(config, packagePath, scriptName, ruleId) {
 }
 
 // src/core/analyze.ts
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
 import { dirname, join as join3, sep as sep3 } from "path";
-import { TextDecoder } from "util";
+import { TextDecoder as TextDecoder2 } from "util";
 
 // src/workspaces/discover.ts
 var import_fast_glob = __toESM(require_out4(), 1);
-import { existsSync as existsSync2 } from "fs";
+import { lstatSync } from "fs";
 import { join as join2, relative as relative3, resolve as resolve3 } from "path";
+
+// src/core/errors.ts
+var AnalyzeError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AnalyzeError";
+  }
+};
 
 // src/workspaces/npm.ts
 function npmWorkspaceGlobs(workspaces) {
@@ -15989,23 +16001,49 @@ function npmWorkspaceGlobs(workspaces) {
 // src/workspaces/pnpm.ts
 var import_yaml = __toESM(require_dist(), 1);
 import { readFileSync as readFileSync2 } from "fs";
+import { TextDecoder } from "util";
 function pnpmWorkspaceGlobs(file) {
+  let bytes;
+  try {
+    bytes = readFileSync2(file);
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return [];
+    throw new AnalyzeError(`${file}: cannot be read (${errorMessage(error)})`);
+  }
   let text;
   try {
-    text = readFileSync2(file, "utf8");
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return [];
+    throw new AnalyzeError(`${file}: workspace manifest must be valid UTF-8`);
   }
   let doc;
   try {
     doc = (0, import_yaml.parse)(text);
-  } catch {
-    return [];
+  } catch (error) {
+    throw new AnalyzeError(`${file}: invalid YAML (${errorMessage(error)})`);
   }
-  if (typeof doc !== "object" || doc === null) return [];
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
+    throw new AnalyzeError(`${file}: workspace manifest root must be an object`);
+  }
+  if (!isPlainRecord(doc)) {
+    throw new AnalyzeError(`${file}: workspace manifest root must be a plain mapping object`);
+  }
   const packages = doc.packages;
-  if (!Array.isArray(packages)) return [];
-  return packages.filter((w) => typeof w === "string" && w.trim() !== "");
+  if (packages === void 0) return [];
+  if (!Array.isArray(packages) || packages.some((workspace) => typeof workspace !== "string" || workspace.trim() === "")) {
+    throw new AnalyzeError(`${file}: "packages" must be an array of non-empty strings`);
+  }
+  return packages;
+}
+function isErrno(error, code) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function isPlainRecord(value) {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 // src/workspaces/discover.ts
@@ -16025,7 +16063,7 @@ function discoverPackages(root) {
   const globs = /* @__PURE__ */ new Set();
   for (const g of npmWorkspaceGlobs(rootUnit.manifest.workspaces)) globs.add(g);
   const logicalPnpmWorkspace = join2(rootReal, "pnpm-workspace.yaml");
-  if (existsSync2(logicalPnpmWorkspace)) {
+  if (manifestExists(logicalPnpmWorkspace)) {
     const pnpmWorkspace = containedPath(rootReal, logicalPnpmWorkspace, "pnpm workspace manifest");
     for (const g of pnpmWorkspaceGlobs(pnpmWorkspace)) globs.add(g);
   }
@@ -16042,12 +16080,15 @@ function discoverPackages(root) {
     });
     for (const dir of dirs.sort()) {
       const abs = resolve3(rootReal, dir);
-      if (!existsSync2(join2(abs, "package.json"))) continue;
+      if (!manifestExists(join2(abs, "package.json"))) continue;
       let real;
       try {
         real = resolveContainedPath(rootReal, abs);
       } catch (error) {
         if (!(error instanceof RootBoundaryError)) throw error;
+        if (error.kind === "filesystem") {
+          throw new AnalyzeError(`${abs}: ${error.message}`);
+        }
         notes.push(`skipped ${toPosix(relative3(rootReal, abs))}: path escapes the project root`);
         continue;
       }
@@ -16077,10 +16118,27 @@ function containedPath(root, candidate, label) {
     return resolveContainedPath(root, candidate);
   } catch (error) {
     if (error instanceof RootBoundaryError) {
+      if (error.kind === "filesystem") {
+        throw new AnalyzeError(`${candidate}: ${error.message}`);
+      }
       throw new AnalyzeError(`${label} is outside the project root`);
     }
     throw error;
   }
+}
+function manifestExists(file) {
+  try {
+    lstatSync(file);
+    return true;
+  } catch (error) {
+    if (isErrno2(error, "ENOENT")) return false;
+    throw new AnalyzeError(
+      `${file}: cannot inspect manifest (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+}
+function isErrno2(error, code) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 function manifestBinNames(manifest) {
   const names = /* @__PURE__ */ new Set();
@@ -16227,12 +16285,6 @@ function assertUnambiguousRootScripts(text) {
 }
 
 // src/core/analyze.ts
-var AnalyzeError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "AnalyzeError";
-  }
-};
 function dependencyNames(manifest) {
   const names = /* @__PURE__ */ new Set();
   for (const block of [manifest.dependencies, manifest.devDependencies]) {
@@ -16254,7 +16306,7 @@ function readManifest(file) {
   const hasBom = bytes.length >= 3 && bytes[0] === 239 && bytes[1] === 187 && bytes[2] === 191;
   let text;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(hasBom ? bytes.subarray(3) : bytes);
+    text = new TextDecoder2("utf-8", { fatal: true }).decode(hasBom ? bytes.subarray(3) : bytes);
   } catch {
     throw new AnalyzeError(`${file}: package.json must be valid UTF-8`);
   }
@@ -16291,7 +16343,7 @@ function readManifest(file) {
 function resolveRoot(startDir) {
   let dir = startDir;
   for (; ; ) {
-    if (existsSync3(join3(dir, "package.json"))) return dir;
+    if (existsSync2(join3(dir, "package.json"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) {
       throw new AnalyzeError(`no package.json found in ${startDir} or any parent directory`);

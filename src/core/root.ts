@@ -2,7 +2,10 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 export class RootBoundaryError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly kind: 'boundary' | 'filesystem' = 'boundary',
+  ) {
     super(message);
     this.name = 'RootBoundaryError';
   }
@@ -14,6 +17,7 @@ export function canonicalizeRoot(root: string): string {
   } catch (error) {
     throw new RootBoundaryError(
       `cannot resolve analysis root: ${error instanceof Error ? error.message : String(error)}`,
+      'filesystem',
     );
   }
 }
@@ -29,6 +33,7 @@ export function resolveContainedPath(root: string, candidate: string): string {
       `cannot resolve path inside the analysis root: ${
         error instanceof Error ? error.message : String(error)
       }`,
+      'filesystem',
     );
   }
 

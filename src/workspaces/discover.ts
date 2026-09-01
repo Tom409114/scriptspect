@@ -7,11 +7,12 @@
  * - symlinked paths are canonicalized; loops terminate; results are deduped
  * - every discovered directory must stay inside the analysis root
  */
-import { existsSync } from 'node:fs';
+import { lstatSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import fg from 'fast-glob';
 import type { PackageManifest, PackageUnit } from '../core/analyze';
-import { AnalyzeError, readManifest, toPosix } from '../core/analyze';
+import { readManifest, toPosix } from '../core/analyze';
+import { AnalyzeError } from '../core/errors';
 import { canonicalizeRoot, RootBoundaryError, resolveContainedPath } from '../core/root';
 import { npmWorkspaceGlobs } from './npm';
 import { pnpmWorkspaceGlobs } from './pnpm';
@@ -42,7 +43,7 @@ export function discoverPackages(root: string): DiscoveryResult {
   const globs = new Set<string>();
   for (const g of npmWorkspaceGlobs(rootUnit.manifest.workspaces)) globs.add(g);
   const logicalPnpmWorkspace = join(rootReal, 'pnpm-workspace.yaml');
-  if (existsSync(logicalPnpmWorkspace)) {
+  if (manifestExists(logicalPnpmWorkspace)) {
     const pnpmWorkspace = containedPath(rootReal, logicalPnpmWorkspace, 'pnpm workspace manifest');
     for (const g of pnpmWorkspaceGlobs(pnpmWorkspace)) globs.add(g);
   }
@@ -61,12 +62,15 @@ export function discoverPackages(root: string): DiscoveryResult {
     });
     for (const dir of dirs.sort()) {
       const abs = resolve(rootReal, dir);
-      if (!existsSync(join(abs, 'package.json'))) continue; // glob matched a non-package dir
+      if (!manifestExists(join(abs, 'package.json'))) continue; // glob matched a non-package dir
       let real: string;
       try {
         real = resolveContainedPath(rootReal, abs);
       } catch (error) {
         if (!(error instanceof RootBoundaryError)) throw error;
+        if (error.kind === 'filesystem') {
+          throw new AnalyzeError(`${abs}: ${error.message}`);
+        }
         notes.push(`skipped ${toPosix(relative(rootReal, abs))}: path escapes the project root`);
         continue;
       }
@@ -105,10 +109,34 @@ function containedPath(root: string, candidate: string, label: string): string {
     return resolveContainedPath(root, candidate);
   } catch (error) {
     if (error instanceof RootBoundaryError) {
+      if (error.kind === 'filesystem') {
+        throw new AnalyzeError(`${candidate}: ${error.message}`);
+      }
       throw new AnalyzeError(`${label} is outside the project root`);
     }
     throw error;
   }
+}
+
+function manifestExists(file: string): boolean {
+  try {
+    lstatSync(file);
+    return true;
+  } catch (error) {
+    if (isErrno(error, 'ENOENT')) return false;
+    throw new AnalyzeError(
+      `${file}: cannot inspect manifest (${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+}
+
+function isErrno(error: unknown, code: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === code
+  );
 }
 
 /** Bin names a manifest actually exposes through its `bin` declaration. */

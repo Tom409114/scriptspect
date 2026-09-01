@@ -62,6 +62,17 @@ describe('CLI: default command and exit codes', () => {
     }
   });
 
+  it('exit 2 when pnpm-workspace.yaml is invalid instead of reporting a clean scan', async () => {
+    project({ build: 'node build.js' });
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages: [1, 2\n');
+
+    const code = await runCli([dir], io);
+
+    expect(code).toBe(2);
+    expect(outLines).toEqual([]);
+    expect(errLines.join('\n')).toMatch(/pnpm-workspace\.yaml.*invalid YAML/i);
+  });
+
   it('check subcommand equals the default command', async () => {
     project({ clean: 'rm -rf dist' });
     expect(await runCli(['check', dir], io)).toBe(1);

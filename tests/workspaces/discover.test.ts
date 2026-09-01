@@ -58,10 +58,81 @@ describe('pnpm-workspace.yaml parsing', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('returns empty for missing or invalid files', () => {
-    expect(pnpmWorkspaceGlobs(join(tmpdir(), 'definitely-missing.yaml'))).toEqual([]);
-    const root = makeProject({ 'pnpm-workspace.yaml': 'packages: [1, 2\n' });
+  it('returns empty when the workspace manifest does not exist', () => {
+    const root = makeProject({});
     expect(pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toEqual([]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects invalid YAML instead of silently dropping workspace packages', () => {
+    const root = makeProject({ 'pnpm-workspace.yaml': 'packages: [1, 2\n' });
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(AnalyzeError);
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(
+      /pnpm-workspace\.yaml.*invalid YAML/i,
+    );
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects malformed UTF-8 bytes instead of decoding replacement characters', () => {
+    const root = makeProject({});
+    const file = join(root, 'pnpm-workspace.yaml');
+    writeFileSync(
+      file,
+      Buffer.concat([Buffer.from('packag'), Buffer.from([0xff]), Buffer.from('es: []\n')]),
+    );
+
+    expect(() => pnpmWorkspaceGlobs(file)).toThrow(AnalyzeError);
+    expect(() => pnpmWorkspaceGlobs(file)).toThrow(/pnpm-workspace\.yaml.*must be valid UTF-8/i);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each(['[]\n', 'workspace\n', ''])('rejects a non-object workspace manifest root', (yaml) => {
+    const root = makeProject({ 'pnpm-workspace.yaml': yaml });
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(AnalyzeError);
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(
+      /pnpm-workspace\.yaml.*workspace manifest root must be an object/i,
+    );
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['binary', '!!binary SGVsbG8=\n'],
+    ['ordered map', '!!omap\n  - packages: []\n'],
+    ['set', '!!set\n  ? packages\n'],
+  ])('rejects a tagged %s root instead of treating it as an empty workspace', (_label, yaml) => {
+    const root = makeProject({ 'pnpm-workspace.yaml': yaml });
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(AnalyzeError);
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(
+      /pnpm-workspace\.yaml.*root must be a plain mapping object/i,
+    );
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('allows a valid pnpm settings file with no packages field', () => {
+    const root = makeProject({ 'pnpm-workspace.yaml': 'catalog:\n  react: ^19.0.0\n' });
+    expect(pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toEqual([]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['a non-array packages field', 'packages: "packages/*"\n'],
+    ['a non-string packages entry', 'packages:\n  - "packages/*"\n  - 42\n'],
+  ])('rejects %s', (_label, yaml) => {
+    const root = makeProject({ 'pnpm-workspace.yaml': yaml });
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(AnalyzeError);
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(
+      /pnpm-workspace\.yaml.*"packages" must be an array of non-empty strings/i,
+    );
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects an existing workspace manifest that cannot be read as a file', () => {
+    const root = makeProject({});
+    mkdirSync(join(root, 'pnpm-workspace.yaml'));
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(AnalyzeError);
+    expect(() => pnpmWorkspaceGlobs(join(root, 'pnpm-workspace.yaml'))).toThrow(
+      /pnpm-workspace\.yaml.*cannot be read/i,
+    );
     rmSync(root, { recursive: true, force: true });
   });
 });
