@@ -66,19 +66,21 @@ To replay a run, place its `repository-candidates.json`,
 `repository-sample.json`, and `repos.txt` beside the repository checkout, set
 `GITHUB_TOKEN` externally to a read-only public-repository token, and run the
 command recorded in `corpus-run.json`. The command checks out the exact source
-commit and fails unless HEAD, the index, and every tracked file are clean. Apart
-from the three named evidence inputs, any nonignored untracked file is also a
-failure. These Git checks run both before and after the frozen-lockfile install,
-before the scanner starts. Replay requires the exact recorded Node version,
-platform, and architecture; it restores the recorded `RUNNER_OS` value or
-explicitly unsets it. It also binds the complete canonical limits JSON, original
-generation timestamp, sample method and seed, candidate snapshot, sample
-evidence, repository list, and a new deterministic output directory to the
-scanner's actual environment variables and positional arguments. The command
-refuses to reuse that output directory. Only evidence basenames and a
-token-variable reference are recorded; neither the credential nor a local
-absolute path is persisted. A run recorded on another platform must therefore
-be replayed in a matching environment with the recorded Node patch version.
+commit and fails unless HEAD, the index, and every tracked file are clean. Every
+tracked-index tag other than ordinary `H` is rejected, including Git's
+`assume-unchanged` and `skip-worktree` hiding flags. Apart from the three named
+evidence inputs, any nonignored untracked file is also a failure. These Git
+checks run both before and after the frozen-lockfile install, before the scanner
+starts. Replay requires the exact recorded Node version, platform, and
+architecture; it restores the recorded `RUNNER_OS` value or explicitly unsets
+it. It also binds the complete canonical limits JSON, original generation
+timestamp, sample method and seed, candidate snapshot, sample evidence,
+repository list, and a new deterministic output directory to the scanner's
+actual environment variables and positional arguments. The command refuses to
+reuse that output directory. Only evidence basenames and a token-variable
+reference are recorded; neither the credential nor a local absolute path is
+persisted. A run recorded on another platform must therefore be replayed in a
+matching environment with the recorded Node patch version.
 
 The run fails if any repository fails, while still leaving `corpus-run.json`
 for diagnosis. Truncation is visible and excluded rather than silently treated

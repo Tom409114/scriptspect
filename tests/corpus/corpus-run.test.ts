@@ -845,6 +845,8 @@ describe('immutable corpus run evidence', () => {
     const replayOutput = `corpus-reproduction-${SOURCE_COMMIT}`;
     const cleanCheckout = [
       `test "$(git rev-parse --verify HEAD)" = '${SOURCE_COMMIT}'`,
+      'git ls-files -v >/dev/null',
+      'git ls-files -v | while IFS= read -r entry; do case "$entry" in H\\ *) ;; *) exit 1 ;; esac; done',
       'git diff --quiet --',
       'git diff --cached --quiet --',
       `test -z "$(git status --porcelain=v1 --untracked-files=all -- '.' ':(top,literal,exclude)repos copy.txt' ':(top,literal,exclude)repository candidate'"'"'s.json' ':(top,literal,exclude)repository sample;ignored.json')"`,
@@ -906,6 +908,23 @@ describe('immutable corpus run evidence', () => {
       expect(result.status, `${testCase.name}: ${result.stderr}`).not.toBe(0);
       expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
     }
+  });
+
+  it.each([
+    ['assume-unchanged', '--assume-unchanged'],
+    ['skip-worktree', '--skip-worktree'],
+  ])('fails closed when %s hides a dirty tracked scanner', async (_name, indexFlag) => {
+    const replay = await replayFixture();
+    git(replay.directory, 'update-index', indexFlag, '--', 'tools/corpus-scan.ts');
+    writeFileSync(
+      join(replay.directory, 'tools', 'corpus-scan.ts'),
+      'export const hiddenDirtyScanner = true;\n',
+    );
+
+    const result = executeReplay(replay.directory, replay.reproduction);
+
+    expect(result.status, String(result.stderr)).not.toBe(0);
+    expect(existsSync(join(replay.directory, 'replay-observation.txt'))).toBe(false);
   });
 
   it('fails closed before scanning under a different Node runtime', async () => {

@@ -208,6 +208,8 @@ function reproductionCommand(options: {
     .join(' ');
   const cleanCheckout = [
     `test "$(git rev-parse --verify HEAD)" = ${posixShellQuote(options.sourceCommit)}`,
+    'git ls-files -v >/dev/null',
+    'git ls-files -v | while IFS= read -r entry; do case "$entry" in H\\ *) ;; *) exit 1 ;; esac; done',
     'git diff --quiet --',
     'git diff --cached --quiet --',
     `test -z "$(git status --porcelain=v1 --untracked-files=all -- ${cleanStatusPathspec})"`,
