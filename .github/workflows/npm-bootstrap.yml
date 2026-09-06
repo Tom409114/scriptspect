@@ -695,6 +695,7 @@ jobs:
           test -s "$RUNNER_TEMP/bootstrap/registry-action-summary"
 
           jq -n \
+            --slurpfile registryState "$RUNNER_TEMP/bootstrap/verified-registry-state.json" \
             --arg version "$VERSION" \
             --arg sourceCommit "$SOURCE_SHA" \
             --arg mode "$MODE" \
@@ -710,7 +711,7 @@ jobs:
               registryIntegrity: $registryIntegrity,
               comparatorAlgorithm: "scriptspect-canonical-tree/v1",
               comparatorAlgorithmDigest: $comparatorAlgorithmDigest,
-              latestUnchanged: true,
+              latestUnchanged: ($registryState[0].latestBefore == $registryState[0].latestAfter),
               workflowRunUrl: $workflowRunUrl,
               nextRequiredActions: [
                 "Review and commit this file as docs/release/npm-integrity-contract.json with reviewedAt added",
@@ -718,7 +719,9 @@ jobs:
                 "Revoke the granular npm token and remove NPM_BOOTSTRAP_TOKEN",
                 "Set NPM_BOOTSTRAP_ENABLED to false before formal publication"
               ]
-            }' > "$RUNNER_TEMP/bootstrap/bootstrap-integrity-contract.json"
+            } + (if $registryState[0].initialLatestAssignment then
+              {initialLatestAssignment: $registryState[0].initialLatestAssignment}
+              else {} end)' > "$RUNNER_TEMP/bootstrap/bootstrap-integrity-contract.json"
       - name: Retain bootstrap evidence for maintainer review
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

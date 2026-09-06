@@ -144,7 +144,13 @@ if (options.before === undefined) {
   }
   const latestBefore = before.latest ?? null;
   const latestAfter = after.latest ?? null;
-  if (latestBefore !== latestAfter) fail('latest dist-tag changed during bootstrap');
+  const initialLatestAssignment =
+    Object.keys(before).length === 0 &&
+    Object.keys(after).length === 2 &&
+    latestAfter === options.version;
+  if (latestBefore !== latestAfter && !initialLatestAssignment) {
+    fail('latest dist-tag changed during bootstrap');
+  }
 
   console.log(
     JSON.stringify({
@@ -153,6 +159,7 @@ if (options.before === undefined) {
       latestBefore,
       latestAfter,
       bootstrap: after.bootstrap,
+      ...(initialLatestAssignment ? { initialLatestAssignment: { before, after } } : {}),
     }),
   );
 }

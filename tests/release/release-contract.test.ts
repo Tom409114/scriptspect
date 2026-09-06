@@ -94,6 +94,42 @@ function integrityContract(mode: IntegrityMode, comparatorDigest = canonicalTree
   };
 }
 
+it('verifies initial registry latest assignment without claiming latest stayed unchanged', () => {
+  const { candidate, exactRegistry } = integrityTarballs('initial-latest');
+  const contract = {
+    ...integrityContract('exact-bytes'),
+    latestUnchanged: false,
+    initialLatestAssignment: {
+      before: {},
+      after: {
+        bootstrap: '0.0.0-bootstrap.0',
+        latest: '0.0.0-bootstrap.0',
+      },
+    },
+  };
+  const accepted = runIntegrityVerifier(contract, candidate, exactRegistry);
+  expect(accepted.status, accepted.stderr).toBe(0);
+  for (const invalid of [
+    { ...contract, initialLatestAssignment: undefined },
+    {
+      ...contract,
+      initialLatestAssignment: {
+        before: { latest: '1.0.0' },
+        after: contract.initialLatestAssignment.after,
+      },
+    },
+    {
+      ...contract,
+      initialLatestAssignment: {
+        before: {},
+        after: { bootstrap: '0.0.0-bootstrap.0', latest: '0.0.0-bootstrap.1' },
+      },
+    },
+    { ...contract, latestUnchanged: true },
+  ])
+    expect(runIntegrityVerifier(invalid, candidate, exactRegistry).status).not.toBe(0);
+});
+
 function npmSri(path: string): string {
   return `sha512-${createHash('sha512').update(readFileSync(path)).digest('base64')}`;
 }
