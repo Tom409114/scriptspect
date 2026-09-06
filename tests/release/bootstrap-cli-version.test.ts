@@ -22,7 +22,7 @@ it('bootstrap version gates accept the real CLI banner and reject a different ve
   for (const assertion of assertions) {
     const command = assertion.replace(
       '$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs',
-      resolve('dist/cli.mjs').replaceAll('\\', '/'),
+      '$CLI_PATH',
     );
     for (const [expectedVersion, expectedStatus] of [
       [version, 0],
@@ -30,7 +30,11 @@ it('bootstrap version gates accept the real CLI banner and reject a different ve
     ] as const) {
       const result = spawnSync(bash, ['-c', command], {
         encoding: 'utf8',
-        env: { ...process.env, VERSION: expectedVersion },
+        env: {
+          ...process.env,
+          VERSION: expectedVersion,
+          CLI_PATH: resolve('dist/cli.mjs').replaceAll('\\', '/'),
+        },
       });
       expect(result.error).toBeUndefined();
       expect(result.status, result.stderr).toBe(expectedStatus);
