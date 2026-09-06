@@ -252,7 +252,7 @@ jobs:
           mkdir -p "$INSTALL_ROOT" "$FIXTURE"
           npm init -y --prefix "$INSTALL_ROOT" >/dev/null
           npm install --prefix "$INSTALL_ROOT" "$TARBALL" --ignore-scripts
-          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "$VERSION" ]]
+          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "scriptspect/$VERSION "* ]]
           test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/config.schema.json"
           test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/output.schema.json"
           test -f "$INSTALL_ROOT/node_modules/scriptspect/dist/action.mjs"
@@ -584,7 +584,7 @@ jobs:
           mkdir -p "$INSTALL_ROOT" "$FIXTURE"
           npm init -y --prefix "$INSTALL_ROOT" >/dev/null
           npm install --prefix "$INSTALL_ROOT" "$TARBALL" --ignore-scripts
-          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "$VERSION" ]]
+          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "scriptspect/$VERSION "* ]]
           test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/config.schema.json"
           test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/output.schema.json"
           test -f "$INSTALL_ROOT/node_modules/scriptspect/dist/action.mjs"
@@ -677,7 +677,7 @@ jobs:
           npm init -y --prefix "$INSTALL_ROOT" >/dev/null
           npm install --prefix "$INSTALL_ROOT" "scriptspect@$VERSION" --ignore-scripts
           npm audit signatures --prefix "$INSTALL_ROOT" --json > "$RUNNER_TEMP/bootstrap/audit-signatures.json"
-          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "$VERSION" ]]
+          [[ "$(node "$INSTALL_ROOT/node_modules/scriptspect/dist/cli.mjs" --version)" == "scriptspect/$VERSION "* ]]
           test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/config.schema.json"
           test -f "$INSTALL_ROOT/node_modules/scriptspect/schema/output.schema.json"
           test -f "$INSTALL_ROOT/node_modules/scriptspect/dist/action.mjs"
