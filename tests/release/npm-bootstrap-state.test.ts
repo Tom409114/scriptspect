@@ -255,6 +255,25 @@ describe('npm bootstrap registry state verifier', () => {
     }
   });
 
+  it('accepts only the exact initial latest assignment observed on npm', () => {
+    const result = verify({
+      owners: ['Tom409114 <tom@example.test>'],
+      before: {},
+      after: { bootstrap: '0.0.0-bootstrap.0', latest: '0.0.0-bootstrap.0' },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).latestAfter).toBe('0.0.0-bootstrap.0');
+    for (const before of [{ latest: '1.2.3' }, { next: '1.2.3' }]) {
+      expect(
+        verify({
+          owners: ['Tom409114 <tom@example.test>'],
+          before,
+          after: { bootstrap: '0.0.0-bootstrap.0', latest: '0.0.0-bootstrap.0' },
+        }).status,
+      ).not.toBe(0);
+    }
+  });
+
   it('rejects any additional maintainer after case-insensitive deduplication', () => {
     const result = verify({
       owners: [

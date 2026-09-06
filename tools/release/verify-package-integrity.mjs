@@ -38,7 +38,7 @@ export function verifyIntegrityContract(value) {
       'workflowRunUrl',
       'reviewedAt',
     ],
-    ['nextRequiredActions'],
+    ['nextRequiredActions', 'initialLatestAssignment'],
   );
   if (contract.schemaVersion !== 1) {
     throw new ReleaseToolError('npm integrity contract schemaVersion must be 1');
@@ -64,7 +64,25 @@ export function verifyIntegrityContract(value) {
       'npm integrity contract comparator algorithm digest does not match the executable comparator',
     );
   }
-  if (contract.latestUnchanged !== true) {
+  if (contract.initialLatestAssignment !== undefined) {
+    const initial = requireExactKeys(
+      contract.initialLatestAssignment,
+      'initial latest assignment',
+      ['before', 'after'],
+    );
+    requireExactKeys(initial.before, 'initial dist-tags before', []);
+    const after = requireExactKeys(initial.after, 'initial dist-tags after', [
+      'bootstrap',
+      'latest',
+    ]);
+    if (
+      contract.latestUnchanged !== false ||
+      after.bootstrap !== contract.bootstrapVersion ||
+      after.latest !== contract.bootstrapVersion
+    ) {
+      throw new ReleaseToolError('invalid initial latest assignment');
+    }
+  } else if (contract.latestUnchanged !== true) {
     throw new ReleaseToolError('npm integrity contract latestUnchanged must be true');
   }
   if (contract.nextRequiredActions !== undefined) {
@@ -101,7 +119,12 @@ export function verifyIntegrityContract(value) {
       'npm integrity contract reviewedAt',
       /^[0-9]{4}-[0-9]{2}-[0-9]{2}T/u,
     ),
-    latestUnchanged: true,
+    latestUnchanged: contract.latestUnchanged,
+    ...(contract.initialLatestAssignment === undefined
+      ? {}
+      : {
+          initialLatestAssignment: contract.initialLatestAssignment,
+        }),
     ...(contract.nextRequiredActions === undefined
       ? {}
       : { nextRequiredActions: contract.nextRequiredActions }),
