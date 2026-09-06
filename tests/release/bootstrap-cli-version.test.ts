@@ -10,7 +10,7 @@ const bash =
   process.platform === 'win32'
     ? resolve(
         dirname(
-          spawnSync('where.exe', ['git'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0],
+          spawnSync('where.exe', ['git'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0] ?? '',
         ),
         '../bin/bash.exe',
       )
