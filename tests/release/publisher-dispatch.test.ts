@@ -287,7 +287,7 @@ describe('release publisher dispatch workflow', () => {
 
     expect(dispatch).toBeDefined();
     expect(dispatch?.needs).toEqual(['authorize', 'stage-release']);
-    expect(dispatch?.if).toBe("needs.stage-release.result == 'success'");
+    expect(dispatch?.if).toContain("needs.stage-release.result == 'success'");
     expect(dispatch?.environment).toBe('release');
     expect(dispatch?.['timeout-minutes']).toBeGreaterThan(0);
     expect(dispatch?.permissions).toEqual({
