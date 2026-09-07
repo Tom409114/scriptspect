@@ -1,0 +1,73 @@
+name: Finalize already-published 0.1.2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 6f439bb974b297d5a334cebe989b4b50d7483677
+          ssh-key: ${{ secrets.RELEASE_TAG_DEPLOY_KEY }}
+          persist-credentials: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify published bytes, signatures, provenance and CLI before finalizing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: Tom409114/scriptspect
+          RELEASE_SHA: 6f439bb974b297d5a334cebe989b4b50d7483677
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$RELEASE_SHA" ]]
+          [[ "$(git ls-remote origin refs/tags/v0.1.2 | cut -f1)" == "$RELEASE_SHA" ]]
+          mkdir -p "$RUNNER_TEMP/finalize-0.1.2/install"
+          cd "$RUNNER_TEMP/finalize-0.1.2"
+          gh release download v0.1.2 --pattern scriptspect-0.1.2.tgz --pattern SHA256SUMS
+          echo '09a7a71fa966849903b30b1f8a67cbee8727cc2a8a34807f96c8868990c2e14b  scriptspect-0.1.2.tgz' | sha256sum --check
+          sha256sum --check SHA256SUMS
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          const response = await fetch('https://registry.npmjs.org/scriptspect/0.1.2');
+          assert(response.ok);
+          const metadata = await response.json();
+          const tarResponse = await fetch(metadata.dist.tarball);
+          assert(tarResponse.ok);
+          const bytes = Buffer.from(await tarResponse.arrayBuffer());
+          assert(bytes.equals(readFileSync('scriptspect-0.1.2.tgz')));
+          assert.equal(metadata.dist.integrity, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
+          const attestResponse = await fetch('https://registry.npmjs.org/-/npm/v1/attestations/scriptspect@0.1.2');
+          assert(attestResponse.ok);
+          const attestations = (await attestResponse.json()).attestations.filter(a => a.predicateType === 'https://slsa.dev/provenance/v1');
+          assert.equal(attestations.length, 1);
+          const statement = JSON.parse(Buffer.from(attestations[0].bundle.dsseEnvelope.payload, 'base64'));
+          assert.deepEqual(statement.subject, [{ name: 'pkg:npm/scriptspect@0.1.2', digest: { sha512: createHash('sha512').update(bytes).digest('hex') } }]);
+          assert.deepEqual(statement.predicate.buildDefinition.externalParameters.workflow, { ref: 'refs/tags/v0.1.2', repository: 'https://github.com/Tom409114/scriptspect', path: '.github/workflows/npm-publish.yml' });
+          assert.equal(statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit, process.env.RELEASE_SHA);
+          NODE
+          cd install
+          npm init --yes >/dev/null
+          npm install --ignore-scripts --save-exact scriptspect@0.1.2
+          npm audit signatures
+          [[ "$(node node_modules/scriptspect/dist/cli.mjs --version)" == 'scriptspect/0.1.2 '* ]]
+          cd "$GITHUB_WORKSPACE"
+          # Create only: no existing tag is overwritten and both aliases move atomically.
+          git push --atomic origin "$RELEASE_SHA:refs/tags/v0" "$RELEASE_SHA:refs/tags/v0.1"
+          gh release edit v0.1.2 --draft=false --latest
+          gh release view v0.1.2 --json isDraft,url --jq 'select(.isDraft == false) | .url'
+          echo 'Published package bytes, official npm signature audit, provenance anchors, CLI and aliases verified.' >> "$GITHUB_STEP_SUMMARY"
