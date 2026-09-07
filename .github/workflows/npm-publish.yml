@@ -82,7 +82,8 @@ jobs:
     permissions:
       actions: read
       checks: write
-      contents: read
+      # GitHub hides draft releases and assets from read-only installation tokens.
+      contents: write
       id-token: write
       pull-requests: read
     outputs:

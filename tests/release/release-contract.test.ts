@@ -891,7 +891,7 @@ describe('release coordinator trust and recovery', () => {
     expect(publish).toContain('--provenance');
     expect(publish).not.toContain('NPM_TOKEN');
     expect(workflow('npm-publish.yml').jobs?.publish?.permissions).toMatchObject({
-      contents: 'read',
+      contents: 'write',
       'id-token': 'write',
       checks: 'write',
     });
