@@ -6,7 +6,7 @@ it('uses the release-scoped deploy key for both protected tag writers', () => {
   for (const [file, jobName] of [
     ['release.yml', 'stage-release'],
     ['npm-publish.yml', 'advance-aliases'],
-  ]) {
+  ] as const) {
     const workflow = parse(readFileSync(`.github/workflows/${file}`, 'utf8'));
     const job = workflow.jobs[jobName];
     expect(job.environment).toBe('release');
