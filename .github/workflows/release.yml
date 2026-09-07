@@ -400,6 +400,7 @@ jobs:
       - name: Pack once and create the versioned candidate manifest
         if: steps.recover.outputs.needs-build == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.authorize.outputs.sha }}
           VERSION: ${{ needs.authorize.outputs.version }}
           TAG: ${{ needs.authorize.outputs.tag }}
