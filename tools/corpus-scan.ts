@@ -123,11 +123,30 @@ interface RepositoryEvidence {
   commit: string;
   status: RepositoryStatus;
   manifestPaths: string[];
+  managerSignalProjections: ManagerSignalProjection[];
   truncations: string[];
   error?: string;
   failure?: GitHubFailureEvidence;
   rootOnly: Omit<CountSummary, 'repositories'>;
   workspaceFull: Omit<CountSummary, 'repositories'>;
+}
+
+type NpmManagerSignalPath = 'package-lock.json' | 'npm-shrinkwrap.json';
+
+interface ManagerSignalProjection {
+  manager: 'npm';
+  projectedPath: NpmManagerSignalPath;
+  semantics: 'presence-only-empty-regular-file-v1';
+  sourceTree: {
+    path: NpmManagerSignalPath;
+    mode: '100644' | '100755';
+    blobOid: string;
+    bytes: number;
+  };
+  materialized: {
+    bytes: 0;
+    sha256: string;
+  };
 }
 
 interface FindingEvidence {
@@ -154,7 +173,7 @@ interface ValidatedSampleSelection extends OrderedCandidate {
 }
 
 interface CorpusRunManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
   sourceCommit: string;
   scannerSha256: string;
@@ -782,6 +801,46 @@ async function downloadSelectedFiles(
   }
 }
 
+const EMPTY_FILE_SHA256 = sha256(Buffer.alloc(0));
+
+function npmManagerSignalPath(path: string): NpmManagerSignalPath {
+  if (path === 'package-lock.json' || path === 'npm-shrinkwrap.json') return path;
+  throw new Error(`${path}: unsupported package-manager presence projection`);
+}
+
+function materializeManagerSignal(entry: TreeEntry, targetRoot: string): ManagerSignalProjection {
+  const projectedPath = npmManagerSignalPath(entry.path);
+  if (entry.type !== 'blob' || (entry.mode !== '100644' && entry.mode !== '100755')) {
+    throw new Error(`${entry.path}: package-manager signal was not a regular Git blob`);
+  }
+  if (!/^[a-f0-9]{40}$/.test(entry.sha)) {
+    throw new Error(
+      `${entry.path}: immutable tree Git blob OID was not 40 lowercase hex characters`,
+    );
+  }
+  if (!Number.isSafeInteger(entry.size) || (entry.size as number) < 0) {
+    throw new Error(`${entry.path}: immutable tree entry had no valid byte size`);
+  }
+  const projectionRoot = resolve(targetRoot);
+  const destination = resolve(projectionRoot, projectedPath);
+  if (dirname(destination) !== projectionRoot) {
+    throw new Error(`${entry.path}: package-manager signal projection escaped the analysis root`);
+  }
+  writeFileSync(destination, Buffer.alloc(0), { flag: 'wx' });
+  return {
+    manager: 'npm',
+    projectedPath,
+    semantics: 'presence-only-empty-regular-file-v1',
+    sourceTree: {
+      path: projectedPath,
+      mode: entry.mode,
+      blobOid: entry.sha,
+      bytes: entry.size as number,
+    },
+    materialized: { bytes: 0, sha256: EMPTY_FILE_SHA256 },
+  };
+}
+
 function scriptsInPackage(result: AnalysisResult, packagePath: string): number {
   return Object.keys(
     result.packages.find((unit) => unit.relPath === packagePath)?.manifest.scripts ?? {},
@@ -945,6 +1004,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
   for (const locator of locators) {
     const tempRoot = mkdtempSync(join(tmpdir(), 'scriptspect-corpus-'));
     let manifestPaths: string[] = [];
+    let managerSignalProjections: ManagerSignalProjection[] = [];
     let truncations: string[] = [];
     try {
       const treeUrl = `${GITHUB_API}/repos/${locator.repo}/git/trees/${locator.commit}?recursive=1`;
@@ -970,6 +1030,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
           commit: locator.commit,
           status: 'truncated',
           manifestPaths,
+          managerSignalProjections,
           truncations,
           rootOnly: emptyCounts(),
           workspaceFull: emptyCounts(),
@@ -1000,6 +1061,9 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
         fetchImpl,
         limits,
       );
+      managerSignalProjections = selected.managerSignals.map((entry) =>
+        materializeManagerSignal(entry, tempRoot),
+      );
       const result = analyze(tempRoot, {
         config: { targets: DEFAULT_TARGETS, severity: new Map(), ignore: [] },
       });
@@ -1010,6 +1074,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
         commit: locator.commit,
         status,
         manifestPaths,
+        managerSignalProjections,
         truncations,
         ...counts,
       });
@@ -1025,6 +1090,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
         commit: locator.commit,
         status: 'failed',
         manifestPaths,
+        managerSignalProjections,
         truncations,
         error: redactCorpusText(error instanceof Error ? error.message : String(error)),
         ...(failure === undefined ? {} : { failure }),
@@ -1048,7 +1114,7 @@ export async function runCorpusScan(options: CorpusScanOptions): Promise<CorpusR
     fixSafety: rule.fixSafety,
   }));
   const partialManifest: Omit<CorpusRunManifest, 'artifactSha256'> = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt,
     sourceCommit,
     scannerSha256: sha256(readFileSync(scannerPath)),

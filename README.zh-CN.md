@@ -20,32 +20,47 @@ Node.js 项目或 monorepo 交给它，它不会执行 scripts，而是直接指
 平台、为什么出错，并且只在安全条件得到证明时提供修复。
 
 <!-- readme-state:overview:start -->
-> [!IMPORTANT]
-> 本仓库目前是**预发布源码评估版**。npm package 与公开 Action tag 尚不存在；下面所有可复制步骤都特意固定到不可变 source commit。
+> [!TIP]
+> 已验证 release：[`scriptspect@0.1.2`](https://www.npmjs.com/package/scriptspect/v/0.1.2)。不可变 Action tag 是
+> [`v0.1.2`](https://github.com/Tom409114/scriptspect/releases/tag/v0.1.2)；安全敏感的 workflow 可以固定到完整 release commit
+> `6f439bb974b297d5a334cebe989b4b50d7483677`。
 
-**[查看真实 demo](#修复前分析结果与修复后)** · **[从源码评估](#从源码评估evaluate-from-source-pre-release)** · **[GitHub Actions](#github-actions-预览pre-release)** · **[规则列表](docs/rules/README.md)**
+**[30 秒开始](#快速开始quick-start)** · **[查看真实 demo](#修复前分析结果与修复后)** · **[GitHub Actions](#github-actions)** · **[规则列表](docs/rules/README.md)**
 <!-- readme-state:overview:end -->
 
+<!-- readme-state:evaluate:start -->
+<!-- readme-section: evaluate -->
+## 快速开始（Quick start）
+
+需要 Node.js 22 或更高版本。无需全局安装，直接运行准确的[已验证 npm release](https://www.npmjs.com/package/scriptspect/v/0.1.2)：
+
+```bash
+npx --yes scriptspect@0.1.2 .
+```
+
+使用 pnpm：
+
+```bash
+pnpm dlx scriptspect@0.1.2 .
+```
+
+存在 finding 时退出 `1`；clean scan 退出 `0`；无效输入、配置或 I/O 退出 `2`。应用任何经审查的修复前，请先使用 `--fix-dry-run`。
+<!-- readme-state:evaluate:end -->
+
 <!-- readme-section: purpose -->
-## 它到底做什么、谁适合用、怎么工作
+## 同一个项目，不同的电脑，同样能用的脚本
 
-如果你维护 JS/TS 应用、库、CLI 或 monorepo，负责 CI/release，或者需要
-同时支持不同操作系统的贡献者，就适合使用 ScriptSpect。它解决的是最常见
-的那类故障：脚本在作者的 Mac/Linux 上正常，到了 Windows 用户或 Windows
-CI 就失败；反过来，Windows-only 写法也可能在 Unix CI 中出错。
+**你在 Mac 上构建成功，贡献者换到 Windows 却报错。**
+ScriptSpect 提前找出 `package.json` 中依赖特定 shell 的写法，把问题挡在 CI 之前。
 
-| 问题 | 直接答案 |
+| 你的工作场景 | ScriptSpect 帮你做什么 |
 | --- | --- |
-| **谁来用？** | JS/TS 维护者、monorepo 负责人、Windows 贡献者，以及 CI/release 团队。 |
-| **解决什么问题？** | 找出 shell-specific 的环境变量写法、`rm`/`cp`/`mv` 等命令、expansion、redirection、operator、path、显式 shell 依赖与未声明 executable。 |
-| **怎么检查？** | 自动发现根 package 与 workspaces，按所选 target shell 对每条 script 做结构化静态分析，绝不执行目标命令。 |
-| **最后得到什么？** | 精确 rule ID、package/script 名、source span、受影响 shell/OS、severity、confidence、解释，以及终端/JSON/PR annotation。 |
-| **怎么帮助修复？** | `--fix-dry-run` 先展示 patch；`--fix` 只应用已证明安全或满足前置条件的修改，模糊情况保持 manual。 |
+| 维护 JS/TS 应用、库或 CLI | 指出哪条命令、在哪个平台有可移植性问题。 |
+| 管理 monorepo | 一起检查根项目和自动发现的 workspaces。 |
+| 审查开发者或 agent 生成的脚本 | 获取结构化 JSON 或 PR 标注，再用 `--fix-dry-run` 预览修改。 |
 
-它的工作路径很简单：**repository → target-shell 静态分析 → 精确 findings →
-可审查的修复计划**。当前预发布版请先按[从源码评估](#从源码评估evaluate-from-source-pre-release)
-完成准备，再运行 `node dist/cli.mjs <your-project>`；加上 `--fix-dry-run`
-可以先看修改。PR 中使用时，复制 [GitHub Actions 预览](#github-actions-预览pre-release)。
+**选一个仓库 → 查看问题 → 审查补丁。**
+分析在本地完成，默认只读；是否应用修复，由你决定。
 
 <!-- readme-section: why -->
 ## 为什么值得使用
@@ -100,50 +115,31 @@ ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正�
 
 `--fix-dry-run` 只打印 patch 而不写入。`--fix` 使用 staged writes、写后重新分析与 recovery journal；它不会安装依赖或改写 lockfile。使用 `pnpm exec tsx tools/generate-readme-demo.ts` 可重新生成全部 demo assets。
 
-<!-- readme-state:evaluate:start -->
-<!-- readme-section: evaluate -->
-## 从源码评估（Evaluate from source (pre-release)）
-
-需要 Node.js 22 或更高版本，并通过 Corepack 使用 pnpm。克隆仓库、检出经审阅的 commit、严格按 lockfile 安装、构建，再扫描版本化 demo fixture。存在 finding 时退出 `1`；clean scan 退出 `0`；无效输入、配置或 I/O 退出 `2`。
-
-```bash
-git clone https://github.com/Tom409114/scriptspect.git
-cd scriptspect
-git checkout c9c671c8e150705d78d9169d4c5a8f22cb37fad0
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-node dist/cli.mjs tests/fixtures/readme-demo
-```
-
-这里特意还没有 `npx scriptspect` 快速开始。机器可读的 release state 见 [docs/readme-status.json](docs/readme-status.json)。
-<!-- readme-state:evaluate:end -->
-
 <!-- readme-section: cli -->
 ## CLI 快速参考
 
-源码 build 支持面向人的输出、JSON、GitHub annotations、聚焦 rule、显式 target matrix 与选择性修复。
+CLI 支持终端输出、JSON、GitHub annotations、指定规则、选择目标 shell 与按需修复。
 
 ```bash
-node dist/cli.mjs [path]
-node dist/cli.mjs [path] --format json
-node dist/cli.mjs [path] --target posix-sh,cmd,powershell
-node dist/cli.mjs [path] --rule PS001,PS010
-node dist/cli.mjs [path] --fix-dry-run
-node dist/cli.mjs [path] --fix
-node dist/cli.mjs explain PS010
+npx --yes scriptspect@0.1.2 .
+npx --yes scriptspect@0.1.2 . --format json
+npx --yes scriptspect@0.1.2 . --target posix-sh,cmd,powershell
+npx --yes scriptspect@0.1.2 . --rule PS001,PS010
+npx --yes scriptspect@0.1.2 . --fix-dry-run
+npx --yes scriptspect@0.1.2 . --fix
+npx --yes scriptspect@0.1.2 explain PS010
 ```
 
 显示过滤不会隐藏失败语义：任何配置为 `error` 的 finding 都会失败；未过滤 warning 总数会与 `--max-warnings` 比较。
 
 <!-- readme-state:action:start -->
 <!-- readme-section: action -->
-## GitHub Actions 预览（pre-release）
+## GitHub Actions
 
-这个完整示例会同时检出 consumer 与不可变 ScriptSpect source commit，然后运行 bundled local Action。不要把 commit 替换为尚不存在的 `Tom409114/scriptspect@v0.1` tag。正式 release 得到验证后，安全敏感 workflow 仍应固定到完整 commit SHA。
+使用[已验证的不可变 release tag](https://github.com/Tom409114/scriptspect/releases/tag/v0.1.2)可以保持 workflow 易读。若要获得最严格的供应链固定，请把 `v0.1.2` 替换为完整 release commit `6f439bb974b297d5a334cebe989b4b50d7483677`。
 
 ```yaml
-name: scriptspect pre-release evaluation
+name: scriptspect
 on: [pull_request]
 permissions:
   contents: read
@@ -154,13 +150,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Tom409114/scriptspect
-          ref: c9c671c8e150705d78d9169d4c5a8f22cb37fad0
-          path: .scriptspect
-          persist-credentials: false
-      - uses: ./.scriptspect
+      - uses: Tom409114/scriptspect@v0.1.2
         with:
           path: .
 ```
@@ -195,10 +185,10 @@ Action 会先写入 annotations、job summary 以及名为 `exit-code`、`packag
 Contracts：[config JSON Schema](schema/config.schema.json) · [JSON output Schema](schema/output.schema.json)
 
 <!-- readme-section: support -->
-## 支持范围与诚实边界
+## 支持的工作流
 
 <!-- readme-state:scope-table:start -->
-| 范围 | 当前源码评估行为 |
+| 范围 | 当前行为 |
 | --- | --- |
 | Projects | 根 `package.json`，以及 npm/Yarn/Bun workspaces 与 `pnpm-workspace.yaml` |
 | Targets | 默认 `posix-sh` + `cmd`；可选 `powershell` evidence |
@@ -208,10 +198,10 @@ Contracts：[config JSON Schema](schema/config.schema.json) · [JSON output Sche
 | Privacy | 离线分析；不执行 scripts；无 telemetry |
 <!-- readme-state:scope-table:end -->
 <!-- readme-state:release-row:start -->
-**Release:** pre-release；目前没有 npm package 或公开 Action reference。
+**Release:** [npm 0.1.2](https://www.npmjs.com/package/scriptspect/v/0.1.2) · [Action v0.1.2](https://github.com/Tom409114/scriptspect/releases/tag/v0.1.2) · 完整 SHA `6f439bb974b297d5a334cebe989b4b50d7483677`。
 <!-- readme-state:release-row:end -->
 
-本主页不宣称外部采用、测量精度、比较优势或 hosted performance。即使 verified release 完成，外部验证与采用门仍必须由真实 evidence 驱动。[validation ledger](docs/validation/spec-compliance-2026-09-01.md) 会把仓库内可以完成的工程工作，与只有真实用户才能形成的 evidence 分开。
+遇到真实的跨平台故障？[提交 issue](https://github.com/Tom409114/scriptspect/issues/new/choose)，附上脚本、目标 shell 和预期行为。你的例子能帮助改进规则。
 
 <!-- readme-section: faq -->
 ## 常见问题与故障排查
@@ -225,7 +215,7 @@ Contracts：[config JSON Schema](schema/config.schema.json) · [JSON output Sche
 **最终使用了哪个 config？** 显式 `--config` 优先，其次是 `package.json` 字段、standalone file，最后是 defaults。人类可读输出会报告非默认 source。
 
 <!-- readme-state:production-faq:start -->
-**现在能在 production CI 使用吗？** 请把这份 source checkout 当作 evaluation build。等待公开 npm、Release、provenance、checksum 与 immutable Action-consumer evidence 齐全后，再依赖 released reference。
+**现在能在 production CI 使用吗？** 可以——请使用上方已验证的 `scriptspect@0.1.2` package 或不可变 `v0.1.2` Action reference。若策略要求精确 commit，请固定到 `6f439bb974b297d5a334cebe989b4b50d7483677`。
 <!-- readme-state:production-faq:end -->
 
 <!-- readme-section: navigation -->
@@ -241,6 +231,7 @@ Contracts：[config JSON Schema](schema/config.schema.json) · [JSON output Sche
 - [Corpus methodology](docs/evidence/corpus-method.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
+- [分享 ScriptSpect：首发文案与演示脚本](docs/launch-kit.md)
 - [Roadmap](docs/roadmap.md)
 - [Evidence policy](docs/evidence/README.md)
 

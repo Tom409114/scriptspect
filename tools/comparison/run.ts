@@ -5,7 +5,7 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sha256 } from '../corpus-lib';
 
@@ -154,6 +154,15 @@ export function runComparison(options: ComparisonOptions): ComparisonManifest {
   }
 
   const outputDir = resolve(options.outputDir);
+  const outputRelative = relative(root, outputDir);
+  if (
+    outputRelative === '' ||
+    (outputRelative !== '..' &&
+      !outputRelative.startsWith(`..${sep}`) &&
+      !isAbsolute(outputRelative))
+  ) {
+    throw new Error('comparison output directory must be outside the repository checkout');
+  }
   mkdirSync(outputDir, { recursive: false });
   const artifactSha256: Record<string, string> = {};
   const writeArtifact = (name: string, content: string): void => {
@@ -332,7 +341,7 @@ export function runComparison(options: ComparisonOptions): ComparisonManifest {
     // can never become promotable through an automated run alone.
     promotable: false,
     reviewStatus: 'pending-human-adjudication',
-    reproduction: `SCRIPTSPECT_SOURCE_COMMIT=${sourceCommit} pnpm exec tsx tools/comparison/run.ts comparison-output`,
+    reproduction: `SCRIPTSPECT_SOURCE_COMMIT=${sourceCommit} pnpm exec tsx tools/comparison/run.ts <OUTSIDE_REPOSITORY_OUTPUT_DIRECTORY>`,
   };
   writeFileSync(
     resolve(outputDir, 'comparison-run.json'),

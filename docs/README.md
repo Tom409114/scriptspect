@@ -7,6 +7,7 @@ The GitHub homepage is available in [English](../README.md) and [Simplified Chin
 - [Rules](rules/README.md): rule-by-rule rationale, examples, and fix limits.
 - [Architecture](architecture.md): analyzer pipeline and contracts.
 - [Contributing rules](contributing-rules.md): how to add evidence-backed rules.
+- [Launch kit](launch-kit.md): bilingual launch drafts and a short demo storyboard.
 - [Comparison notes](comparison.md): current comparison boundary and release gate.
 
 ## Project status and governance

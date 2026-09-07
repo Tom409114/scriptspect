@@ -73,4 +73,18 @@ describe('pinned shared-corpus comparison harness', () => {
       expect(fixture.scriptsDoctor.exitCode).toBe(0);
     }
   }, 20_000);
+
+  it('rejects output directories inside the checkout so cleanCheckout remains meaningful', () => {
+    const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    }).trim();
+
+    expect(() =>
+      runComparison({
+        outputDir: resolve('.comparison-output-must-stay-outside'),
+        sourceCommit,
+        enforcePinnedNode: false,
+      }),
+    ).toThrow(/outside the repository checkout/i);
+  });
 });

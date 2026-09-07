@@ -4,30 +4,26 @@ The links below record when each implementation slice first landed. A merged
 slice is not the same as satisfying its exit condition: release, hosted-CI,
 corpus, and adoption gates stay open until their public evidence exists.
 
-The latest hosted `main` snapshot includes the merged [homepage/release hardening
-PR #78](https://github.com/Tom409114/scriptspect/pull/78), [CodeQL follow-up
-PR #79](https://github.com/Tom409114/scriptspect/pull/79), and [final spec-audit
-PR #80](https://github.com/Tom409114/scriptspect/pull/80). Exact `main` commit
-`c9c671c8e150705d78d9169d4c5a8f22cb37fad0` passed [CI run
-`33482453059`](https://github.com/Tom409114/scriptspect/actions/runs/33482453059).
-The still-open [v0.1.0 release PR #66](https://github.com/Tom409114/scriptspect/pull/66)
-has since advanced; its latest bot-authored run is
-[`action_required`](https://github.com/Tom409114/scriptspect/actions/runs/33482502821)
-under the documented manual-approval policy, so an older green PR-head run is
-not presented as current release evidence. The [DoD
-ledger](validation/v0.1-dod-2026-09-01.md) records the remaining approval,
-publication, tag-actor, and external-evidence gates.
+Current release: [npm 0.1.2](https://www.npmjs.com/package/scriptspect/v/0.1.2)
+and [GitHub Release v0.1.2](https://github.com/Tom409114/scriptspect/releases/tag/v0.1.2),
+source `6f439bb974b297d5a334cebe989b4b50d7483677`.
+[Finalization run 34140851653](https://github.com/Tom409114/scriptspect/actions/runs/34140851653)
+verified registry bytes, signatures/provenance, release assets and Action aliases.
+The [machine-checked receipt](validation/releases/v0.1.2/readme-release-receipt.json)
+records the public release. The September 1 validation ledgers below are historical
+snapshots, not the current publication state. Changes on `main` after this release
+are next-release work; they do not alter the published tarball or immutable tag.
 
 | Milestone | Theme | Key deliverables | Exit condition | Status |
 | --- | --- | --- | --- | --- |
 | M0 | Remote repo and competitive baseline | GitHub repo, license, CI skeleton, issue/PR templates, scripts-doctor parity checklist, name-availability gate | `main` is buildable by hosted Actions and repository controls are recorded | implementation, hosted CI, and main controls verified |
 | M1 | Parser / IR | target-aware lexer, parse matrix, exact spans, negative fixtures | parser matrix and scoped coverage gates pass on all supported OS/Node combinations | implementation and hosted matrix verified |
 | M2 | P0 portability rules | PS001/010/011/012/013/020/021/022/030/040 + the full v0.1 rule set | deterministic positive/negative fixtures and reviewed precision evidence | implementation and final matrix verified; ≥100 precision gate remains M8-open |
-| M3 | Reporter + explain | stylish/json/github reporters; rule docs; `explain` command | one command yields actionable findings; published JSON schemas are frozen | schemas/package contents verified; public npm publication pending |
+| M3 | Reporter + explain | stylish/json/github reporters; rule docs; `explain` command | one command yields actionable findings; published JSON schemas are frozen | schemas/package contents published in 0.1.2 |
 | M4 | Safe fixer | fix safety model, dry-run, cross-env/rimraf/shx conditional fixes | idempotency, concurrency, rollback, and recovery tests pass | recovery and race suites verified on hosted matrix |
 | M5 | Workspaces | npm/pnpm/Yarn/Bun discovery; PS040 workspace-bin awareness | real manager fixtures and a hosted 100-package benchmark under 2 seconds | manager fixtures and hosted 100-package benchmark verified |
-| M6 | GitHub Action | bundled Node Action + annotations + job summary; 3-OS matrix | immutable released reference runs in an external repository | bundled consumer, annotations, and 3-OS matrix verified; released reference pending |
-| M7 | Release | npm trusted publishing, provenance, release notes, checksums | one immutable tarball reaches npm and GitHub Release through Actions | workflow/recovery contracts and latest `main` CI verified; current release PR awaits workflow approval and first release remains pending |
+| M6 | GitHub Action | bundled Node Action + annotations + job summary; 3-OS matrix | immutable released reference runs in an external repository | bundled consumer, annotations, and 3-OS matrix verified; v0.1.2 reference published; independent external-repository trial pending |
+| M7 | Release | npm trusted publishing, provenance, release notes, checksums | one immutable tarball reaches npm and GitHub Release through Actions | 0.1.2 published and verified; bounded manual finalization used after the legacy provenance audit failed; receipt linked above |
 | M8 | Validation and real corpus | read-only public scan, human sampling, false-positive ledger, public validation report | two-week gate, at least 100 reviewed findings, shared-corpus comparison, and real interest evidence | partial: the historical first report landed in PR #64; source tooling now supports 1–1,000 repositories and unreviewed monthly API drafts, while the last hosted run sampled 100 and human/external/time gates remain open |
 
 ## v0.1 validation gates (kill-or-commit)

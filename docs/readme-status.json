@@ -1,9 +1,13 @@
 {
   "schemaVersion": 1,
-  "releaseState": "pre-release",
+  "releaseState": "published",
   "packageName": "scriptspect",
-  "packageVersion": "0.0.0",
-  "sourceCommit": "c9c671c8e150705d78d9169d4c5a8f22cb37fad0",
+  "packageVersion": "0.1.2",
+  "sourceCommit": "6f439bb974b297d5a334cebe989b4b50d7483677",
   "nodeMajor": 22,
-  "repository": "https://github.com/Tom409114/scriptspect"
+  "repository": "https://github.com/Tom409114/scriptspect",
+  "releaseEvidence": {
+    "receiptPath": "validation/releases/v0.1.2/readme-release-receipt.json",
+    "digest": "91fc809d5144da268dec42218b4119ec762ace65500d68e27da99f3ee22fc0ce"
+  }
 }

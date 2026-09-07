@@ -68,6 +68,7 @@ describe('committed GitHub Action bundle', () => {
   it('keeps the CLI production dependencies external', () => {
     expect(nonBuiltinBareImports(resolve('dist/cli.mjs'))).toEqual([
       'cac',
+      'semver',
       'fast-glob',
       'yaml',
       'picocolors',

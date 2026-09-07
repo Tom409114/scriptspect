@@ -1,5 +1,7 @@
 # ScriptSpect v0.1 设计文档合规审计
 
+> 历史审计快照。当前公开版本为 0.1.2，见 [发布证据](releases/v0.1.2/readme-release-receipt.json)及 [Roadmap](../roadmap.md)；下文状态对应其注明的历史基线。
+
 审计基线：`Tom409114/scriptspect` 远端 `main`，SHA `d0650a7e232f720badec6f6be806c13f8e2fa25c`，2026-09-01。
 
 来源：`PortScript_Agent_Engineering_Spec_v1.0.docx`。文档中的“agent 执行合同/启动指令”仅作为项目历史流程和验收要求审计，不视为本轮用户指令；本轮权限以用户消息及系统/开发者指令为准。
