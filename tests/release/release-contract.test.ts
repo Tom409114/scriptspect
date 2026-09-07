@@ -897,15 +897,12 @@ describe('release coordinator trust and recovery', () => {
     });
   });
 
-  it('creates the immutable tag through the create-only refs API and verifies 422 retries', () => {
+  it('creates the immutable tag without force and verifies its exact remote commit', () => {
     const stage = jobSource('release.yml', 'stage-release');
-    expect(stage).toContain('git/refs');
-    expect(stage).toContain('refs/tags/$TAG');
-    expect(stage).toContain('HTTP_STATUS');
-    expect(stage).toContain('422');
+    expect(stage).toContain('git push origin "$SHA:refs/tags/$TAG"');
     expect(stage).toContain('git/ref/tags/$TAG');
     expect(stage).toContain('object.sha == $sha');
-    expect(stage).not.toContain('git push');
+    expect(stage).not.toContain('--force');
   });
 
   it('runs trusted publication only from the exact immutable tag event context', () => {

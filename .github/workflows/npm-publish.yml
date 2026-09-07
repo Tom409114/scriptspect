@@ -377,6 +377,8 @@ jobs:
         with:
           ref: ${{ needs.publish.outputs.sha }}
           fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_TAG_DEPLOY_KEY }}
+          persist-credentials: true
       - name: Apply semver and ancestry guards, then update aliases by CAS
         id: aliases
         env:
