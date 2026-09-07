@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "package": "scriptspect",
+  "bootstrapVersion": "0.0.0-bootstrap.0",
+  "sourceCommit": "51cc7812528d519d094b3ec8953ef07852135993",
+  "integrityMode": "exact-bytes",
+  "registryIntegrity": "sha512-B097Tl1ZrP+I630TW6GVEvZ2MMJR8MFXT5OW17b1QMHoR24j9uU1hxkciuI3c8TgX5ANfntCs8wD0z/KBxGvkQ==",
+  "comparatorAlgorithm": "scriptspect-canonical-tree/v1",
+  "comparatorAlgorithmDigest": "fe2028bd2c9390e93f7ca7942a83c60899419800aec67097d0386bedb353d68b",
+  "latestUnchanged": false,
+  "workflowRunUrl": "https://github.com/Tom409114/scriptspect/actions/runs/34022655073",
+  "initialLatestAssignment": {
+    "before": {},
+    "after": {
+      "bootstrap": "0.0.0-bootstrap.0",
+      "latest": "0.0.0-bootstrap.0"
+    }
+  },
+  "reviewedAt": "2026-09-07T14:14:07Z"
+}
