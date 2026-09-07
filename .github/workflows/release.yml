@@ -326,6 +326,7 @@ jobs:
   build-candidate:
     name: Build or recover the externally anchored candidate
     needs: [authorize]
+    if: always() && needs.authorize.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -526,6 +527,7 @@ jobs:
   stage-release:
     name: Recover or stage the protected tag and authoritative draft
     needs: [authorize, build-candidate]
+    if: always() && needs.authorize.result == 'success' && needs.build-candidate.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
@@ -805,7 +807,7 @@ jobs:
   dispatch-publisher:
     name: Dispatch the exact immutable-tag publisher
     needs: [authorize, stage-release]
-    if: needs.stage-release.result == 'success'
+    if: always() && needs.authorize.result == 'success' && needs.stage-release.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
