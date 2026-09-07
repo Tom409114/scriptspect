@@ -12,11 +12,11 @@
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-6f7bf7.svg"></a>
 </p>
 
-<p align="center"><strong>在 CI 或用户踩坑之前，先让 package.json scripts 在 macOS、Linux 与 Windows 上真正可用。</strong></p>
+<p align="center"><strong>在 CI 报错、同事踩坑之前，提前发现 package.json 脚本的跨平台问题。</strong></p>
 
 ScriptSpect 是 npm 风格 `package.json` scripts 的跨平台预检工具。把一个
 Node.js 项目或 monorepo 交给它，它不会执行 scripts，而是直接指出哪一段
-命令会在 `posix-sh`、Windows `cmd` 或可选 `powershell` 下出错、影响哪个
+命令可能在 `posix-sh`、Windows `cmd` 或可选 `powershell` 下出错、影响哪个
 平台、为什么出错，并且只在安全条件得到证明时提供修复。
 
 <!-- readme-state:overview:start -->
@@ -65,20 +65,21 @@ ScriptSpect 提前找出 `package.json` 中依赖特定 shell 的写法，把问
 <!-- readme-section: why -->
 ## 为什么值得使用
 
-| 提前发现跨平台故障 | 解释具体 target | 让修复可审查 |
-| --- | --- | --- |
-| 在另一种操作系统真正执行前，找出依赖特定 shell 的命令、operator、expansion、redirection、path 与未声明 executable。 | 每条 finding 都带有稳定 rule ID、package/script path、source span、severity、confidence 与受影响 targets。 | `safe`、`conditional`、`manual` 三类安全级别，避免在无法证明等价时进行“热心”改写。 |
-
-ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正则表达式扫描 quoted text。它有意不做完整 shell interpreter；finding 仍应由拥有该 script 的项目审查。
-
-[`scripts-doctor`](docs/comparison.md) 是相邻的 analyzer 基线。`cross-env`、
-`shx` 与 `rimraf` 是 ScriptSpect 在满足前置条件时可能推荐的修复手段，
-不是静态分析竞品。
+**它的实际收益：在审查代码时就发现 shell 写法不兼容，不必等同事换台电脑、
+或者另一个系统的 CI 报错后再排查。**
+跨系统协作、对外发布开发工具、经常让编程 agent 修改项目脚本的仓库，尤其适合接入这一步检查。
 
 <!-- readme-section: demo -->
 ## 修复前、分析结果与修复后
 
-这里的全部内容都由版本化 [demo fixture](tests/fixtures/readme-demo/package.json) 生成，因此 screenshot 与 patch 不会偏离可执行行为。
+### 实例一 · “我的 Mac 能构建，为什么同事的 Windows 报错？”
+
+你维护一个 Vite 项目，同事或编程 agent 加了下面两条命令。
+Mac 上这是常见的 shell 写法；Windows 的原生 npm 脚本默认使用 `cmd`，
+环境变量赋值写法和 `rm -rf` 在这里不兼容。
+
+**亲手试一次：**新建一个空文件夹，把下面完整内容保存为 `package.json`，
+在该文件夹打开终端。这次扫描和修改演示，无需安装或执行里面声明的构建工具。
 
 **修复前——两条假定 POSIX shell 的 scripts：**
 
@@ -98,13 +99,32 @@ ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正�
 }
 ```
 
-**分析结果——`PS001` 与 `PS010` 精确指出不兼容 cmd 的 span：**
+**第一步：不运行构建，先找出问题。**
+
+```bash
+npx --yes scriptspect@0.1.2 .
+```
+
+| 哪条脚本 | 检查结果 | 对你意味着什么 |
+| --- | --- | --- |
+| `build` | `PS001` · `NODE_ENV=production` | Windows cmd 不使用这种环境变量赋值语法。 |
+| `clean` | `PS010` · `rm -rf dist` | Windows 原生 cmd 没有这条命令。 |
+
+实际扫描得到 **2 个错误、2 条提示**，退出码为 `1`。
+提示进一步解释同一条构建命令在不同 shell 中的解析差异。
+下面的截图与补丁来自可执行的 [演示样例](tests/fixtures/readme-demo/package.json)。
 
 ![自动生成的终端记录，显示 ScriptSpect 的 PS001 与 PS010 findings](docs/assets/demo/terminal.svg)
 
 [可选择的终端文本](docs/assets/demo/terminal.txt) · [完整生成 patch](docs/assets/demo/fix.patch) · [验证后的文件](docs/assets/demo/package.after.json)
 
-**修复后——conditional rewrites 使用项目已经声明的 dependencies：**
+**第二步：先预览怎么改，不修改文件。**
+
+```bash
+npx --yes scriptspect@0.1.2 . --fix-dry-run
+```
+
+关键变化如下。这个样例已声明 `cross-env` 和 `rimraf`，所以可以提供这些改写：
 
 ```diff
 -"build": "NODE_ENV=production vite build"
@@ -113,7 +133,52 @@ ScriptSpect 使用 target-specific 的结构化 parser，而不是用一组正�
 +"clean": "rimraf dist"
 ```
 
-`--fix-dry-run` 只打印 patch 而不写入。`--fix` 使用 staged writes、写后重新分析与 recovery journal；它不会安装依赖或改写 lockfile。使用 `pnpm exec tsx tools/generate-readme-demo.ts` 可重新生成全部 demo assets。
+**第三步：确认修改，再应用并重新检查。**
+
+```bash
+npx --yes scriptspect@0.1.2 . --fix
+npx --yes scriptspect@0.1.2 .
+```
+
+已发布版本的实际运行结果：
+
+```text
+scriptspect: fixed 2 script(s) in package.json
+Scanned 2 scripts across 1 package · 0 errors · 0 warnings
+```
+
+最后一次扫描退出码为 `0`，没有发现问题。演示中的两处 shell 不兼容写法，
+在任何人运行构建之前就被改掉了。在自己的项目中，请审查补丁，并自行管理依赖安装。
+
+### 实例二 · 让编程 agent 拿到具体、可操作的检查结果
+
+agent 修改 `package.json` 后，运行：
+
+```bash
+npx --yes scriptspect@0.1.2 . --format json
+```
+
+对上面的原始样例，一条检查结果包含这些字段（摘录）：
+
+```json
+{
+  "ruleId": "PS001",
+  "scriptName": "build",
+  "packagePath": "package.json",
+  "severity": "error",
+  "affectedTargets": ["cmd"]
+}
+```
+
+把 JSON 输出粘贴到编程 agent 的对话中，或者让 agent 通过终端工具运行这条命令。
+让它针对结果中的文件、脚本和目标系统提出最小修改，再由你审查补丁并重新扫描。
+同一条命令也能自动发现受支持的 monorepo workspaces，分别指出各个包里的问题。
+
+### 实例三 · 在 PR 里自动拦住同类问题
+
+接入[下面的 GitHub Actions 工作流](#github-actions)后，如果后续 PR 又加入了不兼容的清理命令，
+检查会失败，并在 `package.json` 上留下标注；干净样例会通过。
+工作流下方展示了真实的线上运行结果，审查代码时就能看到问题。
 
 <!-- readme-section: cli -->
 ## CLI 快速参考
