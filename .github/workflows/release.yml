@@ -618,7 +618,7 @@ jobs:
             test -s "$RUNNER_TEMP/release-notes.md" || printf 'ScriptSpect %s\n' "$VERSION" > "$RUNNER_TEMP/release-notes.md"
             gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
-          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
           RELEASE_ID=$(jq -er '.id' <<< "$RELEASE_JSON")
           RELEASE_TAG=$(jq -er '.tag_name' <<< "$RELEASE_JSON")
           [[ "$RELEASE_TAG" == "$TAG" ]]
@@ -679,7 +679,7 @@ jobs:
             if [[ "$existing_count" == 0 ]]; then
               [[ "$CURRENT_STATE" == retained-candidate ]]
               gh release upload "$TAG" "$file"
-              RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+              RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
               return
             fi
             mkdir -p "$RUNNER_TEMP/existing-$name"
@@ -691,7 +691,7 @@ jobs:
           ensure_asset "$RUNNER_TEMP/candidate/SHA256SUMS"
           ensure_asset "$RUNNER_TEMP/candidate/candidate-manifest.json"
 
-          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+          RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
           asset_id() {
             jq -er --arg name "$1" '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("asset cardinality") end' <<< "$RELEASE_JSON"
           }
@@ -747,7 +747,7 @@ jobs:
           RELEASE_MANIFEST_DIGEST=$(node tools/release/release-state.mjs json-digest \
             "$RUNNER_TEMP/candidate/release-manifest.json" | jq -er '.digest')
           for attempt in {1..12}; do
-            RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/tags/$TAG")
+            RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
             READY_COUNT=$(jq --arg tarball "$TARBALL" '[
               .assets[] | select(.name == $tarball or .name == "SHA256SUMS" or
                 .name == "candidate-manifest.json" or .name == "release-manifest.json") |

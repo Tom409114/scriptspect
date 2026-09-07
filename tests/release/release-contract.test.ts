@@ -907,7 +907,7 @@ describe('release coordinator trust and recovery', () => {
 
   it('runs trusted publication only from the exact immutable tag event context', () => {
     const publisher = workflow('npm-publish.yml');
-    expect(publisher.on).toMatchObject({ push: { tags: ['v[0-9]+.[0-9]+.[0-9]+'] } });
+    expect(publisher.on).not.toHaveProperty('push');
     expect(publisher.on).toHaveProperty('workflow_dispatch');
     expect(publisher.jobs?.publish?.environment).toBe('release');
     const run = jobSource('npm-publish.yml', 'publish');

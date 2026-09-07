@@ -1,8 +1,6 @@
 name: npm publish from immutable tag
 
 on:
-  push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
     inputs:
       intent-id:
@@ -44,7 +42,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           mkdir -p .ci/release-clean .ci/release-broken
-          node -e "require('node:fs').writeFileSync('.ci/release-clean/package.json', JSON.stringify({name:'clean',scripts:{build:'node -e \\"process.exit(0)\\"'}}, null, 2))"
+          node -e "require('node:fs').writeFileSync('.ci/release-clean/package.json', JSON.stringify({name:'clean',scripts:{build:'node --version'}}, null, 2))"
           node -e "require('node:fs').writeFileSync('.ci/release-broken/package.json', JSON.stringify({name:'broken',scripts:{clean:'rm -rf dist'}}, null, 2))"
       - name: Analyze broken fixture from the immutable tag
         id: broken
@@ -219,7 +217,7 @@ jobs:
             "$RUNNER_TEMP/release/release-manifest.json" \
             "$RUNNER_TEMP/release/candidate-manifest.json" >/dev/null
           RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
-            "repos/$REPOSITORY/releases/tags/$TAG")
+            "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
           RELEASE_ID=$(jq -er '.id' <<< "$RELEASE_JSON")
           RELEASE_DRAFT=$(jq -r '.draft | if type == "boolean" then tostring else error("draft is not boolean") end' <<< "$RELEASE_JSON")
           ACTUAL_RELEASE_ASSET_COUNT=$(jq '.assets | length' <<< "$RELEASE_JSON")
@@ -495,7 +493,7 @@ jobs:
 
           # Fail closed on any late Contents-write drift immediately before publication.
           gh api -H 'Accept: application/vnd.github+json' \
-            "repos/$REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/pre-public-release.json"
+            "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)" > "$RUNNER_TEMP/pre-public-release.json"
           gh api -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/pre-public-tag.json"
           jq '[
@@ -522,7 +520,7 @@ jobs:
             [[ "$PRE_PUBLIC_DRAFT" == false ]]
           fi
           gh api -H 'Accept: application/vnd.github+json' \
-            "repos/$REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/published-release.json"
+            "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)" > "$RUNNER_TEMP/published-release.json"
           gh api -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/published-tag.json"
           jq '[
@@ -663,7 +661,7 @@ jobs:
             "repos/$REPOSITORY/check-runs/$INTENT_ID" --input "$RUNNER_TEMP/update-check.json" >/dev/null
 
           RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
-            "repos/$REPOSITORY/releases/tags/$TAG")
+            "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
           FINAL_COUNT=$(jq '[.assets[] | select(.name == "final-verification.json")] | length' <<< "$RELEASE_JSON")
           [[ "$FINAL_COUNT" -le 1 ]]
           if [[ "$FINAL_COUNT" == 1 ]]; then
@@ -685,7 +683,7 @@ jobs:
 
           for attempt in {1..12}; do
             RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
-              "repos/$REPOSITORY/releases/tags/$TAG")
+              "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
             FINAL_COUNT=$(jq '[.assets[] | select(.name == "final-verification.json")] | length' \
               <<< "$RELEASE_JSON")
             [[ "$FINAL_COUNT" -le 1 ]]
@@ -713,7 +711,7 @@ jobs:
 
           # Verify the complete proposed terminal state before making consumed durable.
           RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
-            "repos/$REPOSITORY/releases/tags/$TAG")
+            "repos/$REPOSITORY/releases/$(gh release view "$TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
           gh api -H 'Accept: application/vnd.github+json' \
             "repos/$REPOSITORY/git/ref/tags/$TAG" > "$RUNNER_TEMP/final-tag.json"
           printf '%s\n' "$RELEASE_JSON" > "$RUNNER_TEMP/final-release.json"
@@ -854,7 +852,7 @@ jobs:
           ROLLBACK_RELEASE_ID=$(jq -er '.stagedDraft.releaseId' "$RUNNER_TEMP/release-state.json")
           [[ "$ROLLBACK_SHA" == "$SHA" ]]
           RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
-            "repos/$REPOSITORY/releases/tags/$ROLLBACK_TAG")
+            "repos/$REPOSITORY/releases/$(gh release view "$ROLLBACK_TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
           jq -e --argjson releaseId "$ROLLBACK_RELEASE_ID" --arg tag "$ROLLBACK_TAG" \
             '.id == $releaseId and .tag_name == $tag' <<< "$RELEASE_JSON" >/dev/null
           gh api -H 'Accept: application/vnd.github+json' \
@@ -890,7 +888,7 @@ jobs:
             gh api -X DELETE -H 'Accept: application/vnd.github+json' \
               "repos/$REPOSITORY/releases/assets/$FINAL_ASSET_ID"
             RELEASE_JSON=$(gh api -H 'Accept: application/vnd.github+json' \
-              "repos/$REPOSITORY/releases/tags/$ROLLBACK_TAG")
+              "repos/$REPOSITORY/releases/$(gh release view "$ROLLBACK_TAG" --repo "$REPOSITORY" --json databaseId --jq .databaseId)")
             jq -e --argjson releaseId "$ROLLBACK_RELEASE_ID" --arg tag "$ROLLBACK_TAG" \
               '.id == $releaseId and .tag_name == $tag' <<< "$RELEASE_JSON" >/dev/null
             gh api -H 'Accept: application/vnd.github+json' \
