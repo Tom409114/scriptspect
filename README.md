@@ -12,11 +12,11 @@
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-6f7bf7.svg"></a>
 </p>
 
-<p align="center"><strong>Make package.json scripts work on macOS, Linux, and Windows—before CI or users find the breakage.</strong></p>
+<p align="center"><strong>Catch cross-platform package.json script bugs before CI or teammates do.</strong></p>
 
 ScriptSpect is a preflight checker for npm-style `package.json` scripts. Point
 it at a Node.js project or monorepo: without running the scripts, it shows the
-exact command fragment that will break in `posix-sh`, Windows `cmd`, or optional
+command fragments that may break in `posix-sh`, Windows `cmd`, or optional
 `powershell`, explains the affected platform, and offers a fix only when its
 safety conditions are proved.
 
@@ -68,25 +68,23 @@ Analysis is local and read-only by default. You decide which fixes to apply.
 <!-- readme-section: why -->
 ## Why it is useful
 
-| Catch the breakage | Explain the target | Keep fixes reviewable |
-| --- | --- | --- |
-| Finds shell-dependent commands, operators, expansion, redirection, paths, and undeclared executables before another OS runs them. | Every finding carries a stable rule ID, package/script path, source span, severity, confidence, and affected targets. | `safe`, `conditional`, and `manual` classes prevent “helpful” rewrites when equivalence cannot be proved. |
-
-ScriptSpect uses a target-specific structural parser rather than scanning quoted
-text with a stack of regular expressions. It is intentionally not a full shell
-interpreter: findings should still be reviewed in the project that owns the
-script.
-
-[`scripts-doctor`](docs/comparison.md) is the adjacent analyzer baseline.
-`cross-env`, `shx`, and `rimraf` are remedies ScriptSpect may recommend when
-their preconditions are satisfied, not competing analyzers.
+**The payoff: catch a shell mismatch while reviewing a change, instead of
+waiting for a teammate's machine or an OS-specific CI job to fail.**
+This is particularly useful for cross-platform teams, published developer tools,
+and repositories where coding agents frequently change package scripts.
 
 <!-- readme-section: demo -->
 ## Before, result, and after
 
-Everything here is generated from the versioned
-[demo fixture](tests/fixtures/readme-demo/package.json), so the screenshot and
-patch cannot drift away from executable behavior.
+### Example 1 · “It builds on my Mac. Why does Windows fail?”
+
+You maintain a Vite project. A teammate—or a coding agent—adds the two scripts
+below. On a Mac they use familiar shell syntax; native Windows npm scripts use
+`cmd`, where inline environment assignments and `rm -rf` are incompatible.
+
+**Try it yourself:** save this complete example as `package.json` in a new,
+empty folder. Open a terminal there. For this scan-and-patch demo, you do not
+need to install or execute the declared build tools.
 
 **Before — two scripts that assume a POSIX shell:**
 
@@ -106,13 +104,34 @@ patch cannot drift away from executable behavior.
 }
 ```
 
-**Result — `PS001` and `PS010` identify the exact cmd-incompatible spans:**
+**1. Find the problem before running the build:**
+
+```bash
+npx --yes scriptspect@0.1.2 .
+```
+
+| Script | Finding | What it means for you |
+| --- | --- | --- |
+| `build` | `PS001` · `NODE_ENV=production` | Windows cmd does not use this environment-variable assignment syntax. |
+| `clean` | `PS010` · `rm -rf dist` | Native Windows cmd does not provide this command. |
+
+The actual scan reports **2 errors and 2 advisories**, with exit code `1`.
+The advisories explain how the same build command is parsed differently.
+The screenshot and patch below come from the executable
+[demo fixture](tests/fixtures/readme-demo/package.json).
 
 ![Generated terminal transcript showing ScriptSpect findings for PS001 and PS010](docs/assets/demo/terminal.svg)
 
 [Selectable terminal text](docs/assets/demo/terminal.txt) · [Full generated patch](docs/assets/demo/fix.patch) · [Verified after file](docs/assets/demo/package.after.json)
 
-**After — the conditional rewrites use dependencies already declared by the project:**
+**2. Preview the proposed changes without modifying the file:**
+
+```bash
+npx --yes scriptspect@0.1.2 . --fix-dry-run
+```
+
+The important changes are shown below. These rewrites are available because
+`cross-env` and `rimraf` are already declared in this example:
 
 ```diff
 -"build": "NODE_ENV=production vite build"
@@ -121,10 +140,56 @@ patch cannot drift away from executable behavior.
 +"clean": "rimraf dist"
 ```
 
-`--fix-dry-run` prints this patch without writing. `--fix` uses staged writes,
-post-write analysis, and a recovery journal; it never installs dependencies or
-rewrites a lockfile. Regenerate all demo assets with
-`pnpm exec tsx tools/generate-readme-demo.ts`.
+**3. Apply the reviewed changes, then scan again:**
+
+```bash
+npx --yes scriptspect@0.1.2 . --fix
+npx --yes scriptspect@0.1.2 .
+```
+
+Actual result with the published package:
+
+```text
+scriptspect: fixed 2 script(s) in package.json
+Scanned 2 scripts across 1 package · 0 errors · 0 warnings
+```
+
+The final scan exits `0`, with no findings. The two demonstrated shell
+incompatibilities have been removed before anyone runs the build.
+Review fixes in your own project; the tool leaves dependency installation to you.
+
+### Example 2 · Give your coding agent a concrete review result
+
+After an agent edits `package.json`, run:
+
+```bash
+npx --yes scriptspect@0.1.2 . --format json
+```
+
+For the original example, a finding contains these fields (excerpt):
+
+```json
+{
+  "ruleId": "PS001",
+  "scriptName": "build",
+  "packagePath": "package.json",
+  "severity": "error",
+  "affectedTargets": ["cmd"]
+}
+```
+
+Paste the JSON output into your coding agent's conversation, or have the agent
+run the command through its terminal tool. Ask it to propose a minimal patch
+for the reported file, script and target. Review its patch and rerun the scan.
+The same command discovers supported workspaces in a
+monorepo, so each package's script can be identified separately.
+
+### Example 3 · Catch the same mistake in a pull request
+
+Add the [GitHub Actions workflow below](#github-actions). If a future PR adds
+the incompatible clean script, the Action marks the check as failed and
+annotates `package.json`; a clean fixture passes. See the real hosted result
+below the workflow. Reviewers get the problem alongside the code change.
 
 <!-- readme-section: cli -->
 ## CLI at a glance
