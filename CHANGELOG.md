@@ -26,11 +26,14 @@
 ### Bug Fixes
 
 * **action:** honor scriptspect.config.json when target/severity inputs are unset ([#63](https://github.com/Tom409114/scriptspect/issues/63)) ([1a393e5](https://github.com/Tom409114/scriptspect/commit/1a393e539cbd4122dfeabb8778fb55e5544f97c6))
+* **ci:** allow authorized manual release recovery jobs ([#90](https://github.com/Tom409114/scriptspect/issues/90)) ([7445b4b](https://github.com/Tom409114/scriptspect/commit/7445b4b0d291b2cdee03d51c7cd189e991a4821f))
+* **ci:** authenticate release candidate intent lookup ([#89](https://github.com/Tom409114/scriptspect/issues/89)) ([7e02168](https://github.com/Tom409114/scriptspect/commit/7e02168b4baf20d28ac10e46a96d1e7db9a581c5))
 * **ci:** checksums job tarball path, npm version derivation, and clean v0.1.0 tag ([#61](https://github.com/Tom409114/scriptspect/issues/61)) ([4fc54ab](https://github.com/Tom409114/scriptspect/commit/4fc54ab28900d78fdba14a116e5ad5b95fca6eaf))
 * **ci:** configure release-please via config file for initial-version 0.1.0 ([#59](https://github.com/Tom409114/scriptspect/issues/59)) ([33fc062](https://github.com/Tom409114/scriptspect/commit/33fc062d74c4c5cd6864668bbb86fe476a4321f5))
 * **ci:** job-level hashFiles broke workflow validation ([#5](https://github.com/Tom409114/scriptspect/issues/5)) ([25839b4](https://github.com/Tom409114/scriptspect/commit/25839b493c9cd08b0d196b30c14387b723d62e08))
 * **ci:** load release gate from current main ([#75](https://github.com/Tom409114/scriptspect/issues/75)) ([670945f](https://github.com/Tom409114/scriptspect/commit/670945fab061210a99cb4d9bdef4a5946843411b))
 * **ci:** release-please first release is v0.1.0, not 1.0.0 ([#57](https://github.com/Tom409114/scriptspect/issues/57)) ([20a9b12](https://github.com/Tom409114/scriptspect/commit/20a9b123f6a950d42f299bc89d32953001221ce7))
+* **ci:** use scoped deploy key for protected release tags ([#91](https://github.com/Tom409114/scriptspect/issues/91)) ([f94563a](https://github.com/Tom409114/scriptspect/commit/f94563a5fc32d31a6d9023b8e2cb589b2e09af5c))
 * close final spec audit gaps ([#80](https://github.com/Tom409114/scriptspect/issues/80)) ([c9c671c](https://github.com/Tom409114/scriptspect/commit/c9c671c8e150705d78d9169d4c5a8f22cb37fad0))
 * close hosted CI regressions ([1be4049](https://github.com/Tom409114/scriptspect/commit/1be40498788de46c32df84b03a53fc15ce95778a))
 * contain configuration within project root ([a138b13](https://github.com/Tom409114/scriptspect/commit/a138b13f84f17aede1d716ed19f984f5f5485a0a))
