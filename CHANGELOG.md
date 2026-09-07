@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/Tom409114/scriptspect/compare/v0.1.0...v0.1.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **ci:** read draft releases by id and prepare valid tag fixtures ([#93](https://github.com/Tom409114/scriptspect/issues/93)) ([8983dab](https://github.com/Tom409114/scriptspect/commit/8983dabc3c463a0793c58c9fcb96a310b180ff72))
+
 ## 0.1.0 (2026-09-07)
 
 
