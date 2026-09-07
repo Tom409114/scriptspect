@@ -3,7 +3,9 @@ import { readFile, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  type ManualFinalizationReadmeReleaseReceipt,
   type ReadmeReleaseReceipt,
+  type TerminalReadmeReleaseReceipt,
   validateReadmeReleaseReceipt,
   validateReceiptAgainstStatus,
 } from './readme-release-receipt.js';
@@ -18,6 +20,7 @@ import {
 
 const defaultRepositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const githubApiVersion = '2022-11-28';
+const trustedManualFinalizationCommit = 'cc99a79c7b835ff530b081d181e649de96d589e9';
 
 type JsonObject = Record<string, unknown>;
 
@@ -70,6 +73,19 @@ export type VerifiedReadmeReleaseEvidence =
       publishRunId: number;
       finalVerificationAssetId: number;
       finalVerificationDigest: string;
+    }
+  | {
+      releaseState: 'published';
+      remoteVerification: 'verified';
+      evidenceKind: 'manual-finalization';
+      repository: ManualFinalizationReadmeReleaseReceipt['repository'];
+      packageName: 'scriptspect';
+      version: string;
+      tag: string;
+      commit: string;
+      releaseId: number;
+      publishRunId: number;
+      finalizationRunId: number;
     };
 
 function objectValue(value: unknown, label: string): JsonObject {
@@ -215,8 +231,16 @@ async function loadLocalEvidence(
   validateReceiptAgainstStatus(receipt, statusValue);
   equal(status.repository, receipt.repository, 'README status repository');
   equal(status.packageName, 'scriptspect', 'README status packageName');
-  equal(status.packageVersion, receipt.finalVerification.version, 'README status packageVersion');
-  equal(status.sourceCommit, receipt.finalVerification.commit, 'README status sourceCommit');
+  const receiptVersion =
+    receipt.schemaVersion === 'scriptspect-readme-release-receipt/v1'
+      ? receipt.finalVerification.version
+      : receipt.version;
+  const receiptCommit =
+    receipt.schemaVersion === 'scriptspect-readme-release-receipt/v1'
+      ? receipt.finalVerification.commit
+      : receipt.commit;
+  equal(status.packageVersion, receiptVersion, 'README status packageVersion');
+  equal(status.sourceCommit, receiptCommit, 'README status sourceCommit');
   return { statusValue, status, receipt };
 }
 
@@ -259,7 +283,7 @@ async function requestJson(
   }
 }
 
-function validateCheckRun(value: unknown, receipt: ReadmeReleaseReceipt): ConsumedState {
+function validateCheckRun(value: unknown, receipt: TerminalReadmeReleaseReceipt): ConsumedState {
   const check = objectValue(value, 'intent check run');
   equal(
     positiveInteger(check.id, 'intent check run id'),
@@ -312,7 +336,7 @@ function normalizedAliases(aliases: Array<{ name: string; target: string }>): st
   return JSON.stringify([...aliases].sort((left, right) => left.name.localeCompare(right.name)));
 }
 
-function bindReceiptToState(receipt: ReadmeReleaseReceipt, state: ConsumedState): void {
+function bindReceiptToState(receipt: TerminalReadmeReleaseReceipt, state: ConsumedState): void {
   const final = receipt.finalVerification;
   equal(final.intentId, state.intent.intentId, 'final verification intentId');
   equal(final.version, state.intent.version, 'final verification version');
@@ -449,6 +473,222 @@ function validateNpmMetadata(value: unknown, packageName: string, final: FinalVe
   );
 }
 
+function validateManualFinalizationRun(
+  value: unknown,
+  receipt: ManualFinalizationReadmeReleaseReceipt,
+): void {
+  const run = objectValue(value, 'manual finalization workflow run');
+  equal(
+    positiveInteger(run.id, 'manual finalization workflow run id'),
+    receipt.finalizationRunId,
+    'manual finalization workflow run id',
+  );
+  equal(
+    stringValue(run.name, 'manual finalization workflow name'),
+    `Finalize already-published ${receipt.version}`,
+    'manual finalization workflow name',
+  );
+  equal(
+    stringValue(run.path, 'manual finalization workflow path'),
+    receipt.finalizationWorkflowPath,
+    'manual finalization workflow path',
+  );
+  equal(
+    stringValue(run.event, 'manual finalization workflow event'),
+    'workflow_dispatch',
+    'manual finalization workflow event',
+  );
+  equal(
+    stringValue(run.status, 'manual finalization workflow status'),
+    'completed',
+    'manual finalization workflow status',
+  );
+  equal(
+    stringValue(run.conclusion, 'manual finalization workflow conclusion'),
+    'success',
+    'manual finalization workflow conclusion',
+  );
+  equal(
+    stringValue(run.head_branch, 'manual finalization workflow branch'),
+    'main',
+    'manual finalization workflow branch',
+  );
+  equal(
+    stringValue(run.head_sha, 'manual finalization workflow head_sha'),
+    trustedManualFinalizationCommit,
+    'manual finalization workflow head_sha',
+  );
+  const repository = objectValue(run.repository, 'manual finalization workflow repository');
+  equal(
+    stringValue(repository.full_name, 'manual finalization workflow repository'),
+    'Tom409114/scriptspect',
+    'manual finalization workflow repository',
+  );
+}
+
+function validateManualPublishRun(
+  value: unknown,
+  receipt: ManualFinalizationReadmeReleaseReceipt,
+): void {
+  const run = objectValue(value, 'manual publish workflow run');
+  equal(
+    positiveInteger(run.id, 'manual publish workflow run id'),
+    receipt.publishRunId,
+    'manual publish workflow run id',
+  );
+  equal(
+    stringValue(run.name, 'manual publish workflow name'),
+    'npm publish from immutable tag',
+    'manual publish workflow name',
+  );
+  equal(
+    stringValue(run.path, 'manual publish workflow path'),
+    '.github/workflows/npm-publish.yml',
+    'manual publish workflow path',
+  );
+  equal(
+    stringValue(run.event, 'manual publish workflow event'),
+    'workflow_dispatch',
+    'manual publish workflow event',
+  );
+  equal(
+    stringValue(run.status, 'manual publish workflow status'),
+    'completed',
+    'manual publish workflow status',
+  );
+  equal(
+    stringValue(run.conclusion, 'manual publish workflow conclusion'),
+    'failure',
+    'manual publish workflow conclusion',
+  );
+  equal(
+    stringValue(run.head_branch, 'manual publish workflow head_branch'),
+    receipt.tag,
+    'manual publish workflow head_branch',
+  );
+  equal(
+    stringValue(run.head_sha, 'manual publish workflow head_sha'),
+    receipt.commit,
+    'manual publish workflow head_sha',
+  );
+  const repository = objectValue(run.repository, 'manual publish workflow repository');
+  equal(
+    stringValue(repository.full_name, 'manual publish workflow repository'),
+    'Tom409114/scriptspect',
+    'manual publish workflow repository',
+  );
+}
+
+function sortedAssets(assets: Array<{ name: string; assetId: number; sha256: string }>): string {
+  return JSON.stringify([...assets].sort((left, right) => left.name.localeCompare(right.name)));
+}
+
+async function verifyManualFinalization(
+  fetchImpl: typeof fetch,
+  githubToken: string,
+  apiRoot: string,
+  status: PublishedReadmeStatus,
+  receipt: ManualFinalizationReadmeReleaseReceipt,
+): Promise<VerifiedReadmeReleaseEvidence> {
+  const githubJsonInit: RequestInit = {
+    headers: githubHeaders(githubToken, 'application/vnd.github+json'),
+  };
+  const exactTagUrl = `${apiRoot}/git/ref/tags/${encodeURIComponent(receipt.tag)}`;
+  const [publishRunValue, finalizationRunValue, releaseValue, exactTagValue] = await Promise.all([
+    requestJson(
+      fetchImpl,
+      `${apiRoot}/actions/runs/${receipt.publishRunId}`,
+      'manual publish workflow run',
+      githubJsonInit,
+    ),
+    requestJson(
+      fetchImpl,
+      `${apiRoot}/actions/runs/${receipt.finalizationRunId}`,
+      'manual finalization workflow run',
+      githubJsonInit,
+    ),
+    requestJson(
+      fetchImpl,
+      `${apiRoot}/releases/tags/${encodeURIComponent(receipt.tag)}`,
+      'GitHub Release',
+      githubJsonInit,
+    ),
+    requestJson(fetchImpl, exactTagUrl, 'exact tag ref', githubJsonInit),
+  ]);
+  validateManualPublishRun(publishRunValue, receipt);
+  validateManualFinalizationRun(finalizationRunValue, receipt);
+  validateTagRef(exactTagValue, receipt.tag, receipt.commit);
+  const observedRelease = releaseSnapshot(releaseValue, exactTagValue);
+  equal(observedRelease.releaseId, receipt.releaseId, 'GitHub Release id');
+  equal(observedRelease.tag, receipt.tag, 'GitHub Release tag');
+  equal(observedRelease.commit, receipt.commit, 'GitHub Release commit');
+  equal(observedRelease.draft, false, 'GitHub Release draft');
+  equal(
+    sortedAssets(observedRelease.assets),
+    sortedAssets(receipt.assets),
+    'GitHub Release assets',
+  );
+
+  const aliasRequests = receipt.aliases.map(async ({ name, target }) => {
+    const value = await requestJson(
+      fetchImpl,
+      `${apiRoot}/git/ref/tags/${encodeURIComponent(name)}`,
+      `${name} alias ref`,
+      githubJsonInit,
+    );
+    validateTagRef(value, name, target);
+  });
+  const registryUrl = `https://registry.npmjs.org/${encodeURIComponent(status.packageName)}/${encodeURIComponent(receipt.version)}`;
+  const [npmValue] = await Promise.all([
+    requestJson(fetchImpl, registryUrl, 'npm exact-version metadata', {
+      headers: { accept: 'application/json' },
+    }),
+    ...aliasRequests,
+  ]);
+  const metadata = objectValue(npmValue, 'npm exact-version metadata');
+  equal(stringValue(metadata.name, 'npm metadata name'), receipt.packageName, 'npm metadata name');
+  equal(
+    stringValue(metadata.version, 'npm metadata version'),
+    receipt.version,
+    'npm metadata version',
+  );
+  const dist = objectValue(metadata.dist, 'npm metadata dist');
+  equal(
+    stringValue(dist.integrity, 'npm metadata dist.integrity'),
+    receipt.registryNpmSRI,
+    'npm metadata dist.integrity',
+  );
+  const tarballUrl = stringValue(dist.tarball, 'npm metadata dist.tarball');
+  const tarballResponse = await request(fetchImpl, tarballUrl, 'npm registry tarball');
+  const tarballBytes = Buffer.from(await tarballResponse.arrayBuffer());
+  const tarAsset = receipt.assets.find(({ name }) => name === `scriptspect-${receipt.version}.tgz`);
+  if (tarAsset === undefined)
+    throw new Error('README release receipt is missing its package asset');
+  equal(
+    createHash('sha256').update(tarballBytes).digest('hex'),
+    tarAsset.sha256,
+    'npm registry tarball SHA-256',
+  );
+  equal(
+    `sha512-${createHash('sha512').update(tarballBytes).digest('base64')}`,
+    receipt.registryNpmSRI,
+    'npm registry tarball integrity',
+  );
+  return {
+    releaseState: 'published',
+    remoteVerification: 'verified',
+    evidenceKind: 'manual-finalization',
+    repository: receipt.repository,
+    packageName: receipt.packageName,
+    version: receipt.version,
+    tag: receipt.tag,
+    commit: receipt.commit,
+    releaseId: receipt.releaseId,
+    publishRunId: receipt.publishRunId,
+    finalizationRunId: receipt.finalizationRunId,
+  };
+}
+
 export async function verifyReadmeReleaseEvidence(
   options: VerifyReadmeReleaseEvidenceOptions = {},
 ): Promise<VerifiedReadmeReleaseEvidence> {
@@ -474,6 +714,9 @@ export async function verifyReadmeReleaseEvidence(
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== 'function') throw new Error('fetch is unavailable');
   const { apiRoot } = parseRepository(receipt.repository);
+  if (receipt.schemaVersion === 'scriptspect-readme-manual-finalization-receipt/v1') {
+    return verifyManualFinalization(fetchImpl, githubToken, apiRoot, status, receipt);
+  }
   const githubJsonInit: RequestInit = {
     headers: githubHeaders(githubToken, 'application/vnd.github+json'),
   };

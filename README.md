@@ -21,36 +21,49 @@ exact command fragment that will break in `posix-sh`, Windows `cmd`, or optional
 safety conditions are proved.
 
 <!-- readme-state:overview:start -->
-> [!IMPORTANT]
-> This repository is a **pre-release source evaluation**. The npm package and
-> public Action tag do not exist yet; the copy-paste paths below deliberately
-> use an immutable source commit.
+> [!TIP]
+> Verified release: [`scriptspect@0.1.2`](https://www.npmjs.com/package/scriptspect/v/0.1.2). The immutable Action
+> tag is [`v0.1.2`](https://github.com/Tom409114/scriptspect/releases/tag/v0.1.2); security-sensitive workflows can pin
+> the full release commit `6f439bb974b297d5a334cebe989b4b50d7483677`.
 
-**[See the real demo](#before-result-and-after)** · **[Evaluate from source](#evaluate-from-source-pre-release)** · **[GitHub Actions](#github-actions-preview-pre-release)** · **[Rules](docs/rules/README.md)**
+**[Run in 30 seconds](#quick-start)** · **[See the real demo](#before-result-and-after)** · **[GitHub Actions](#github-actions)** · **[Rules](docs/rules/README.md)**
 <!-- readme-state:overview:end -->
 
+<!-- readme-state:evaluate:start -->
+<!-- readme-section: evaluate -->
+## Quick start
+
+Requires Node.js 22 or newer. Run the exact [verified npm release](https://www.npmjs.com/package/scriptspect/v/0.1.2)
+without a global install:
+
+```bash
+npx --yes scriptspect@0.1.2 .
+```
+
+With pnpm:
+
+```bash
+pnpm dlx scriptspect@0.1.2 .
+```
+
+Findings exit `1`; a clean scan exits `0`; invalid input, configuration, or I/O
+exits `2`. Start with `--fix-dry-run` before applying any reviewed fix.
+<!-- readme-state:evaluate:end -->
+
 <!-- readme-section: purpose -->
-## What it does, who it is for, and how it works
+## One project. Different machines. The same scripts.
 
-Use ScriptSpect if you maintain a JS/TS app, library, CLI, or monorepo; own CI
-or releases; or support contributors on more than one operating system. It
-solves the familiar failure where a script works on its author's Mac or Linux
-machine but fails for Windows users—or contains Windows-only syntax that fails
-on Unix CI.
+**A build that works on your Mac can fail on a contributor's Windows laptop.**
+ScriptSpect catches those shell assumptions in `package.json` before they reach CI.
 
-| Question | Direct answer |
+| Your workflow | What ScriptSpect gives you |
 | --- | --- |
-| **Who uses it?** | JS/TS maintainers, monorepo owners, Windows contributors, and CI/release teams. |
-| **What problem does it catch?** | Shell-specific environment assignment, commands such as `rm`/`cp`/`mv`, expansion, redirection, operators, paths, explicit shell dependencies, and undeclared executables. |
-| **How does it check?** | It discovers the root package and workspaces, structurally parses every script for the selected shell targets, and never executes the target commands. |
-| **What do you get?** | An exact rule ID, package and script name, source span, affected shell/OS, severity, confidence, explanation, and terminal/JSON/PR-annotation output. |
-| **How does it help fix it?** | `--fix-dry-run` previews a patch. `--fix` applies only proven safe or precondition-satisfied changes; ambiguous cases stay manual. |
+| Maintain a JS/TS app, library, or CLI | Find the command and platform behind a portability failure. |
+| Work in a monorepo | Check the root package and discovered workspaces together. |
+| Review human- or agent-written scripts | Get structured JSON or PR annotations, then preview a fix with `--fix-dry-run`. |
 
-The mental model is: **repository → static target-shell analysis → exact
-findings → reviewable fix plan**. For the current pre-release, follow
-[Evaluate from source](#evaluate-from-source-pre-release), run
-`node dist/cli.mjs <your-project>`, and add `--fix-dry-run` to preview changes.
-For pull requests, copy the [GitHub Actions preview](#github-actions-preview-pre-release).
+**Point it at a repository → inspect the findings → review the patch.**
+Analysis is local and read-only by default. You decide which fixes to apply.
 
 <!-- readme-section: why -->
 ## Why it is useful
@@ -113,43 +126,20 @@ post-write analysis, and a recovery journal; it never installs dependencies or
 rewrites a lockfile. Regenerate all demo assets with
 `pnpm exec tsx tools/generate-readme-demo.ts`.
 
-<!-- readme-state:evaluate:start -->
-<!-- readme-section: evaluate -->
-## Evaluate from source (pre-release)
-
-Requires Node.js 22 or newer and pnpm via Corepack. Clone the repository, check
-out the reviewed commit, install exactly from the lockfile, build, and scan the
-versioned demo fixture. Findings exit `1`; a clean scan exits `0`; invalid input,
-configuration, or I/O exits `2`.
-
-```bash
-git clone https://github.com/Tom409114/scriptspect.git
-cd scriptspect
-git checkout c9c671c8e150705d78d9169d4c5a8f22cb37fad0
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-node dist/cli.mjs tests/fixtures/readme-demo
-```
-
-There is deliberately no `npx scriptspect` quick start yet. The machine-readable
-release state is [docs/readme-status.json](docs/readme-status.json).
-<!-- readme-state:evaluate:end -->
-
 <!-- readme-section: cli -->
 ## CLI at a glance
 
-The source build supports human, JSON, and GitHub-friendly output, focused rule
+The CLI supports human, JSON, and GitHub-friendly output, focused rule
 runs, explicit target matrices, and opt-in fixes.
 
 ```bash
-node dist/cli.mjs [path]
-node dist/cli.mjs [path] --format json
-node dist/cli.mjs [path] --target posix-sh,cmd,powershell
-node dist/cli.mjs [path] --rule PS001,PS010
-node dist/cli.mjs [path] --fix-dry-run
-node dist/cli.mjs [path] --fix
-node dist/cli.mjs explain PS010
+npx --yes scriptspect@0.1.2 .
+npx --yes scriptspect@0.1.2 . --format json
+npx --yes scriptspect@0.1.2 . --target posix-sh,cmd,powershell
+npx --yes scriptspect@0.1.2 . --rule PS001,PS010
+npx --yes scriptspect@0.1.2 . --fix-dry-run
+npx --yes scriptspect@0.1.2 . --fix
+npx --yes scriptspect@0.1.2 explain PS010
 ```
 
 Presentation filters do not hide failure semantics: any configured `error`
@@ -157,15 +147,14 @@ fails, and the unfiltered warning count is compared with `--max-warnings`.
 
 <!-- readme-state:action:start -->
 <!-- readme-section: action -->
-## GitHub Actions preview (pre-release)
+## GitHub Actions
 
-This complete example checks out both the consumer and an immutable ScriptSpect
-source commit, then runs the bundled local Action. Do not replace the commit
-with the nonexistent `Tom409114/scriptspect@v0.1` tag. After a verified release,
-security-sensitive workflows should continue pinning a full commit SHA.
+Use the [verified immutable release tag](https://github.com/Tom409114/scriptspect/releases/tag/v0.1.2) for readable workflows.
+For the strongest supply-chain pin, replace `v0.1.2` with the full release
+commit `6f439bb974b297d5a334cebe989b4b50d7483677`.
 
 ```yaml
-name: scriptspect pre-release evaluation
+name: scriptspect
 on: [pull_request]
 permissions:
   contents: read
@@ -176,13 +165,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Tom409114/scriptspect
-          ref: c9c671c8e150705d78d9169d4c5a8f22cb37fad0
-          path: .scriptspect
-          persist-credentials: false
-      - uses: ./.scriptspect
+      - uses: Tom409114/scriptspect@v0.1.2
         with:
           path: .
 ```
@@ -228,10 +211,10 @@ to explain an intentional platform-specific script.
 Contracts: [config JSON Schema](schema/config.schema.json) · [JSON output Schema](schema/output.schema.json)
 
 <!-- readme-section: support -->
-## Scope and honest limits
+## Built for your workflow
 
 <!-- readme-state:scope-table:start -->
-| Area | Current source-evaluation behavior |
+| Area | Current behavior |
 | --- | --- |
 | Projects | root `package.json` plus npm/Yarn/Bun workspaces and `pnpm-workspace.yaml` |
 | Targets | `posix-sh` + `cmd` by default; opt-in `powershell` evidence |
@@ -241,14 +224,10 @@ Contracts: [config JSON Schema](schema/config.schema.json) · [JSON output Schem
 | Privacy | offline analysis; scripts are not executed; no telemetry |
 <!-- readme-state:scope-table:end -->
 <!-- readme-state:release-row:start -->
-**Release:** pre-release; no npm package or public Action reference yet.
+**Release:** [npm 0.1.2](https://www.npmjs.com/package/scriptspect/v/0.1.2) · [Action v0.1.2](https://github.com/Tom409114/scriptspect/releases/tag/v0.1.2) · full SHA `6f439bb974b297d5a334cebe989b4b50d7483677`.
 <!-- readme-state:release-row:end -->
 
-The homepage does not claim external adoption, measured precision, comparative
-superiority, or hosted performance. Even after a verified release, external
-validation and adoption gates remain evidence-led. The [validation
-ledger](docs/validation/spec-compliance-2026-09-01.md) keeps repository-controlled
-work separate from evidence that only real users can create.
+Have a real cross-platform failure? [Open an issue](https://github.com/Tom409114/scriptspect/issues/new/choose) with the script, target shell, and expected behavior. Your example helps improve the rules.
 
 <!-- readme-section: faq -->
 ## FAQ and troubleshooting
@@ -269,9 +248,9 @@ field, the standalone file, then defaults. Non-default sources are reported in
 human-readable output.
 
 <!-- readme-state:production-faq:start -->
-**Can I use it in production CI today?** Treat this source checkout as an
-evaluation build. Wait for public npm, Release, provenance, checksum, and
-immutable Action-consumer evidence before depending on a released reference.
+**Can I use it in production CI today?** Yes—use the verified `scriptspect@0.1.2`
+package or immutable `v0.1.2` Action reference above. Pin `6f439bb974b297d5a334cebe989b4b50d7483677`
+when your policy requires an exact commit.
 <!-- readme-state:production-faq:end -->
 
 <!-- readme-section: navigation -->
@@ -285,6 +264,7 @@ immutable Action-consumer evidence before depending on a released reference.
 - [Corpus methodology](docs/evidence/corpus-method.md)
 - [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
+- [Share ScriptSpect: launch drafts and demo storyboard](docs/launch-kit.md)
 - [Roadmap](docs/roadmap.md)
 - [Evidence policy](docs/evidence/README.md)
 

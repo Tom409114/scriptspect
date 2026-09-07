@@ -128,6 +128,78 @@ describe('PS051 target shell parse diagnostics', () => {
       }),
     ]);
   });
+
+  it('accepts a real POSIX function with case arms while retaining non-POSIX failures', () => {
+    const script =
+      'f() { case "$1" in test/unit/*) vitest run "$1" ;; test/*) vitest run -c vitest.config.db.ts "$1" ;; *) vitest run "$1" || vitest run -c vitest.config.db.ts "$1" ;; esac; }; f';
+
+    expect(analyze(script, ['posix-sh'], ['PS051'])).toEqual([]);
+    for (const target of ['cmd', 'powershell'] as const) {
+      expect(analyze(script, [target], ['PS051'])).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: 'PS051',
+            severity: 'error',
+            confidence: 'high',
+            affectedTargets: [target],
+            subtype: 'unbalanced-group',
+          }),
+        ]),
+      );
+    }
+  });
+
+  it('reports an unterminated POSIX case as a deterministic PS051 failure', () => {
+    expect(analyze('case "$x" in foo) echo ok ;;', ['posix-sh'], ['PS051'])).toEqual([
+      expect.objectContaining({
+        ruleId: 'PS051',
+        severity: 'error',
+        confidence: 'high',
+        affectedTargets: ['posix-sh'],
+        subtype: 'unterminated-case',
+      }),
+    ]);
+  });
+});
+
+describe('POSIX case command traversal', () => {
+  const script = 'case "$x" in build) vite build ;; clean) rm -rf dist ;; esac';
+
+  it('feeds a case-arm local tool invocation to PS040', () => {
+    expect(analyze(script, ['posix-sh'], ['PS040'])).toEqual([
+      expect.objectContaining({
+        ruleId: 'PS040',
+        scriptName: 'test',
+        affectedTargets: ['posix-sh'],
+      }),
+    ]);
+  });
+
+  it('does not treat a POSIX case body as executable cmd syntax', () => {
+    expect(analyze(script, ['cmd'], ['PS010'])).toEqual([]);
+  });
+
+  it('keeps analyzing after an if-wrapped case statement', () => {
+    const findings = analyze(
+      'if true; then case x in foo) echo in ;; esac; fi; vite after',
+      ['posix-sh'],
+      ['PS040'],
+    );
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({ ruleId: 'PS040', affectedTargets: ['posix-sh'] }),
+    );
+  });
+
+  it.each([
+    'if case x in foo) echo yes ;; esac; then vite build; fi',
+    'while case x in foo) echo yes ;; esac; do vite build; done',
+    'if true; then case x in foo) echo yes ;; esac; else vite build; fi',
+  ])('feeds the first command after a compound case boundary to PS040 in %s', (script) => {
+    expect(analyze(script, ['posix-sh'], ['PS040'])).toContainEqual(
+      expect.objectContaining({ ruleId: 'PS040', affectedTargets: ['posix-sh'] }),
+    );
+  });
 });
 
 describe('matrix diagnostic fix gates', () => {

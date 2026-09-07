@@ -1,8 +1,22 @@
 # Published-homepage handoff
 
-The homepage must remain in `pre-release` state until the release workflow has
-finished npm publication, provenance verification, public Release verification,
-floating-alias verification, and the terminal `consumed` release state.
+The homepage must remain in `pre-release` state until public release evidence
+has been verified. The normal release workflow provides a terminal `consumed`
+receipt after npm publication, provenance, public Release and alias checks.
+
+## Current release: 0.1.2
+
+The first public release used the bounded `finalize-published-0.1.2.yml`
+workflow after the legacy provenance-audit parser failed. Its
+[manual-finalization receipt](validation/releases/v0.1.2/readme-release-receipt.json)
+records the successful finalization run, exact four asset IDs/digests, npm SRI,
+immutable source and aliases. The verifier checks these against GitHub and npm.
+It does **not** pretend that the old intent reached `consumed` or that a
+`final-verification.json` asset exists. This narrowly supported recovery receipt
+is distinct from the normal terminal receipt described below.
+
+Published README commands describe the immutable release, not every subsequent
+change on `main`. CI checks the demo against that released source separately.
 
 The transition is deliberately a second pull request. Do not include it in the
 release-please PR: the README can only cite public evidence that exists after the

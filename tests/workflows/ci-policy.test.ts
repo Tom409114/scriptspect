@@ -178,6 +178,15 @@ describe('reproducible CI', () => {
     expect(generatedRun).toContain('set -o pipefail');
     expect(generatedRun).toContain('SOURCE_DIFF=$?');
     expect(generatedRun).toContain('case "$SOURCE_DIFF" in');
+    expect(generatedRun).toContain('RELEASE_STATE=$(node -e');
+    expect(generatedRun).toMatch(
+      /if \[ "\$RELEASE_STATE" = "pre-release" \]; then\s+pnpm exec tsx tools\/generate-readme-demo\.ts\s+fi/u,
+    );
+    expect(generatedRun).toContain('verify_pinned_demo()');
+    expect(generatedRun).toMatch(
+      /1\)\s+case "\$RELEASE_STATE" in\s+published\)\s+verify_pinned_demo/u,
+    );
+    expect(generatedRun).toMatch(/pre-release\)\s+git diff --quiet "\$STATUS_COMMIT" HEAD --/u);
     expect(generatedRun).not.toContain('if ! git diff --quiet "$SOURCE_BASE" HEAD --');
     expect(generatedRun).toContain('git archive "$STATUS_COMMIT"');
     for (const pinnedAsset of [

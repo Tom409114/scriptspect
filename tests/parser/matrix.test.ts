@@ -245,6 +245,136 @@ describe('target-local dialect parsing', () => {
     });
   });
 
+  it('recognizes POSIX case-arm delimiters without weakening other target diagnostics', () => {
+    const source =
+      'f() { case "$1" in test/unit/*) vitest run "$1" ;; test/*) vitest run -c vitest.config.db.ts "$1" ;; *) vitest run "$1" || vitest run -c vitest.config.db.ts "$1" ;; esac; }; f';
+
+    expect(parseForTarget(source, 'posix-sh').diagnostics).toEqual([]);
+    for (const target of ['cmd', 'powershell'] as const) {
+      expect(
+        parseForTarget(source, target).diagnostics.filter(
+          (diagnostic) => diagnostic.code === 'unbalanced-group',
+        ),
+      ).toEqual([
+        expect.objectContaining({ span: [30, 31], severity: 'error' }),
+        expect.objectContaining({ span: [57, 58], severity: 'error' }),
+        expect.objectContaining({ span: [102, 103], severity: 'error' }),
+      ]);
+    }
+  });
+
+  it('parses multiline POSIX case bodies into the command IR without diagnostics', () => {
+    const source = [
+      'case "$1" in',
+      '  build)',
+      '    vite build',
+      '    ;;',
+      '  clean)',
+      '    rm -rf dist',
+      '    ;;',
+      'esac',
+    ].join('\n');
+
+    expect(parseForTarget(source, 'posix-sh').diagnostics).toEqual([]);
+    expect(commandNames(source, 'posix-sh')).toEqual(expect.arrayContaining(['vite', 'rm']));
+    expect(commandNames(source, 'cmd')).not.toEqual(expect.arrayContaining(['vite', 'rm']));
+    expect(commandNames(source, 'powershell')).not.toEqual(expect.arrayContaining(['vite', 'rm']));
+  });
+
+  it.each([
+    ['missing esac', 'case "$x" in foo) echo ok ;;'],
+    ['quoted case', '"case" x in foo) echo ok ;; esac'],
+    ['quoted in', 'case x "in" foo) echo ok ;; esac'],
+    ['quoted esac', 'case x in foo) echo ok ;; "esac"'],
+  ])('does not clean-pass malformed POSIX case syntax with %s', (_label, source) => {
+    expect(
+      parseForTarget(source, 'posix-sh').diagnostics.some(
+        (diagnostic) => diagnostic.severity === 'error',
+      ),
+    ).toBe(true);
+  });
+
+  it('marks an if-wrapped case boundary as unsupported while retaining its body commands', () => {
+    const source = 'if case x in foo) vite build ;; esac; then echo ok; fi';
+    const parsed = parseForTarget(source, 'posix-sh');
+
+    expect(parsed.diagnostics).toEqual([
+      expect.objectContaining({ code: 'unsupported-subset', severity: 'advisory' }),
+    ]);
+    expect(commandNames(source, 'posix-sh')).toContain('vite');
+  });
+
+  it.each([
+    'if case x in foo) echo yes ;; esac; then vite build; fi',
+    'while case x in foo) echo yes ;; esac; do vite build; done',
+    'if true; then case x in foo) echo yes ;; esac; else vite build; fi',
+  ])('retains the first command after a compound case boundary in %s', (source) => {
+    expect(commandNames(source, 'posix-sh')).toContain('vite');
+  });
+
+  it('does not manufacture a command from a later case grammar boundary', () => {
+    const source =
+      'if case x in foo) echo one ;; esac; then case y in bar) vite build ;; esac; else echo no; fi';
+
+    expect(commandNames(source, 'posix-sh')).toContain('vite');
+    expect(commandNames(source, 'posix-sh')).not.toContain('case');
+  });
+
+  it('keeps a case statement inside a subshell group as grammar rather than a command', () => {
+    const source = '(case x in foo) echo ok ;; esac)';
+    const parsed = parseForTarget(source, 'posix-sh');
+
+    expect(parsed.diagnostics).toEqual([]);
+    expect(commandNames(source, 'posix-sh')).toEqual(['echo']);
+  });
+
+  it.each([
+    ['an empty arm list', 'case x in esac', []],
+    ['parenthesized alternatives', 'case x in (foo|bar) echo ok ;; esac', ['echo']],
+    ['an empty terminated arm', 'case x in foo) ;; esac', []],
+    ['an empty final arm', 'case x in foo) esac', []],
+    ['a final arm without double semicolon', 'case x in foo) echo ok; esac', ['echo']],
+    ['a nested case body', 'case x in foo) case y in bar) echo nested ;; esac ;; esac', ['echo']],
+  ] as const)('parses %s without manufacturing grammar commands', (_label, source, expected) => {
+    expect(parseForTarget(source, 'posix-sh').diagnostics).toEqual([]);
+    expect(commandNames(source, 'posix-sh')).toEqual(expected);
+  });
+
+  it.each([
+    ['a missing expression', 'case'],
+    ['a missing in keyword', 'case x'],
+    ['a missing first pattern', 'case x in ) echo ok ;; esac'],
+    ['a missing alternative pattern', 'case x in foo|) echo ok ;; esac'],
+    ['a missing pattern closer', 'case x in foo echo ok ;; esac'],
+    ['a malformed nested case', 'case x in foo) case ;; esac'],
+  ])('fails closed for %s', (_label, source) => {
+    expect(parseForTarget(source, 'posix-sh').diagnostics).toContainEqual(
+      expect.objectContaining({ severity: 'error' }),
+    );
+  });
+
+  it('does not accept a line break between the case keyword and its selector word', () => {
+    expect(
+      parseForTarget('case\nx in foo) echo ok ;; esac', 'posix-sh').diagnostics,
+    ).toContainEqual(expect.objectContaining({ code: 'malformed-case', severity: 'error' }));
+  });
+
+  it.each([
+    ['fall through', 'case x in foo) echo one ;& bar) echo two ;; esac'],
+    ['continue pattern testing', 'case x in foo) echo one ;;& bar) echo two ;; esac'],
+  ])('supports the POSIX case %s terminator', (_label, source) => {
+    expect(parseForTarget(source, 'posix-sh').diagnostics).toEqual([]);
+    expect(commandNames(source, 'posix-sh')).toEqual(['echo', 'echo']);
+  });
+
+  it('recovers commands after a case nested in an unsupported compound wrapper', () => {
+    const source = 'if true; then case x in foo) echo in ;; esac; fi; vite after';
+    const parsed = parseForTarget(source, 'posix-sh');
+
+    expect(parsed.diagnostics).toEqual([]);
+    expect(commandNames(source, 'posix-sh')).toContain('vite');
+  });
+
   it('keeps diagnostics from evidence-only parses out of the active target set', () => {
     const matrix = parseMatrix("echo 'oops", new Set<ShellTarget>(['cmd']), new Set());
 

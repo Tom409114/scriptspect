@@ -76,7 +76,93 @@ const publishedStatus = {
   },
 } as const;
 
+const manualFinalizationReceipt = {
+  schemaVersion: 'scriptspect-readme-manual-finalization-receipt/v1',
+  repository: 'https://github.com/Tom409114/scriptspect',
+  packageName: 'scriptspect',
+  version: '0.1.2',
+  tag: 'v0.1.2',
+  commit: '6f439bb974b297d5a334cebe989b4b50d7483677',
+  releaseId: 384192380,
+  publishRunId: 34139934545,
+  finalizationRunId: 34140851653,
+  finalizationWorkflowPath: '.github/workflows/finalize-published-0.1.2.yml',
+  registryNpmSRI:
+    'sha512-YY8+I8Xg0oZ9oFqV+UCkKmzShj3gW/xmrDMFuUpxXAgZs08c6XrKfg3RA+Oea3htSJ6CF1w/05dlyoK2AH5k+A==',
+  assets: [
+    {
+      name: 'scriptspect-0.1.2.tgz',
+      assetId: 549013932,
+      sha256: '09a7a71fa966849903b30b1f8a67cbee8727cc2a8a34807f96c8868990c2e14b',
+    },
+    {
+      name: 'SHA256SUMS',
+      assetId: 549013970,
+      sha256: 'be1f2a2c66a60296809753e7f2224992fee6773ea56ee8d2f419d6baf118de52',
+    },
+    {
+      name: 'candidate-manifest.json',
+      assetId: 549014023,
+      sha256: 'aa6222faa7813de626d1cfa4273a98dc5cd5e4565e0ad685db4b8193688597df',
+    },
+    {
+      name: 'release-manifest.json',
+      assetId: 549014080,
+      sha256: '6e97080bcc9a51c2495b52d1a32dae929870bca3995b44b16520106827c003ae',
+    },
+  ],
+  aliases: [
+    { name: 'v0.1', target: '6f439bb974b297d5a334cebe989b4b50d7483677' },
+    { name: 'v0', target: '6f439bb974b297d5a334cebe989b4b50d7483677' },
+  ],
+} as const;
+
 describe('README release receipt', () => {
+  it('accepts a truthful manual-finalization receipt without terminal-state fields', () => {
+    expect(validateReadmeReleaseReceipt(manualFinalizationReceipt)).toEqual(
+      manualFinalizationReceipt,
+    );
+  });
+
+  it('rejects manual-finalization evidence for any workflow except the protected recovery workflow', () => {
+    expect(() =>
+      validateReadmeReleaseReceipt({
+        ...manualFinalizationReceipt,
+        finalizationWorkflowPath: '.github/workflows/other.yml',
+      }),
+    ).toThrow(/finalizationWorkflowPath/u);
+  });
+
+  it('rejects manual-finalization evidence that names another historical run', () => {
+    expect(() =>
+      validateReadmeReleaseReceipt({
+        ...manualFinalizationReceipt,
+        publishRunId: manualFinalizationReceipt.publishRunId + 1,
+      }),
+    ).toThrow(/publishRunId/u);
+    expect(() =>
+      validateReadmeReleaseReceipt({
+        ...manualFinalizationReceipt,
+        finalizationRunId: manualFinalizationReceipt.finalizationRunId + 1,
+      }),
+    ).toThrow(/finalizationRunId/u);
+  });
+
+  it('binds manual-finalization evidence to published README status', () => {
+    const status = {
+      ...publishedStatus,
+      packageVersion: manualFinalizationReceipt.version,
+      sourceCommit: manualFinalizationReceipt.commit,
+      releaseEvidence: {
+        ...publishedStatus.releaseEvidence,
+        digest: '91fc809d5144da268dec42218b4119ec762ace65500d68e27da99f3ee22fc0ce',
+      },
+    };
+    expect(validateReceiptAgainstStatus(manualFinalizationReceipt, status)).toEqual(
+      manualFinalizationReceipt,
+    );
+  });
+
   it('validates and normalizes an exact receipt', () => {
     expect(validateReadmeReleaseReceipt(validReceipt)).toEqual(normalizedReceipt);
   });

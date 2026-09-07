@@ -57,16 +57,10 @@ describe('bilingual homepage', () => {
     }
   });
 
-  it('answers what the product does, who uses it, and how it works', () => {
+  it('keeps the purpose section before the detailed demo', () => {
     const english = read('README.md');
     const chinese = read('README.zh-CN.md');
 
-    expect(english).toContain('## What it does, who it is for, and how it works');
-    expect(english).toContain('JS/TS maintainers');
-    expect(english).toContain('repository → static target-shell analysis');
-    expect(chinese).toContain('## 它到底做什么、谁适合用、怎么工作');
-    expect(chinese).toContain('JS/TS 维护者');
-    expect(chinese).toContain('repository → target-shell 静态分析');
     for (const homepage of [english, chinese]) {
       expect(homepage.indexOf('<!-- readme-section: purpose -->')).toBeLessThan(
         homepage.indexOf('<!-- readme-section: demo -->'),
@@ -102,7 +96,7 @@ describe('bilingual homepage', () => {
     }
   });
 
-  it('leads with the executable demo and links real hosted Action evidence', () => {
+  it('places quick start before the detailed demo and links real hosted Action evidence', () => {
     const english = read('README.md');
     const chinese = read('README.zh-CN.md');
     const evidence = JSON.parse(read('docs/validation/readme-action-evidence.json')) as {
@@ -143,8 +137,8 @@ describe('bilingual homepage', () => {
     );
 
     for (const homepage of [english, chinese]) {
-      expect(homepage.indexOf('<!-- readme-section: demo -->')).toBeLessThan(
-        homepage.indexOf('<!-- readme-section: evaluate -->'),
+      expect(homepage.indexOf('<!-- readme-section: evaluate -->')).toBeLessThan(
+        homepage.indexOf('<!-- readme-section: demo -->'),
       );
       expect(homepage).toContain('docs/assets/demo/action.svg');
       expect(homepage).toContain('docs/assets/demo/action.txt');

@@ -40,13 +40,21 @@ public code. A machine scan produces a **data draft**, not a precision claim.
    REST core requests. The scanner never clones, executes scripts, or writes to
    a sampled repository.
 4. Only the root `package.json`, `pnpm-workspace.yaml`, and candidate workspace
-   `package.json` files are materialized in a fresh temporary directory. The
-   normal CLI analyzer then applies the same canonical-root, workspace glob,
-   dependency visibility, and symlink-boundary policy used for local projects.
+   `package.json` files are downloaded and materialized in a fresh temporary
+   directory. A regular root `package-lock.json` or `npm-shrinkwrap.json` is a
+   special npm-manager signal: its potentially large bytes are **not** downloaded
+   or parsed. Instead, the scanner containment-checks the fixed root-only path and
+   creates an empty regular file whose only meaning is “this npm lockfile exists
+   at the immutable source tree.” Nested locks, symlinks, and other manager
+   configuration are not projected. The normal CLI analyzer then applies the
+   same canonical-root, workspace glob, dependency visibility, and
+   symlink-boundary policy used for local projects.
 5. Dependency/VCS/vendor/generated/build/distribution directories and symlink
    tree entries are excluded. The default ceilings are 20,000 tree entries,
-   500 manifests, depth 12, 1 MiB per file, and 10 MiB decoded bytes per
-   repository. A GitHub-truncated tree or any local limit marks the repository
+   500 manifests, depth 12, 1 MiB per downloaded file, and 10 MiB decoded bytes
+   per repository. Presence-only npm lock projections remain inside the tree-entry
+   ceiling but do not count as downloaded/decoded bytes. A GitHub-truncated tree
+   or any local limit marks the repository
    `truncated`; API, decoding, immutable-blob verification, or analysis errors
    mark it `failed`. Neither status contributes to promoted totals. GitHub HTTP
    failures retain their status, rate-limit limit/remaining/reset/used/resource,
@@ -71,11 +79,16 @@ The workflow artifact contains:
 - `repos.txt`: the exact immutable sample;
 - `findings.jsonl`: stable finding IDs, immutable source URLs, script SHA-256,
   rule metadata, spans, and source-free rule summaries—never raw script source;
-- `corpus-run.json`: selected manifest paths, scanner/source commit and hashes,
+- `corpus-run.json` (schema version 2): selected downloaded manifest paths,
+  scanner/source commit and hashes,
   rule-registry hash, limits, sample method/seed, hashes of the full candidate
   snapshot and sample evidence, environment, per-repository status, separate
   scan modes, artifact hashes, and a directly copyable POSIX-shell reproduction
-  command;
+  command. Each applied npm-manager projection records its fixed projected path,
+  the `presence-only-empty-regular-file-v1` semantics, the immutable source-tree
+  path/mode/Git blob OID/original byte size, and the projected zero-byte file's
+  SHA-256. This is presence evidence, not a claim that the original lockfile bytes
+  were materialized or inspected;
 - `summary.md`: an explicitly unverified summary for maintainers.
 
 To replay a run, place its `repository-candidates.json`,

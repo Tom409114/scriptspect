@@ -60,7 +60,10 @@ jobs:
           set -o pipefail
           pnpm exec tsx tools/generate-schemas.ts
           pnpm docs:rules
-          pnpm exec tsx tools/generate-readme-demo.ts
+          RELEASE_STATE=$(node -e "const fs=require('node:fs'); const status=JSON.parse(fs.readFileSync('docs/readme-status.json')); if(!['pre-release','published'].includes(status.releaseState)) process.exit(1); process.stdout.write(status.releaseState)")
+          if [ "$RELEASE_STATE" = "pre-release" ]; then
+            pnpm exec tsx tools/generate-readme-demo.ts
+          fi
           pnpm exec tsx tools/verify-readme-release-evidence.ts
           pnpm exec tsx tools/check-readme-parity.ts
           STATUS_COMMIT=$(node -e "const fs=require('node:fs'); const status=JSON.parse(fs.readFileSync('docs/readme-status.json')); if(!/^[0-9a-f]{40}$/.test(status.sourceCommit)) process.exit(1); process.stdout.write(status.sourceCommit)")
@@ -68,6 +71,25 @@ jobs:
           git merge-base --is-ancestor "$STATUS_COMMIT" HEAD
           test "$STATUS_COMMIT" != "$(git rev-parse HEAD)"
           git cat-file -e "$SOURCE_BASE^{commit}"
+          verify_pinned_demo() {
+            PINNED_SOURCE_DIR="$RUNNER_TEMP/readme-pinned-source"
+            mkdir -p "$PINNED_SOURCE_DIR"
+            git archive "$STATUS_COMMIT" | tar -x -C "$PINNED_SOURCE_DIR"
+            (
+              cd "$PINNED_SOURCE_DIR"
+              corepack pnpm install --frozen-lockfile
+              corepack pnpm exec tsx tools/generate-readme-demo.ts
+            )
+            for PINNED_ASSET in \
+              package.before.json \
+              terminal.txt \
+              fix.patch \
+              package.after.json; do
+              git diff --no-index --exit-code -- \
+                "$PINNED_SOURCE_DIR/docs/assets/demo/$PINNED_ASSET" \
+                "docs/assets/demo/$PINNED_ASSET"
+            done
+          }
           set +e
           git diff --quiet "$SOURCE_BASE" HEAD -- \
             docs/readme-status.json \
@@ -78,27 +100,18 @@ jobs:
           set -e
           case "$SOURCE_DIFF" in
             0)
-              PINNED_SOURCE_DIR="$RUNNER_TEMP/readme-pinned-source"
-              mkdir -p "$PINNED_SOURCE_DIR"
-              git archive "$STATUS_COMMIT" | tar -x -C "$PINNED_SOURCE_DIR"
-              (
-                cd "$PINNED_SOURCE_DIR"
-                corepack pnpm install --frozen-lockfile
-                corepack pnpm exec tsx tools/generate-readme-demo.ts
-              )
-              for PINNED_ASSET in \
-                package.before.json \
-                terminal.txt \
-                fix.patch \
-                package.after.json; do
-                git diff --no-index --exit-code -- \
-                  "$PINNED_SOURCE_DIR/docs/assets/demo/$PINNED_ASSET" \
-                  "docs/assets/demo/$PINNED_ASSET"
-              done
+              verify_pinned_demo
               ;;
             1)
-              git diff --quiet "$STATUS_COMMIT" HEAD -- \
-                src dist schema package.json pnpm-lock.yaml pnpm-workspace.yaml action.yml tsconfig.json tsup.config.ts
+              case "$RELEASE_STATE" in
+                published)
+                  verify_pinned_demo
+                  ;;
+                pre-release)
+                  git diff --quiet "$STATUS_COMMIT" HEAD -- \
+                    src dist schema package.json pnpm-lock.yaml pnpm-workspace.yaml action.yml tsconfig.json tsup.config.ts
+                  ;;
+              esac
               ;;
             *)
               echo "::error::unable to compare README source metadata with the event base"

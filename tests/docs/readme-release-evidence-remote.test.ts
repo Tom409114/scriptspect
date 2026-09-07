@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -571,4 +572,230 @@ describe('remote README release evidence', () => {
       ).rejects.toThrow(new RegExp(`${alias.replaceAll('.', '\\.')} tag ref target`, 'u'));
     },
   );
+});
+
+describe('manual-finalization README release evidence', () => {
+  const manualCommit = '6f439bb974b297d5a334cebe989b4b50d7483677';
+  const packageBytes = Buffer.from('immutable package bytes');
+  const packageSha256 = createHash('sha256').update(packageBytes).digest('hex');
+  const packageSRI = `sha512-${createHash('sha512').update(packageBytes).digest('base64')}`;
+  const manualAssets = [
+    { name: 'scriptspect-0.1.2.tgz', assetId: 41, sha256: packageSha256 },
+    { name: 'SHA256SUMS', assetId: 42, sha256: '2'.repeat(64) },
+    { name: 'candidate-manifest.json', assetId: 43, sha256: '3'.repeat(64) },
+    { name: 'release-manifest.json', assetId: 44, sha256: '4'.repeat(64) },
+  ];
+  const manualReceipt = {
+    schemaVersion: 'scriptspect-readme-manual-finalization-receipt/v1',
+    repository: 'https://github.com/Tom409114/scriptspect',
+    packageName: 'scriptspect',
+    version: '0.1.2',
+    tag: 'v0.1.2',
+    commit: manualCommit,
+    releaseId: 31,
+    publishRunId: 34139934545,
+    finalizationRunId: 34140851653,
+    finalizationWorkflowPath: '.github/workflows/finalize-published-0.1.2.yml',
+    registryNpmSRI: packageSRI,
+    assets: manualAssets,
+    aliases: [
+      { name: 'v0.1', target: manualCommit },
+      { name: 'v0', target: manualCommit },
+    ],
+  } as const;
+
+  function writeManualEvidence(): { repositoryRoot: string; statusPath: string } {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), 'scriptspect-readme-manual-'));
+    temporaryRoots.push(repositoryRoot);
+    const statusPath = join(repositoryRoot, 'docs', 'readme-status.json');
+    const receiptDirectory = join(repositoryRoot, 'docs', 'validation', 'releases', 'v0.1.2');
+    mkdirSync(receiptDirectory, { recursive: true });
+    writeFileSync(
+      join(receiptDirectory, 'readme-release-receipt.json'),
+      `${JSON.stringify(manualReceipt)}\n`,
+    );
+    writeFileSync(
+      statusPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        releaseState: 'published',
+        packageName: 'scriptspect',
+        packageVersion: '0.1.2',
+        sourceCommit: manualCommit,
+        nodeMajor: 22,
+        repository: manualReceipt.repository,
+        releaseEvidence: {
+          receiptPath: 'validation/releases/v0.1.2/readme-release-receipt.json',
+          digest: canonicalJsonDigest(manualReceipt),
+        },
+      })}\n`,
+    );
+    return { repositoryRoot, statusPath };
+  }
+
+  function manualFetch(
+    overrides: {
+      repositoryFullName?: string;
+      releaseAssets?: typeof manualAssets;
+      tarballBytes?: Uint8Array;
+      publishRun?: Record<string, unknown>;
+      finalizationRun?: Record<string, unknown>;
+    } = {},
+  ): typeof fetch {
+    const apiRoot = 'https://api.github.com/repos/Tom409114/scriptspect';
+    const repositoryFullName = overrides.repositoryFullName ?? 'Tom409114/scriptspect';
+    const releaseAssets = overrides.releaseAssets ?? manualAssets;
+    const tarballBytes = overrides.tarballBytes ?? packageBytes;
+    const publishRun = overrides.publishRun ?? {
+      id: manualReceipt.publishRunId,
+      name: 'npm publish from immutable tag',
+      path: '.github/workflows/npm-publish.yml',
+      event: 'workflow_dispatch',
+      status: 'completed',
+      conclusion: 'failure',
+      head_branch: manualReceipt.tag,
+      head_sha: manualCommit,
+      repository: { full_name: 'Tom409114/scriptspect' },
+    };
+    const finalizationRun = overrides.finalizationRun ?? {
+      id: manualReceipt.finalizationRunId,
+      name: 'Finalize already-published 0.1.2',
+      path: manualReceipt.finalizationWorkflowPath,
+      event: 'workflow_dispatch',
+      status: 'completed',
+      conclusion: 'success',
+      head_branch: 'main',
+      head_sha: 'cc99a79c7b835ff530b081d181e649de96d589e9',
+      repository: { full_name: repositoryFullName },
+    };
+    return async (input) => {
+      const url = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url;
+      if (url === `${apiRoot}/actions/runs/${manualReceipt.publishRunId}`) {
+        return jsonResponse(publishRun);
+      }
+      if (url === `${apiRoot}/actions/runs/${manualReceipt.finalizationRunId}`) {
+        return jsonResponse(finalizationRun);
+      }
+      if (url === `${apiRoot}/releases/tags/v0.1.2`) {
+        return jsonResponse({
+          id: manualReceipt.releaseId,
+          tag_name: 'v0.1.2',
+          draft: false,
+          prerelease: false,
+          assets: releaseAssets.map((asset) => ({
+            id: asset.assetId,
+            name: asset.name,
+            digest: `sha256:${asset.sha256}`,
+          })),
+        });
+      }
+      if (url.startsWith(`${apiRoot}/git/ref/tags/`)) {
+        const name = decodeURIComponent(url.slice(`${apiRoot}/git/ref/tags/`.length));
+        return jsonResponse({
+          ref: `refs/tags/${name}`,
+          object: { type: 'commit', sha: manualCommit },
+        });
+      }
+      if (url === 'https://registry.npmjs.org/scriptspect/0.1.2') {
+        return jsonResponse({
+          name: 'scriptspect',
+          version: '0.1.2',
+          dist: { integrity: packageSRI, tarball: 'https://registry.npmjs.org/package.tgz' },
+        });
+      }
+      if (url === 'https://registry.npmjs.org/package.tgz') return new Response(tarballBytes);
+      return new Response(`unexpected request: ${url}`, { status: 404 });
+    };
+  }
+
+  it('accepts public evidence backed by the exact successful recovery workflow', async () => {
+    await expect(
+      verifyReadmeReleaseEvidence({
+        ...writeManualEvidence(),
+        githubToken: 'test-token',
+        fetchImpl: manualFetch(),
+      }),
+    ).resolves.toMatchObject({
+      releaseState: 'published',
+      remoteVerification: 'verified',
+      evidenceKind: 'manual-finalization',
+      version: '0.1.2',
+      commit: manualCommit,
+      finalizationRunId: manualReceipt.finalizationRunId,
+    });
+  });
+
+  it('rejects a successful workflow run attributed to another repository', async () => {
+    await expect(
+      verifyReadmeReleaseEvidence({
+        ...writeManualEvidence(),
+        githubToken: 'test-token',
+        fetchImpl: manualFetch({ repositoryFullName: 'someone/else' }),
+      }),
+    ).rejects.toThrow(/repository/u);
+  });
+
+  it('rejects a publish workflow run from another source commit', async () => {
+    await expect(
+      verifyReadmeReleaseEvidence({
+        ...writeManualEvidence(),
+        githubToken: 'test-token',
+        fetchImpl: manualFetch({
+          publishRun: {
+            id: manualReceipt.publishRunId,
+            name: 'npm publish from immutable tag',
+            path: '.github/workflows/npm-publish.yml',
+            event: 'workflow_dispatch',
+            status: 'completed',
+            conclusion: 'failure',
+            head_branch: manualReceipt.tag,
+            head_sha: '0'.repeat(40),
+            repository: { full_name: 'Tom409114/scriptspect' },
+          },
+        }),
+      }),
+    ).rejects.toThrow(/publish workflow head_sha/u);
+  });
+
+  it('rejects a successful finalizer run from an untrusted workflow revision', async () => {
+    await expect(
+      verifyReadmeReleaseEvidence({
+        ...writeManualEvidence(),
+        githubToken: 'test-token',
+        fetchImpl: manualFetch({
+          finalizationRun: {
+            id: manualReceipt.finalizationRunId,
+            name: 'Finalize already-published 0.1.2',
+            path: manualReceipt.finalizationWorkflowPath,
+            event: 'workflow_dispatch',
+            status: 'completed',
+            conclusion: 'success',
+            head_branch: 'main',
+            head_sha: '0'.repeat(40),
+            repository: { full_name: 'Tom409114/scriptspect' },
+          },
+        }),
+      }),
+    ).rejects.toThrow(/finalization workflow head_sha/u);
+  });
+
+  it('rejects a public release whose exact asset set differs from the receipt', async () => {
+    await expect(
+      verifyReadmeReleaseEvidence({
+        ...writeManualEvidence(),
+        githubToken: 'test-token',
+        fetchImpl: manualFetch({ releaseAssets: manualAssets.slice(1) }),
+      }),
+    ).rejects.toThrow(/Release assets/u);
+  });
+
+  it('rejects registry tarball bytes that differ from the release package asset', async () => {
+    await expect(
+      verifyReadmeReleaseEvidence({
+        ...writeManualEvidence(),
+        githubToken: 'test-token',
+        fetchImpl: manualFetch({ tarballBytes: Buffer.from('different bytes') }),
+      }),
+    ).rejects.toThrow(/tarball SHA-256/u);
+  });
 });

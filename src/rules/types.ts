@@ -46,9 +46,9 @@ export interface RuleContext {
   packagePath: string;
   /** Active target shells for this run. */
   targets: readonly ShellTarget[];
-  /** dependency + devDependency names of the analyzed package. */
+  /** Locally provable dependency provider identities for executable checks. */
   dependencies: ReadonlySet<string>;
-  /** Bin names exposed by workspace packages (including this package's own bin). */
+  /** Real bin names exposed by workspace dependencies visible to this package. */
   workspaceBins: ReadonlySet<string>;
 }
 
