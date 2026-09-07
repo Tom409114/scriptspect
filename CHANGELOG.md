@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/Tom409114/scriptspect/compare/v0.1.1...v0.1.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **ci:** grant publisher access to draft release assets ([#95](https://github.com/Tom409114/scriptspect/issues/95)) ([9e60cc2](https://github.com/Tom409114/scriptspect/commit/9e60cc2b1f9d92baa131ad4036cf91193e367c4c))
+
 ## [0.1.1](https://github.com/Tom409114/scriptspect/compare/v0.1.0...v0.1.1) (2026-09-07)
 
 
